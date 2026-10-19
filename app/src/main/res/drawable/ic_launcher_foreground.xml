@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Camera Body Outer Rounded Frame -->
+    <path
+        android:fillColor="#1E293B"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="2.5"
+        android:pathData="M30,36h10l4,-5h20l4,5h10c4.4,0 8,3.6 8,8v28c0,4.4 -3.6,8 -8,8h-48c-4.4,0 -8,-3.6 -8,-8v-28c0,-4.4 3.6,-8 8,-8z" />
+    <!-- Outer Cyan Lens Ring -->
+    <path
+        android:fillColor="#0F172A"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="2.8"
+        android:pathData="M54,58m-16,0a16,16 0,1 1,32 0a16,16 0,1 1,-32 0" />
+    <!-- Crosshair ticks on lens -->
+    <path
+        android:strokeColor="#7DD3FC"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:pathData="M54,39L54,43M54,73L54,77M35,58L39,58M69,58L73,58" />
+    <!-- Center Red Amap Location Pin inside Camera Lens -->
+    <path
+        android:fillColor="#EF4444"
+        android:pathData="M54,47c-4.4,0 -8,3.6 -8,8c0,5.2 8,13 8,13s8,-7.8 8,-13c0,-4.4 -3.6,-8 -8,-8z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,55m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+    <!-- Top-right viewfinder indicator dot -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M74,43m-2.2,0a2.2,2.2 0,1 1,4.4 0a2.2,2.2 0,1 1,-4.4 0" />
+</vector>
