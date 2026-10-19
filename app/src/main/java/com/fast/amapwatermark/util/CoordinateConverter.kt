@@ -18,7 +18,7 @@ object CoordinateConverter {
      * Convert hardware GPS (WGS-84) to Amap (GCJ-02) with zero offset
      */
     fun wgs84ToGcj02(wgsLat: Double, wgsLon: Double): LatLon {
-        if (outOfChina(wgsLat, wgsLon)) return LatLon(wgsLat, wgsLon)
+        if (outOfChina(wgsLat, wgsLon)) return LatLon(round6(wgsLat), round6(wgsLon))
         var dLat = transformLat(wgsLon - 105.0, wgsLat - 35.0)
         var dLon = transformLon(wgsLon - 105.0, wgsLat - 35.0)
         val radLat = wgsLat / 180.0 * PI
@@ -37,7 +37,7 @@ object CoordinateConverter {
      * Exact fixed-point inverse from Amap (GCJ-02) back to WGS-84 (< 0.01m error)
      */
     fun gcj02ToWgs84(gcjLat: Double, gcjLon: Double): LatLon {
-        if (outOfChina(gcjLat, gcjLon)) return LatLon(gcjLat, gcjLon)
+        if (outOfChina(gcjLat, gcjLon)) return LatLon(round6(gcjLat), round6(gcjLon))
         var wgsLat = gcjLat
         var wgsLon = gcjLon
         repeat(6) {
@@ -48,11 +48,22 @@ object CoordinateConverter {
         return LatLon(round6(wgsLat), round6(wgsLon))
     }
 
+    fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371000.0
+        val dLat = (lat2 - lat1) * PI / 180.0
+        val dLon = (lon2 - lon1) * PI / 180.0
+        val a = sin(dLat / 2.0).pow(2.0) +
+                cos(lat1 * PI / 180.0) * cos(lat2 * PI / 180.0) * sin(dLon / 2.0).pow(2.0)
+        return r * 2.0 * atan2(sqrt(a), sqrt(1.0 - a))
+    }
+
     fun formatCoordinate(lat: Double, lon: Double, useDms: Boolean): String {
         return if (useDms) {
             "${toDms(lat, true)}, ${toDms(lon, false)}"
         } else {
-            String.format(Locale.US, "%.6f°N, %.6f°E", lat, lon)
+            val ns = if (lat >= 0) "N" else "S"
+            val ew = if (lon >= 0) "E" else "W"
+            String.format(Locale.US, "%.6f°%s, %.6f°%s", abs(lat), ns, abs(lon), ew)
         }
     }
 

@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>极速经纬水印相机 · 高德零偏差专版</title>
+  <title>极速经纬水印相机 · 专业实景高德零偏差版</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-      background-color: #090d16;
-      color: #f8fafc;
+      background-color: #000000;
+      color: #ffffff;
       margin: 0;
       padding: 0;
       overflow-x: hidden;
@@ -22,607 +22,428 @@
       font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-variant-numeric: tabular-nums;
     }
+    .text-shadow-strong {
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85), 0 1px 3px rgba(0, 0, 0, 0.9);
+    }
     @keyframes shutterFlash {
-      0% { opacity: 0.92; }
+      0% { opacity: 0.95; }
       100% { opacity: 0; }
     }
     .animate-flash {
-      animation: shutterFlash 0.28s ease-out forwards;
+      animation: shutterFlash 0.22s ease-out forwards;
     }
-    @keyframes pulseRing {
-      0% { transform: scale(0.95); opacity: 0.8; }
-      50% { transform: scale(1.08); opacity: 0.4; }
-      100% { transform: scale(0.95); opacity: 0.8; }
-    }
-    .pulse-indicator {
-      animation: pulseRing 2s infinite ease-in-out;
-    }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0f172a; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
   </style>
 </head>
-<body class="min-h-screen flex flex-col bg-slate-950 text-slate-100 select-none">
+<body class="min-h-screen bg-black text-white flex flex-col items-center justify-center select-none">
 
-  <!-- Top App Bar -->
-  <header class="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 py-2.5">
-    <div class="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-2">
-      <div class="flex items-center gap-2.5">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-blue-500/20">
-          <svg class="w-5 h-5 text-slate-950" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+  <!-- Phone Frame Container (Full screen on mobile, sleek phone frame on desktop) -->
+  <div class="w-full max-w-[460px] min-h-screen sm:min-h-[840px] sm:max-h-[92vh] sm:rounded-[32px] sm:border sm:border-neutral-800 bg-black flex flex-col justify-between overflow-hidden shadow-2xl relative">
+
+    <!-- ==================== 1. TOP BLACK CAMERA BAR (1:1 FIGURE 3) ==================== -->
+    <header class="w-full h-[82px] bg-black px-6 flex items-center justify-between shrink-0 z-20">
+      <!-- Left: 设置 -->
+      <button id="btnTopSettings" type="button" class="flex flex-col items-center gap-1 group active:scale-95 transition">
+        <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span class="text-[11px] text-neutral-200 tracking-wide">设置</span>
+      </button>
+
+      <!-- Right: 倒计时 | 闪光灯 | 翻转 -->
+      <div class="flex items-center gap-7">
+        <button id="btnTopTimer" type="button" class="flex flex-col items-center gap-1 active:scale-95 transition">
+          <div class="relative w-7 h-7 flex items-center justify-center">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l2.5 2.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span id="timerBadgeText" class="hidden absolute -bottom-0.5 -right-1 text-[10px] font-bold text-sky-400 bg-black px-0.5 rounded">3</span>
+          </div>
+          <span id="timerLabelText" class="text-[11px] text-neutral-200">倒计时</span>
+        </button>
+
+        <button id="btnTopFlash" type="button" class="flex flex-col items-center gap-1 active:scale-95 transition">
+          <div class="relative w-7 h-7 flex items-center justify-center">
+            <svg id="flashSvgIcon" class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            <span id="flashBadgeText" class="text-[10px] font-medium text-white ml-0.5">关</span>
+          </div>
+          <span class="text-[11px] text-neutral-200">闪光灯</span>
+        </button>
+
+        <button id="btnTopFlip" type="button" class="flex flex-col items-center gap-1 active:scale-95 transition">
+          <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16v10H4V7zm4 5h.01M16 12h.01"/>
+          </svg>
+          <span class="text-[11px] text-neutral-200">翻转</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ==================== 2. CENTER 3:4 LIVE CAMERA VIEWFINDER ==================== -->
+    <div id="viewfinderContainer" class="relative w-full flex-1 bg-neutral-900 overflow-hidden cursor-crosshair">
+      <!-- Real Camera Video Stream -->
+      <video id="cameraVideo" autoplay playsinline muted class="hidden w-full h-full object-cover"></video>
+      <!-- Simulated High-FPS Realistic Desk/Outdoor Viewfinder Canvas -->
+      <canvas id="viewfinderCanvas" width="1080" height="1440" class="w-full h-full object-cover block"></canvas>
+
+      <!-- Live Filter Overlay -->
+      <div id="liveFilterOverlay" class="pointer-events-none absolute inset-0 transition-colors duration-200"></div>
+
+      <!-- Shutter White Flash Overlay -->
+      <div id="shutterFlashOverlay" class="pointer-events-none absolute inset-0 bg-white opacity-0 z-30"></div>
+
+      <!-- Top-Left GPS Lock Status Pill -->
+      <button id="btnGpsPill" type="button" class="absolute top-3 left-3 z-20 px-3 py-1 rounded-full bg-black/55 backdrop-blur-md border border-white/15 flex items-center gap-1.5 text-[11px] font-mono-num text-white shadow">
+        <span id="gpsDot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span id="gpsPillText">GCJ-02 · ±2.4m</span>
+      </button>
+
+      <!-- Async Convergence Banner -->
+      <div id="asyncBanner" class="hidden absolute top-12 left-1/2 -translate-x-1/2 z-20 bg-amber-400 text-black px-3.5 py-1 rounded-full text-xs font-bold shadow-lg">
+        底图已0ms定格 · 正在后台寻优高德坐标...
+      </div>
+
+      <!-- Countdown Big Number Overlay -->
+      <div id="countdownOverlay" class="hidden pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+        <span id="countdownNumText" class="text-8xl font-bold text-white text-shadow-strong">3</span>
+      </div>
+
+      <!-- TAP-TO-FOCUS SQUARE BOX + SUN EXPOSURE ICON (1:1 FIGURE 3) -->
+      <div id="focusBoxWrapper" class="pointer-events-none absolute z-10 flex items-center gap-2 transition-all duration-150" style="left: 56%; top: 26%;">
+        <div class="relative w-[78px] h-[78px] border-[1.8px] border-white">
+          <span class="absolute top-0 left-1/2 -translate-x-1/2 w-[1.8px] h-2 bg-white"></span>
+          <span class="absolute bottom-0 left-1/2 -translate-x-1/2 w-[1.8px] h-2 bg-white"></span>
+          <span class="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-[1.8px] bg-white"></span>
+          <span class="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-[1.8px] bg-white"></span>
+        </div>
+        <!-- Sun brightness icon right next to focus square -->
+        <svg class="w-6 h-6 text-white drop-shadow" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4"/>
+          <path stroke-linecap="round" d="M12 3v2m0 14v2M3 12h2m14 0h2m-15.36-6.36l1.42 1.42m11.31 11.31l1.42 1.42M5.64 18.36l1.42-1.42m11.31-11.31l1.42-1.42"/>
+        </svg>
+      </div>
+
+      <!-- RIGHT-EDGE FLOATING CIRCULAR ZOOM BUTTON ("1.0X" - 1:1 FIGURE 3) -->
+      <button id="btnZoomCircle" type="button" class="absolute right-3.5 top-[52%] z-20 w-11 h-11 rounded-full bg-black/45 border-[1.5px] border-white flex items-center justify-center text-xs font-semibold text-white backdrop-blur-sm active:scale-95 transition">
+        1.0X
+      </button>
+
+      <!-- LIVE WATERMARK OVERLAY AT BOTTOM OF VIEWFINDER (1:1 FIGURE 3 CENTERED BIG TIME + COORDS) -->
+      <div id="liveWatermarkArea" class="absolute inset-x-0 bottom-0 z-20 pt-10 pb-4 px-4 bg-gradient-to-t from-black/75 via-black/30 to-transparent cursor-pointer">
+        <!-- Style 0: Centered Big Time ("19:09" + "2026-10-19 星期一 📍小庄村" + Lat/Lon pill) -->
+        <div id="wmStyleCentered" class="flex flex-col items-center text-center">
+          <div id="wmBigTime" class="text-[56px] leading-none font-light tracking-tight text-white text-shadow-strong mb-1.5">19:09</div>
+          <div class="flex items-center justify-center gap-1 text-[15px] font-normal text-white text-shadow-strong">
+            <span id="wmDateWeekday">2026-10-19 星期一</span>
+            <span id="wmPinAndPoi" class="inline-flex items-center gap-0.5 ml-1">
+              <!-- Red Pin SVG -->
+              <svg class="w-4 h-4 text-red-500 shrink-0 drop-shadow" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2a7 7 0 00-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 00-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"/>
+              </svg>
+              <span id="wmShortPoiText">小庄村</span>
+            </span>
+          </div>
+          <!-- High-Precision Amap Coordinate Pill -->
+          <div id="wmCoordPill" class="mt-2 px-3 py-0.5 rounded-full bg-slate-950/65 border border-white/15 backdrop-blur-sm text-[11.5px] font-mono-num font-semibold text-sky-300 shadow">
+            39.908823°N, 116.397470°E [GCJ-02] ±2.4m
+          </div>
+          <div id="wmExtraNoteLine" class="hidden mt-1 text-xs text-amber-200 text-shadow-strong"></div>
+        </div>
+
+        <!-- Style 1: Left-Aligned Engineering Card -->
+        <div id="wmStyleCard" class="hidden max-w-[88%] rounded-xl p-3 bg-slate-950/75 border border-white/20 backdrop-blur-md text-xs space-y-1">
+          <div class="flex items-center gap-1.5 font-bold text-white border-b border-white/15 pb-1">
+            <span class="w-1.5 h-3.5 bg-sky-400 rounded-sm"></span>
+            <span>高德精准经纬水印</span>
+            <span id="wmCardSysBadge" class="text-[10px] font-mono-num px-1.5 rounded bg-sky-500/30 text-sky-200">GCJ-02</span>
+          </div>
+          <div id="wmCardCoordLine" class="font-mono-num text-sky-300 font-semibold"></div>
+          <div id="wmCardAddrLine" class="text-white"></div>
+          <div id="wmCardTimeLine" class="font-mono-num text-neutral-300"></div>
+          <div id="wmCardNoteLine" class="text-amber-200"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Optional Live Filter Selector Bar -->
+    <div id="filterBarStrip" class="hidden w-full bg-neutral-950 border-t border-neutral-800 px-4 py-2 flex items-center justify-around z-20">
+      <button type="button" data-filter="0" class="filter-chip px-3 py-1 rounded-full text-xs font-semibold bg-sky-600 text-white">原图</button>
+      <button type="button" data-filter="1" class="filter-chip px-3 py-1 rounded-full text-xs text-neutral-300 bg-neutral-800">鲜明</button>
+      <button type="button" data-filter="2" class="filter-chip px-3 py-1 rounded-full text-xs text-neutral-300 bg-neutral-800">暖阳</button>
+      <button type="button" data-filter="3" class="filter-chip px-3 py-1 rounded-full text-xs text-neutral-300 bg-neutral-800">清冷</button>
+      <button type="button" data-filter="4" class="filter-chip px-3 py-1 rounded-full text-xs text-neutral-300 bg-neutral-800">黑白</button>
+    </div>
+
+    <!-- ==================== 3. BOTTOM BLACK CONTROL BAR (1:1 FIGURE 3) ==================== -->
+    <footer class="w-full h-[126px] bg-black px-6 flex items-center justify-between shrink-0 z-20">
+      <!-- 1. 相册 (Circular Thumbnail + Label) -->
+      <button id="btnBottomGallery" type="button" class="flex flex-col items-center gap-1.5 active:scale-95 transition">
+        <div class="relative w-11 h-11 rounded-full overflow-hidden border-[1.5px] border-white bg-neutral-800">
+          <img id="bottomGalleryThumb" src="" alt="相册" class="w-full h-full object-cover" />
+        </div>
+        <span class="text-xs text-white">相册</span>
+      </button>
+
+      <!-- 2. 地点 (Paper-plane navigation arrow + Label) -->
+      <button id="btnBottomLocation" type="button" class="flex flex-col items-center gap-1.5 active:scale-95 transition">
+        <div class="w-11 h-11 flex items-center justify-center">
+          <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 3L3 10.5l8.25 3L14.25 21 21 3z"/>
           </svg>
         </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-sm sm:text-base font-bold tracking-tight text-white">极速经纬水印相机</h1>
-            <span id="headerCoordBadge" class="px-2 py-0.5 text-[11px] font-mono-num font-semibold rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">GCJ-02 高德坐标</span>
-          </div>
-          <p class="text-[11px] text-slate-400 hidden sm:block">零快门延迟 · 图层分离无损改水印 · 一键零偏差跳高德地图</p>
+        <span class="text-xs text-white">地点</span>
+      </button>
+
+      <!-- 3. Center Big White Ring Shutter Button -->
+      <button id="btnShutterMain" type="button" aria-label="拍照" class="w-[76px] h-[76px] rounded-full border-[4px] border-white p-1.5 flex items-center justify-center active:scale-90 transition-transform">
+        <span class="w-full h-full rounded-full bg-white/10 hover:bg-white/20 transition"></span>
+      </button>
+
+      <!-- 4. 滤镜 (Three interlocking rings + Label) -->
+      <button id="btnBottomFilter" type="button" class="flex flex-col items-center gap-1.5 active:scale-95 transition">
+        <div class="w-11 h-11 flex items-center justify-center">
+          <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+            <circle cx="12" cy="8.5" r="4.5"/>
+            <circle cx="8.5" cy="14.5" r="4.5"/>
+            <circle cx="15.5" cy="14.5" r="4.5"/>
+          </svg>
         </div>
+        <span class="text-xs text-white">滤镜</span>
+      </button>
+
+      <!-- 5. 水印 (Watermark frame icon + Label) -->
+      <button id="btnBottomWatermark" type="button" class="flex flex-col items-center gap-1.5 active:scale-95 transition">
+        <div class="w-11 h-11 flex items-center justify-center">
+          <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="18" height="16" rx="2.5"/>
+            <path stroke-linecap="round" d="M7 9h10M8 15h.01M12 15h.01M16 15h.01"/>
+          </svg>
+        </div>
+        <span class="text-xs text-white">水印</span>
+      </button>
+    </footer>
+
+    <!-- ==================== OVERLAY SCREEN: IN-APP GALLERY & AMAP ZERO-OFFSET JUMP ==================== -->
+    <div id="screenGallery" class="hidden absolute inset-0 z-40 bg-slate-950 flex-col justify-between">
+      <!-- Top Bar -->
+      <div class="bg-black px-4 py-3.5 flex items-center justify-between border-b border-slate-800">
+        <button id="btnGalleryBack" type="button" class="text-sm font-semibold text-white flex items-center gap-1">
+          <span>← 返回相机</span>
+        </button>
+        <span id="galleryTitleText" class="text-sm font-bold text-white">已拍相册 (2)</span>
+        <label for="inputImportExifPhoto" class="cursor-pointer px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-xs font-semibold text-white">
+          📥 导入相册照片
+        </label>
+        <input id="inputImportExifPhoto" type="file" accept="image/jpeg,image/png,image/webp" class="hidden" />
       </div>
 
-      <!-- Navigation Tabs -->
-      <nav class="flex items-center bg-slate-950/90 p-1 rounded-xl border border-slate-800">
-        <button id="tabBtnCamera" type="button" class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all bg-blue-600 text-white shadow-sm flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/></svg>
-          <span>极速拍摄</span>
-        </button>
-        <button id="tabBtnGallery" type="button" class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-          <span>已拍相册</span>
-          <span id="galleryCountBadge" class="px-1.5 py-0.2 rounded-full text-[11px] font-mono-num bg-slate-800 text-cyan-300">2</span>
-        </button>
-        <button id="tabBtnSettings" type="button" class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          <span>设置与纠偏</span>
-        </button>
-      </nav>
-    </div>
-  </header>
+      <!-- Main Selected Photo Preview -->
+      <div class="flex-1 bg-black flex items-center justify-center p-2 overflow-hidden">
+        <img id="galleryMainImg" src="" alt="已拍照片大图" class="max-w-full max-h-full object-contain rounded-lg" />
+      </div>
 
-  <!-- Main Content Area -->
-  <main class="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-4 flex flex-col gap-4">
-
-    <!-- ==================== VIEW 1: CAMERA VIEW ==================== -->
-    <section id="viewCamera" class="flex flex-col lg:grid lg:grid-cols-12 gap-4">
-      <!-- Left/Center: Camera Viewfinder -->
-      <div class="lg:col-span-7 flex flex-col gap-3">
-        <!-- GPS Status Bar above Viewfinder -->
-        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2">
-            <span id="gpsStatusDot" class="w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-indicator"></span>
-            <span id="gpsStatusText" class="text-xs font-medium text-emerald-300">高精度定位已锁定</span>
-            <span id="gpsAccuracyBadge" class="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-mono-num">±2.8m</span>
+      <!-- Coordinate Info & One-Click Amap Jump Panel -->
+      <div class="bg-slate-900 border-t border-slate-800 p-3.5 space-y-2.5">
+        <div class="flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <div id="galleryPoiTitle" class="text-sm font-bold text-white truncate">📍 小庄村</div>
+            <div id="galleryGcjText" class="text-xs font-mono-num font-semibold text-sky-400">高德 GCJ-02: 39.908823°N, 116.397470°E</div>
+            <div id="galleryWgsText" class="text-[11px] font-mono-num text-slate-400">原始 WGS-84: 39.907419°N, 116.391228°E</div>
           </div>
-          <div class="flex items-center gap-1.5">
-            <select id="presetLocationSelect" aria-label="选择实景定位点或真实GPS" class="bg-slate-950 text-xs text-slate-200 border border-slate-700 rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500">
-              <option value="device">🛰️ 手机实时硬件 GPS</option>
-              <option value="bj" selected>📍 演示点：北京天安门广场东侧</option>
-              <option value="sh">📍 演示点：上海陆家嘴东方明珠环岛</option>
-              <option value="hz">📍 演示点：杭州西湖断桥残雪监测点</option>
-              <option value="sz">📍 演示点：深圳湾人才公园观海台</option>
-              <option value="cd">📍 演示点：成都春熙路太古里东广场</option>
-            </select>
-            <button id="btnRefreshGps" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 transition">
-              刷新定位
-            </button>
-          </div>
-        </div>
-
-        <!-- Viewfinder Container -->
-        <div class="relative w-full aspect-[4/3] sm:aspect-[16/10] bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
-          <!-- Real Camera Video (when authorized) -->
-          <video id="cameraVideo" autoplay playsinline muted class="hidden w-full h-full object-cover"></video>
-          <!-- Interactive Simulated Viewfinder Canvas (always active fallback / background) -->
-          <canvas id="viewfinderCanvas" width="1280" height="800" class="w-full h-full object-cover block"></canvas>
-
-          <!-- Shutter Flash Overlay -->
-          <div id="shutterFlashOverlay" class="pointer-events-none absolute inset-0 bg-white opacity-0"></div>
-
-          <!-- Async Convergence Banner -->
-          <div id="asyncSamplingBanner" class="hidden absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-amber-500/95 text-slate-950 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-lg flex items-center gap-2">
-            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-            </svg>
-            <span id="asyncSamplingText">底图已秒拍定格 · 正在后台高频寻优坐标...</span>
-          </div>
-
-          <!-- Top-right Camera Controls inside Viewfinder -->
-          <div class="absolute top-3 right-3 z-10 flex items-center gap-2">
-            <button id="btnToggleRealCamera" type="button" class="px-2.5 py-1.5 rounded-xl bg-slate-950/75 hover:bg-slate-900/90 backdrop-blur-md text-xs text-slate-200 border border-white/15 flex items-center gap-1.5 shadow">
-              <span id="camSourceDot" class="w-2 h-2 rounded-full bg-cyan-400"></span>
-              <span id="camSourceLabel">启用手机摄像头</span>
-            </button>
-            <button id="btnSimulateJitter" type="button" title="模拟刚打开App定位未收敛状态（测试异步寻优合成）" class="px-2.5 py-1.5 rounded-xl bg-slate-950/75 hover:bg-slate-900/90 backdrop-blur-md text-xs text-amber-300 border border-amber-400/30 shadow">
-              模拟弱GPS(±24m)
-            </button>
-          </div>
-
-          <!-- LIVE CLICKABLE WATERMARK OVERLAY ON VIEWFINDER (Q9: Click to quick-edit) -->
-          <div id="liveWatermarkWrapper" class="absolute bottom-3 left-3 z-10 max-w-[88%] sm:max-w-[76%] transition-all duration-200 cursor-pointer group" title="点击直接自定义水印字段与样式">
-            <div id="liveWatermarkBox" class="rounded-xl p-3 border border-white/20 backdrop-blur-md shadow-xl transition-all group-hover:ring-2 group-hover:ring-blue-400" style="background-color: rgba(15, 23, 42, 0.72);">
-              <div class="flex items-center justify-between gap-3 mb-1.5 pb-1 border-b border-white/15">
-                <div class="flex items-center gap-1.5">
-                  <span class="w-2 h-5 rounded-sm bg-blue-400 inline-block"></span>
-                  <span class="text-xs font-bold tracking-wide text-white">高德精准经纬水印</span>
-                  <span id="wmCoordSysTag" class="px-1.5 py-0.2 rounded text-[10px] font-mono-num font-semibold bg-blue-500/30 text-blue-200 border border-blue-400/40">GCJ-02</span>
-                </div>
-                <span class="text-[10px] text-blue-300 bg-blue-500/20 px-1.5 py-0.5 rounded flex items-center gap-1">
-                  ✎ 点击快改
-                </span>
-              </div>
-              <div id="wmLinesContainer" class="space-y-0.5 text-xs leading-snug">
-                <!-- Populated dynamically by updateLiveWatermarkPreview() -->
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Shutter & Quick Action Bar -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-3">
-          <!-- Recent photo thumbnail -->
-          <button id="btnLastPhotoQuick" type="button" class="flex items-center gap-2.5 text-left group p-1.5 rounded-xl hover:bg-slate-800/80 transition">
-            <img id="lastPhotoThumb" src="" alt="最近拍摄缩略图" class="w-12 h-12 rounded-xl object-cover border border-slate-700 bg-slate-800" />
-            <div class="hidden sm:block">
-              <div class="text-xs font-semibold text-slate-200 group-hover:text-blue-400 transition">最近已拍照片</div>
-              <div id="lastPhotoCoordText" class="text-[11px] font-mono-num text-slate-400">点击秒跳高德 / 改水印</div>
-            </div>
+          <button id="btnGalleryCopyCoord" type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono-num text-sky-300 border border-slate-700 shrink-0">
+            复制坐标
           </button>
+        </div>
 
-          <!-- Instant Shutter Button -->
-          <div class="flex flex-col items-center">
-            <button id="btnShutter" type="button" aria-label="极速拍照" class="relative w-16 h-16 rounded-full bg-white p-1 shadow-xl shadow-blue-500/20 active:scale-95 transition-transform flex items-center justify-center group">
-              <span class="w-full h-full rounded-full border-[3px] border-slate-900 bg-gradient-to-b from-white to-slate-200 group-hover:from-blue-50 group-hover:to-blue-100 flex items-center justify-center">
-                <span class="w-6 h-6 rounded-full bg-blue-600"></span>
-              </span>
-            </button>
-            <span class="text-[11px] text-slate-400 mt-1 font-medium">极速快门 (0ms延迟)</span>
-          </div>
+        <div class="grid grid-cols-12 gap-2">
+          <a id="btnGalleryJumpAmapPin" href="https://uri.amap.com/marker" class="col-span-7 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white text-center shadow-lg flex items-center justify-center gap-1">
+            <span>📍 一键跳高德地图 (丝毫不差)</span>
+          </a>
+          <a id="btnGalleryJumpAmapNavi" href="https://uri.amap.com/navigation" class="col-span-5 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white text-center shadow-lg flex items-center justify-center gap-1">
+            <span>🧭 导航去这里</span>
+          </a>
+        </div>
 
-          <!-- Quick Coordinate System Toggle & Copy -->
-          <div class="flex flex-col sm:flex-row items-end sm:items-center gap-2">
-            <button id="btnQuickSwitchCoordSys" type="button" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-blue-300 border border-slate-700 transition flex items-center gap-1.5">
-              <span>切换坐标系</span>
-            </button>
-            <button id="btnQuickAmapCurrent" type="button" class="px-3 py-2 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-xs font-semibold text-blue-300 border border-blue-500/30 transition flex items-center gap-1">
-              <span>当前位置跳高德</span>
-            </button>
-          </div>
+        <div class="grid grid-cols-3 gap-2">
+          <button id="btnGalleryEditWm" type="button" class="col-span-2 py-2 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-semibold text-amber-300">
+            ✎ 修改水印内容/样式 (无损重绘)
+          </button>
+          <button id="btnGalleryDownload" type="button" class="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-white">
+            ⬇ 保存图片
+          </button>
         </div>
       </div>
 
-      <!-- Right Column: Quick Watermark Customizer & Live Dual-Coordinate Inspector -->
-      <div class="lg:col-span-5 flex flex-col gap-3">
-        <div id="quickCustomizerCard" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3.5">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
-            <div>
-              <h2 class="text-sm font-bold text-white flex items-center gap-2">
-                <span>水印实时定制面板</span>
-                <span class="text-[11px] font-normal text-slate-400">(取景框同步预览)</span>
-              </h2>
-            </div>
-            <button id="btnCopyLiveCoords" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-cyan-300 border border-slate-700 transition font-mono-num">
-              复制当前经纬度
-            </button>
-          </div>
+      <!-- Bottom Thumbnail Strip -->
+      <div id="galleryThumbStrip" class="bg-black px-3 py-2.5 flex items-center gap-2.5 overflow-x-auto border-t border-slate-900">
+      </div>
+    </div>
 
-          <!-- Dual Coordinate Live Readout Box -->
-          <div class="grid grid-cols-2 gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800/90">
-            <div class="p-2 rounded-lg bg-blue-500/10 border border-blue-500/25">
-              <div class="flex items-center justify-between text-[11px] text-blue-300 mb-0.5">
-                <span class="font-semibold">GCJ-02 (高德火星)</span>
-                <span class="text-[10px] bg-blue-500/20 px-1 rounded">0米偏差</span>
-              </div>
-              <div id="readoutGcj02" class="text-xs font-mono-num font-bold text-white">--</div>
-            </div>
-            <div class="p-2 rounded-lg bg-slate-900 border border-slate-800">
-              <div class="flex items-center justify-between text-[11px] text-slate-400 mb-0.5">
-                <span class="font-semibold">WGS-84 (原始GPS)</span>
-                <span id="readoutOffsetMeters" class="text-[10px] text-amber-300 font-mono-num">偏移 --m</span>
-              </div>
-              <div id="readoutWgs84" class="text-xs font-mono-num font-semibold text-slate-300">--</div>
-            </div>
-          </div>
-
-          <!-- Coordinate System & Format Selectors -->
-          <div class="grid grid-cols-2 gap-2.5">
-            <div>
-              <label for="selectCoordSystem" class="block text-xs text-slate-400 mb-1">画面水印显示坐标系</label>
-              <select id="selectCoordSystem" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
-                <option value="GCJ-02">GCJ-02 高德坐标 (默认)</option>
-                <option value="WGS-84">WGS-84 原始GPS坐标</option>
-              </select>
-            </div>
-            <div>
-              <label for="selectCoordFormat" class="block text-xs text-slate-400 mb-1">经纬度数字格式</label>
-              <select id="selectCoordFormat" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
-                <option value="DEC">十进制 6位小数 (0.1m级)</option>
-                <option value="DMS">度分秒 DMS (39°54'31")</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Custom Address & Note Inputs -->
-          <div class="space-y-2.5">
-            <div>
-              <label for="inputLiveAddress" class="block text-xs text-slate-400 mb-1">水印地址描述 (可自定义微调)</label>
-              <input id="inputLiveAddress" type="text" value="北京市东城区东长安街天安门广场东侧" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label for="inputLiveNote" class="block text-xs text-slate-400 mb-1">现场备注 / 巡检点位说明</label>
-              <input id="inputLiveNote" type="text" value="现场点位核验 · 位置已与高德地图对齐" placeholder="输入施工、巡检或外业备注..." class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500" />
-            </div>
-          </div>
-
-          <!-- Field Checkboxes -->
+    <!-- ==================== MODAL: 地点与高德零偏差校准 ==================== -->
+    <div id="modalLocation" class="hidden absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full p-4 space-y-3">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+          <h3 class="text-sm font-bold text-white">📍 地点与高德坐标校准</h3>
+          <button id="btnCloseLocationModal" type="button" class="text-slate-400 hover:text-white text-sm">✕</button>
+        </div>
+        <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs space-y-1 font-mono-num">
+          <div class="text-sky-400 font-bold">高德 GCJ-02: <span id="locModalGcj">39.908823, 116.397470</span></div>
+          <div class="text-slate-400">原始 WGS-84: <span id="locModalWgs">39.907419, 116.391228</span></div>
+        </div>
+        <div class="space-y-2 text-xs">
           <div>
-            <span class="block text-xs text-slate-400 mb-1.5">显示字段开关 (点击即时生效)</span>
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-              <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 cursor-pointer">
-                <input id="chkShowCoords" type="checkbox" checked class="accent-blue-500 rounded" />
-                <span>经纬度数值</span>
-              </label>
-              <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 cursor-pointer">
-                <input id="chkShowCoordTag" type="checkbox" checked class="accent-blue-500 rounded" />
-                <span>坐标系标签</span>
-              </label>
-              <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 cursor-pointer">
-                <input id="chkShowAccuracy" type="checkbox" checked class="accent-blue-500 rounded" />
-                <span>定位精度(±m)</span>
-              </label>
-              <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 cursor-pointer">
-                <input id="chkShowAddress" type="checkbox" checked class="accent-blue-500 rounded" />
-                <span>详细地址</span>
-              </label>
-              <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 cursor-pointer">
-                <input id="chkShowTime" type="checkbox" checked class="accent-blue-500 rounded" />
-                <span>精确时间</span>
-              </label>
-              <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 cursor-pointer">
-                <input id="chkShowNote" type="checkbox" checked class="accent-blue-500 rounded" />
-                <span>现场备注</span>
-              </label>
-            </div>
+            <label for="inputShortPoi" class="block text-slate-400 mb-1">地点简称 (如图3：小庄村)</label>
+            <input id="inputShortPoi" type="text" value="小庄村" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white" />
           </div>
-
-          <!-- Corner Position & Opacity & Font Size -->
-          <div class="grid grid-cols-3 gap-2 pt-1 border-t border-slate-800">
-            <div>
-              <label for="selectWmCorner" class="block text-[11px] text-slate-400 mb-1">角落位置</label>
-              <select id="selectWmCorner" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white">
-                <option value="bottom-left" selected>左下角</option>
-                <option value="bottom-right">右下角</option>
-              </select>
-            </div>
-            <div>
-              <label for="selectWmFontSize" class="block text-[11px] text-slate-400 mb-1">字号大小</label>
-              <select id="selectWmFontSize" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white">
-                <option value="sm">紧凑小号</option>
-                <option value="md" selected>标准适中</option>
-                <option value="lg">醒目大号</option>
-              </select>
-            </div>
-            <div>
-              <label for="rangeWmOpacity" class="block text-[11px] text-slate-400 mb-1">底框透明度 <span id="lblWmOpacity" class="font-mono-num text-slate-300">72%</span></label>
-              <input id="rangeWmOpacity" type="range" min="35" max="95" value="72" class="w-full accent-blue-500 mt-1" />
-            </div>
+          <div>
+            <label for="inputFullAddr" class="block text-slate-400 mb-1">详细地址描述</label>
+            <input id="inputFullAddr" type="text" value="北京市朝阳区小庄村" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white" />
           </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== VIEW 2: GALLERY & AMAP JUMP & NON-DESTRUCTIVE EDIT ==================== -->
-    <section id="viewGallery" class="hidden flex-col gap-4">
-      <!-- Top Action Bar in Gallery -->
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-base font-bold text-white">已拍照片与系统相册 EXIF 定位库</h2>
-          <p class="text-xs text-slate-400 mt-0.5">
-            每张照片均采用<strong class="text-blue-300">「干净底图 + 动态水印 JSON + 双轨 EXIF」</strong>图层分离存储，支持无限次无损重绘水印与零误差跳转高德地图。
-          </p>
-        </div>
-        <div class="flex items-center gap-2">
-          <label for="inputImportPhoto" class="cursor-pointer px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow flex items-center gap-1.5 transition">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-            <span>导入系统相册照片 (自动解析EXIF并纠偏)</span>
-          </label>
-          <input id="inputImportPhoto" type="file" accept="image/jpeg,image/png,image/webp" class="hidden" />
-        </div>
-      </div>
-
-      <!-- Photo Grid -->
-      <div id="galleryGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <!-- Populated dynamically by renderGallery() -->
-      </div>
-    </section>
-
-    <!-- ==================== VIEW 3: SETTINGS & COORDINATE VERIFICATION LAB ==================== -->
-    <section id="viewSettings" class="hidden flex-col gap-4">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <!-- App Core Settings -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-          <h2 class="text-base font-bold text-white border-b border-slate-800 pb-2.5">相机与定位核心设置</h2>
-
-          <div class="flex items-center justify-between gap-4 py-1">
-            <div>
-              <div class="text-sm font-medium text-white">默认水印坐标系</div>
-              <div class="text-xs text-slate-400">推荐高德 GCJ-02 火星坐标，确保画面经纬度与高德地图搜索框及落针 100% 一致</div>
-            </div>
-            <select id="settingDefaultCoordSys" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white">
-              <option value="GCJ-02">GCJ-02 高德坐标系</option>
-              <option value="WGS-84">WGS-84 原始GPS</option>
-            </select>
-          </div>
-
-          <div class="flex items-center justify-between gap-4 py-1 border-t border-slate-800/80 pt-3">
-            <div>
-              <div class="text-sm font-medium text-white">秒拍不阻塞 + 异步寻优合成</div>
-              <div class="text-xs text-slate-400">按下快门 0ms 定格画面；若当时定位误差大于阈值，后台继续采样 1.2 秒取最优坐标再合成水印</div>
-            </div>
-            <input id="settingAsyncOptimal" type="checkbox" checked class="w-5 h-5 accent-blue-500 rounded cursor-pointer" />
-          </div>
-
-          <div class="flex items-center justify-between gap-4 py-1 border-t border-slate-800/80 pt-3">
-            <div>
-              <div class="text-sm font-medium text-white">异步寻优精度阈值 (<span id="lblAccuracyThreshold" class="font-mono-num text-blue-300">10m</span>)</div>
-              <div class="text-xs text-slate-400">当实时定位误差超过该米数时自动触发后台寻优</div>
-            </div>
-            <input id="settingAccuracyThreshold" type="range" min="5" max="30" value="10" class="w-32 accent-blue-500" />
-          </div>
-
-          <div class="flex items-center justify-between gap-4 py-1 border-t border-slate-800/80 pt-3">
-            <div>
-              <div class="text-sm font-medium text-white">导出时同时下载无水印原图</div>
-              <div class="text-xs text-slate-400">App 内部始终保留干净底图用于二次改水印；开启此项后下载照片会额外导出一份纯净原图</div>
-            </div>
-            <input id="settingKeepCleanExport" type="checkbox" class="w-5 h-5 accent-blue-500 rounded cursor-pointer" />
-          </div>
-        </div>
-
-        <!-- Coordinate Conversion & Zero-Offset Verification Tool -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3.5">
-          <div class="border-b border-slate-800 pb-2.5">
-            <h2 class="text-base font-bold text-white">WGS-84 ↔ GCJ-02 零偏差验证实验室</h2>
-            <p class="text-xs text-slate-400 mt-0.5">输入任意原始 GPS 或高德坐标，实时计算中国大陆加密偏移距离并直接唤起高德地图验证落点</p>
-          </div>
-
-          <div class="grid grid-cols-2 gap-2.5">
-            <div>
-              <label for="labInputLat" class="block text-xs text-slate-400 mb-1">输入纬度 (Latitude)</label>
-              <input id="labInputLat" type="number" step="0.000001" value="39.908823" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono-num text-white" />
-            </div>
-            <div>
-              <label for="labInputLon" class="block text-xs text-slate-400 mb-1">输入经度 (Longitude)</label>
-              <input id="labInputLon" type="number" step="0.000001" value="116.397470" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono-num text-white" />
-            </div>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <select id="labInputType" class="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white">
-              <option value="GCJ-02">当前输入为 GCJ-02 (高德火星坐标)</option>
-              <option value="WGS-84">当前输入为 WGS-84 (硬件原始GPS)</option>
-            </select>
-            <button id="btnLabConvert" type="button" class="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition">
-              立即互转算偏
-            </button>
-          </div>
-
-          <div id="labResultBox" class="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5 text-xs font-mono-num">
-            <!-- Populated by runLabConversion() -->
-          </div>
-
-          <div class="flex flex-wrap gap-2 pt-1">
-            <button id="btnLabJumpAmap" type="button" class="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white transition text-center">
-              一键唤起高德地图验证该落点 (0米误差)
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <!-- ==================== MODAL 1: NON-DESTRUCTIVE WATERMARK EDITOR (Q10 & Q11) ==================== -->
-  <div id="modalEditWatermark" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto">
-    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full p-4 sm:p-5 shadow-2xl my-auto max-h-[92vh] overflow-y-auto">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-        <div>
-          <h3 class="text-base font-bold text-white flex items-center gap-2">
-            <span>无损重绘修改照片水印</span>
-            <span class="px-2 py-0.5 text-[11px] rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">基于纯净底图 0 画质损失</span>
-          </h3>
-          <p class="text-xs text-slate-400 mt-0.5">修改坐标或切换坐标系后，画面水印与「一键跳高德」目标坐标将实时联动更新</p>
-        </div>
-        <button id="btnCloseEditModal" type="button" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300">✕</button>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
-        <!-- Preview Canvas inside Editor -->
-        <div class="md:col-span-6 flex flex-col gap-2">
-          <div class="rounded-xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center">
-            <img id="editModalPreviewImg" src="" alt="水印重绘实时预览" class="max-w-full h-auto max-h-72 object-contain" />
-          </div>
-          <div class="flex items-center justify-between text-[11px] text-slate-400 bg-slate-950 px-3 py-2 rounded-lg border border-slate-800">
-            <span>原始实拍 GCJ-02：<strong id="editModalOrigCoord" class="font-mono-num text-slate-200">--</strong></span>
-            <button id="btnRestoreOrigCoords" type="button" class="text-blue-400 hover:text-blue-300 font-semibold underline">
-              恢复原始实拍坐标
-            </button>
-          </div>
-        </div>
-
-        <!-- Form Controls inside Editor -->
-        <div class="md:col-span-6 space-y-3 text-xs">
           <div class="grid grid-cols-2 gap-2">
             <div>
-              <label for="editCoordSys" class="block text-slate-400 mb-1">水印显示坐标系</label>
-              <select id="editCoordSys" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white">
-                <option value="GCJ-02">GCJ-02 高德火星坐标</option>
-                <option value="WGS-84">WGS-84 原始GPS坐标</option>
+              <label for="inputManualLat" class="block text-slate-400 mb-1">高德纬度 GCJ-02</label>
+              <input id="inputManualLat" type="number" step="0.000001" value="39.908823" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono-num text-white" />
+            </div>
+            <div>
+              <label for="inputManualLon" class="block text-slate-400 mb-1">高德经度 GCJ-02</label>
+              <input id="inputManualLon" type="number" step="0.000001" value="116.397470" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono-num text-white" />
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button id="btnRequestRealGps" type="button" class="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-sky-300 border border-slate-700">
+            🛰 刷新真实GPS
+          </button>
+          <button id="btnSaveLocationModal" type="button" class="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white">
+            保存并应用
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== MODAL: 水印样式与字段定制 (也用于已拍照片无损改水印) ==================== -->
+    <div id="modalWatermark" class="hidden absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full p-4 space-y-3 max-h-[88vh] overflow-y-auto">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+          <h3 id="wmModalTitle" class="text-sm font-bold text-white">🎨 水印模板与字段定制</h3>
+          <button id="btnCloseWmModal" type="button" class="text-slate-400 hover:text-white text-sm">✕</button>
+        </div>
+
+        <div class="space-y-2.5 text-xs">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label for="wmSelectStyle" class="block text-slate-400 mb-1">水印模板样式</label>
+              <select id="wmSelectStyle" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white">
+                <option value="0">图3同款·大时间居中款</option>
+                <option value="1">工程外业·左下角卡片款</option>
               </select>
             </div>
             <div>
-              <label for="editCoordFormat" class="block text-slate-400 mb-1">经纬度格式</label>
-              <select id="editCoordFormat" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white">
+              <label for="wmSelectCoordSys" class="block text-slate-400 mb-1">显示坐标系</label>
+              <select id="wmSelectCoordSys" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white">
+                <option value="GCJ-02">GCJ-02 高德坐标 (默认)</option>
+                <option value="WGS-84">WGS-84 原始GPS</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label for="wmInputPoi" class="block text-slate-400 mb-1">地点名称 (📍后文字)</label>
+              <input id="wmInputPoi" type="text" value="小庄村" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white" />
+            </div>
+            <div>
+              <label for="wmSelectDms" class="block text-slate-400 mb-1">经纬度格式</label>
+              <select id="wmSelectDms" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white">
                 <option value="DEC">十进制 6位小数</option>
                 <option value="DMS">度分秒 (DMS)</option>
               </select>
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-2">
+          <div id="wmEditCoordRow" class="hidden grid-cols-2 gap-2">
             <div>
-              <label for="editGcjLat" class="block text-slate-400 mb-1">高德纬度 GCJ-02 (跳高德联动)</label>
-              <input id="editGcjLat" type="number" step="0.000001" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono-num text-white" />
+              <label for="wmEditLat" class="block text-slate-400 mb-1">高德纬度 (跳高德联动)</label>
+              <input id="wmEditLat" type="number" step="0.000001" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono-num text-white" />
             </div>
             <div>
-              <label for="editGcjLon" class="block text-slate-400 mb-1">高德经度 GCJ-02 (跳高德联动)</label>
-              <input id="editGcjLon" type="number" step="0.000001" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono-num text-white" />
+              <label for="wmEditLon" class="block text-slate-400 mb-1">高德经度 (跳高德联动)</label>
+              <input id="wmEditLon" type="number" step="0.000001" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono-num text-white" />
             </div>
           </div>
 
           <div>
-            <label for="editAddress" class="block text-slate-400 mb-1">详细地址文字</label>
-            <input id="editAddress" type="text" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white" />
+            <label for="wmInputNote" class="block text-slate-400 mb-1">自定义备注内容 (选填)</label>
+            <input id="wmInputNote" type="text" placeholder="输入现场巡检或打卡备注..." class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white" />
           </div>
 
-          <div>
-            <label for="editTimestamp" class="block text-slate-400 mb-1">拍摄时间文字</label>
-            <input id="editTimestamp" type="text" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono-num text-white" />
-          </div>
-
-          <div>
-            <label for="editNote" class="block text-slate-400 mb-1">自定义备注内容</label>
-            <input id="editNote" type="text" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white" />
-          </div>
-
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label for="editCorner" class="block text-slate-400 mb-1">水印位置</label>
-              <select id="editCorner" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white">
-                <option value="bottom-left">左下角</option>
-                <option value="bottom-right">右下角</option>
-              </select>
-            </div>
-            <div>
-              <label for="editFontSize" class="block text-slate-400 mb-1">字号大小</label>
-              <select id="editFontSize" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white">
-                <option value="sm">紧凑小号</option>
-                <option value="md">标准适中</option>
-                <option value="lg">醒目大号</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-3 gap-1.5 pt-1">
-            <label class="flex items-center gap-1.5 bg-slate-950 px-2 py-1.5 rounded border border-slate-800 cursor-pointer">
-              <input id="editChkCoords" type="checkbox" checked class="accent-blue-500" />
-              <span>显示经纬度</span>
+          <div class="grid grid-cols-2 gap-2 pt-1">
+            <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800">
+              <input id="wmChkTime" type="checkbox" checked class="accent-blue-500" />
+              <span>显示时间日期</span>
             </label>
-            <label class="flex items-center gap-1.5 bg-slate-950 px-2 py-1.5 rounded border border-slate-800 cursor-pointer">
-              <input id="editChkAddress" type="checkbox" checked class="accent-blue-500" />
-              <span>显示地址</span>
+            <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800">
+              <input id="wmChkLoc" type="checkbox" checked class="accent-blue-500" />
+              <span>显示地点(📍POI)</span>
             </label>
-            <label class="flex items-center gap-1.5 bg-slate-950 px-2 py-1.5 rounded border border-slate-800 cursor-pointer">
-              <input id="editChkTime" type="checkbox" checked class="accent-blue-500" />
-              <span>显示时间</span>
+            <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800">
+              <input id="wmChkCoords" type="checkbox" checked class="accent-blue-500" />
+              <span>显示经纬度坐标</span>
             </label>
-            <label class="flex items-center gap-1.5 bg-slate-950 px-2 py-1.5 rounded border border-slate-800 cursor-pointer">
-              <input id="editChkNote" type="checkbox" checked class="accent-blue-500" />
-              <span>显示备注</span>
-            </label>
-            <label class="flex items-center gap-1.5 bg-slate-950 px-2 py-1.5 rounded border border-slate-800 cursor-pointer">
-              <input id="editChkTag" type="checkbox" checked class="accent-blue-500" />
-              <span>坐标系标签</span>
-            </label>
-            <label class="flex items-center gap-1.5 bg-slate-950 px-2 py-1.5 rounded border border-slate-800 cursor-pointer">
-              <input id="editChkAcc" type="checkbox" checked class="accent-blue-500" />
-              <span>显示精度</span>
+            <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800">
+              <input id="wmChkNote" type="checkbox" checked class="accent-blue-500" />
+              <span>显示自定义备注</span>
             </label>
           </div>
         </div>
-      </div>
 
-      <div class="flex items-center justify-end gap-2.5 mt-5 pt-3 border-t border-slate-800">
-        <button id="btnCancelEditModal" type="button" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300">
-          取消
-        </button>
-        <button id="btnSaveEditModal" type="button" class="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-lg shadow-blue-600/30">
-          保存并无损重绘水印
-        </button>
+        <div class="flex gap-2 pt-2">
+          <button id="btnApplyWmModal" type="button" class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white shadow-lg">
+            确认保存并无损应用
+          </button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- ==================== MODAL 2: AMAP ZERO-OFFSET JUMP LAUNCHER ==================== -->
-  <div id="modalAmapJump" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3">
-    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-4 sm:p-5 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <div class="flex items-center gap-2">
-          <span class="w-8 h-8 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold">高</span>
-          <div>
-            <h3 id="amapModalTitle" class="text-sm sm:text-base font-bold text-white">高德地图零偏差精准跳转</h3>
-            <p class="text-[11px] text-emerald-400">已对齐 GCJ-02 火星坐标系 (dev=0 零偏移直达)</p>
-          </div>
+    <!-- ==================== MODAL: 顶部设置面板 ==================== -->
+    <div id="modalSettings" class="hidden absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full p-4 space-y-3 text-xs">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+          <h3 class="text-sm font-bold text-white">⚙ 相机与高德定位设置</h3>
+          <button id="btnCloseSettingsModal" type="button" class="text-slate-400 hover:text-white text-sm">✕</button>
         </div>
-        <button id="btnCloseAmapModal" type="button" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300">✕</button>
-      </div>
-
-      <div class="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2 text-xs">
-        <div class="flex items-center justify-between">
-          <span class="text-slate-400">目标点位名称：</span>
-          <span id="amapTargetName" class="font-semibold text-white truncate max-w-[65%]">--</span>
+        <div class="space-y-3">
+          <label class="flex items-center justify-between">
+            <span>启用手机真实光学摄像头</span>
+            <button id="btnToggleHardwareCam" type="button" class="px-3 py-1 rounded-lg bg-sky-600 text-white font-semibold">开启摄像头</button>
+          </label>
+          <label class="flex items-center justify-between">
+            <span>秒拍0延迟 + 弱信号后台异步寻优</span>
+            <input id="setChkAsync" type="checkbox" checked class="w-4 h-4 accent-blue-500" />
+          </label>
+          <label class="flex items-center justify-between">
+            <span>导出时同时保留无水印纯净原图</span>
+            <input id="setChkKeepClean" type="checkbox" class="w-4 h-4 accent-blue-500" />
+          </label>
         </div>
-        <div class="flex items-center justify-between">
-          <span class="text-slate-400">高德精准坐标 (GCJ-02)：</span>
-          <span id="amapTargetGcj" class="font-mono-num font-bold text-blue-300">--</span>
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-slate-400">原始硬件GPS (WGS-84)：</span>
-          <span id="amapTargetWgs" class="font-mono-num text-slate-400">--</span>
-        </div>
-        <div class="pt-1 border-t border-slate-800/80">
-          <span class="text-[11px] text-slate-400 block mb-1">安卓原生 URI 协议串 (Intent Scheme)：</span>
-          <code id="amapNativeUriCode" class="block bg-slate-900 p-2 rounded-lg text-[11px] font-mono-num text-cyan-300 break-all border border-slate-800"></code>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        <a id="linkWakeAndroidAmapPin" href="#amap-pin" class="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white text-center shadow-lg shadow-blue-600/25 flex items-center justify-center gap-1.5">
-          <span>📍 唤起高德App精准落针</span>
-        </a>
-        <a id="linkWakeAndroidAmapNavi" href="#amap-navi" class="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white text-center shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-1.5">
-          <span>🧭 唤起高德App路线导航</span>
-        </a>
-      </div>
-
-      <div class="flex items-center justify-between gap-2 pt-1">
-        <a id="linkOpenAmapWeb" href="https://uri.amap.com/marker" target="_blank" rel="noopener noreferrer" class="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 text-center border border-slate-700 transition">
-          🌐 打开高德官方网页/H5唤起页 (电脑/手机通用)
-        </a>
-        <button id="btnCopyAmapCoordModal" type="button" class="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-cyan-300 border border-slate-700 transition font-mono-num">
-          复制GCJ-02坐标
-        </button>
+        <button id="btnDoneSettings" type="button" class="w-full py-2 rounded-xl bg-blue-600 text-white font-bold mt-2">完成</button>
       </div>
     </div>
-  </div>
 
-  <!-- Toast Notification -->
-  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 pointer-events-none flex flex-col gap-2"></div>
+    <!-- Toast Container -->
+    <div id="toastBox" class="pointer-events-none absolute top-24 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-1.5"></div>
+  </div>
 
   <script>
-    // ============================================================================
-    // 1. NATIONAL STANDARD WGS-84 <-> GCJ-02 HIGH-PRECISION CONVERSION ENGINE
-    // ============================================================================
     const PI = Math.PI;
-    const AXIS = 6378245.0; // Krasovsky 1940 ellipsoid semi-major axis
-    const OFFSET_EE = 0.00669342162296594323; // Flattenings squared
+    const AXIS = 6378245.0;
+    const OFFSET_EE = 0.00669342162296594323;
 
     function outOfChina(lat, lon) {
       return (lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271);
     }
-
     function transformLat(x, y) {
       let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
       ret += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
@@ -630,18 +451,17 @@
       ret += (160.0 * Math.sin(y / 12.0 * PI) + 320 * Math.sin(y * PI / 30.0)) * 2.0 / 3.0;
       return ret;
     }
-
     function transformLon(x, y) {
       let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
       ret += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
       ret += (20.0 * Math.sin(x * PI) + 40.0 * Math.sin(x / 3.0 * PI)) * 2.0 / 3.0;
-      ret += (150.0 * Math.sin(x / 12.0 * PI) + 300.0 * Math.sin(x / 30.0 * PI)) * 2.0 / 3.0;
+      ret += (150.0 * sin(x / 12.0 * PI) + 300.0 * sin(x / 30.0 * PI)) * 2.0 / 3.0;
       return ret;
     }
+    function sin(v) { return Math.sin(v); }
 
     function wgs84ToGcj02(wgsLat, wgsLon) {
-      const lat = Number(wgsLat);
-      const lon = Number(wgsLon);
+      const lat = Number(wgsLat), lon = Number(wgsLon);
       if (outOfChina(lat, lon)) return { lat, lon };
       let dLat = transformLat(lon - 105.0, lat - 35.0);
       let dLon = transformLon(lon - 105.0, lat - 35.0);
@@ -651,38 +471,19 @@
       const sqrtMagic = Math.sqrt(magic);
       dLat = (dLat * 180.0) / ((AXIS * (1 - OFFSET_EE)) / (magic * sqrtMagic) * PI);
       dLon = (dLon * 180.0) / (AXIS / sqrtMagic * Math.cos(radLat) * PI);
-      return {
-        lat: Number((lat + dLat).toFixed(6)),
-        lon: Number((lon + dLon).toFixed(6))
-      };
+      return { lat: Number((lat + dLat).toFixed(6)), lon: Number((lon + dLon).toFixed(6)) };
     }
 
-    // Fixed-point iteration inverse (precision < 0.01 meter)
     function gcj02ToWgs84(gcjLat, gcjLon) {
-      const lat = Number(gcjLat);
-      const lon = Number(gcjLon);
+      const lat = Number(gcjLat), lon = Number(gcjLon);
       if (outOfChina(lat, lon)) return { lat, lon };
-      let wgsLat = lat;
-      let wgsLon = lon;
+      let wgsLat = lat, wgsLon = lon;
       for (let i = 0; i < 6; i++) {
-        const currGcj = wgs84ToGcj02(wgsLat, wgsLon);
-        wgsLat += (lat - currGcj.lat);
-        wgsLon += (lon - currGcj.lon);
+        const curr = wgs84ToGcj02(wgsLat, wgsLon);
+        wgsLat += (lat - curr.lat);
+        wgsLon += (lon - curr.lon);
       }
-      return {
-        lat: Number(wgsLat.toFixed(6)),
-        lon: Number(wgsLon.toFixed(6))
-      };
-    }
-
-    function haversineMeters(lat1, lon1, lat2, lon2) {
-      const R = 6371000;
-      const dLat = (lat2 - lat1) * PI / 180;
-      const dLon = (lon2 - lon1) * PI / 180;
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(lat1 * PI / 180) * Math.cos(lat2 * PI / 180) *
-                Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return { lat: Number(wgsLat.toFixed(6)), lon: Number(wgsLon.toFixed(6)) };
     }
 
     function toDMS(deg, isLat) {
@@ -695,1334 +496,658 @@
       return d + '°' + String(m).padStart(2, '0') + "'" + String(s).padStart(5, '0') + '"' + dir;
     }
 
-    function formatCoordPair(lat, lon, format) {
-      if (format === 'DMS') {
-        return toDMS(lat, true) + ', ' + toDMS(lon, false);
-      }
+    function formatCoords(lat, lon, dms) {
+      if (dms === 'DMS') return toDMS(lat, true) + ', ' + toDMS(lon, false);
       return Number(lat).toFixed(6) + '°N, ' + Number(lon).toFixed(6) + '°E';
     }
 
-    function nowTimestampStr() {
+    function getNowTimeParts() {
       const d = new Date();
-      const pad = (n) => String(n).padStart(2, '0');
-      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
-             pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      const pad = n => String(n).padStart(2, '0');
+      const weeks = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+      const hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+      const dateWeek = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + weeks[d.getDay()];
+      const fullTs = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + hm + ':' + pad(d.getSeconds());
+      return { hm, dateWeek, fullTs };
     }
-
-    // ============================================================================
-    // 2. PRESET LOCATIONS & GLOBAL STATE
-    // ============================================================================
-    const PRESET_LOCATIONS = {
-      bj: {
-        name: '北京天安门广场东侧',
-        address: '北京市东城区东长安街天安门广场东侧',
-        gcjLat: 39.908823,
-        gcjLon: 116.397470,
-        accuracy: 2.8,
-        sceneTheme: 'beijing'
-      },
-      sh: {
-        name: '上海陆家嘴东方明珠环岛',
-        address: '上海市浦东新区世纪大道1号东方明珠明珠环岛',
-        gcjLat: 31.239702,
-        gcjLon: 121.499763,
-        accuracy: 3.1,
-        sceneTheme: 'shanghai'
-      },
-      hz: {
-        name: '杭州西湖断桥残雪监测点',
-        address: '浙江省杭州市西湖区北山街断桥残雪景点入口',
-        gcjLat: 30.259244,
-        gcjLon: 120.151306,
-        accuracy: 2.4,
-        sceneTheme: 'hangzhou'
-      },
-      sz: {
-        name: '深圳湾人才公园观海台',
-        address: '广东省深圳市南山区科苑南路深圳人才公园星光桥',
-        gcjLat: 22.512938,
-        gcjLon: 113.949102,
-        accuracy: 2.6,
-        sceneTheme: 'shenzhen'
-      },
-      cd: {
-        name: '成都春熙路太古里东广场',
-        address: '四川省成都市锦江区中纱帽街8号成都远洋太古里',
-        gcjLat: 30.654328,
-        gcjLon: 104.083721,
-        accuracy: 3.2,
-        sceneTheme: 'chengdu'
-      }
-    };
 
     const state = {
-      activeTab: 'camera',
-      usingRealCamera: false,
-      mediaStream: null,
-      currentGcjLat: 39.908823,
-      currentGcjLon: 116.397470,
-      currentWgsLat: 39.907419,
-      currentWgsLon: 116.391228,
-      currentAccuracy: 2.8,
-      sceneTheme: 'beijing',
-      // Watermark config
-      wmConfig: {
-        coordSystem: 'GCJ-02', // 'GCJ-02' | 'WGS-84'
-        coordFormat: 'DEC',    // 'DEC' | 'DMS'
-        address: '北京市东城区东长安街天安门广场东侧',
-        note: '现场点位核验 · 位置已与高德地图对齐',
-        showCoords: true,
-        showCoordTag: true,
-        showAccuracy: true,
-        showAddress: true,
-        showTime: true,
-        showNote: true,
-        corner: 'bottom-left', // 'bottom-left' | 'bottom-right'
-        fontSize: 'md',        // 'sm' | 'md' | 'lg'
-        opacity: 72
-      },
-      settings: {
-        asyncOptimal: true,
-        accuracyThreshold: 10,
-        keepCleanExport: false
-      },
+      timerSec: 0,
+      flashMode: 0, // 0: 关, 1: 开, 2: 自动
+      isFront: false,
+      zoom: 1.0,
+      filterIdx: 0,
+      usingRealCam: false,
+      stream: null,
+      gcjLat: 39.908823,
+      gcjLon: 116.397470,
+      wgsLat: 39.907419,
+      wgsLon: 116.391228,
+      accuracy: 2.4,
+      shortPoi: '小庄村',
+      fullAddr: '北京市朝阳区建国路小庄村',
+      styleTemplate: 0, // 0: Fig 3 Centered, 1: Left Card
+      coordSys: 'GCJ-02',
+      coordFmt: 'DEC',
+      note: '',
+      showTime: true,
+      showLoc: true,
+      showCoords: true,
+      showNote: true,
+      asyncOptimal: true,
+      keepClean: false,
       photos: [],
-      editingPhotoId: null
+      selectedPhotoId: null,
+      editingTargetPhotoId: null
     };
 
-    // Initialize initial WGS coordinates from initial GCJ
-    const initWgs = gcj02ToWgs84(state.currentGcjLat, state.currentGcjLon);
-    state.currentWgsLat = initWgs.lat;
-    state.currentWgsLon = initWgs.lon;
-
-    // ============================================================================
-    // 3. TOAST & CLIPBOARD HELPERS (No alert/confirm)
-    // ============================================================================
-    function showToast(message, type = 'info') {
-      const container = document.getElementById('toastContainer');
+    function showToast(msg) {
+      const box = document.getElementById('toastBox');
       const el = document.createElement('div');
-      const colors = {
-        info: 'bg-slate-900 border-blue-500/50 text-blue-200',
-        success: 'bg-slate-900 border-emerald-500/60 text-emerald-200',
-        warn: 'bg-slate-900 border-amber-500/60 text-amber-200'
-      };
-      el.className = 'pointer-events-auto px-4 py-2.5 rounded-xl border shadow-xl text-xs font-medium transition-all duration-200 ' + (colors[type] || colors.info);
-      el.textContent = message;
-      container.appendChild(el);
-      setTimeout(() => {
-        el.style.opacity = '0';
-        setTimeout(() => el.remove(), 220);
-      }, 2800);
+      el.className = 'px-3.5 py-1.5 rounded-full bg-black/85 border border-white/20 text-xs text-white shadow-lg';
+      el.textContent = msg;
+      box.appendChild(el);
+      setTimeout(() => el.remove(), 2200);
     }
 
-    function copyTextSafe(text, label) {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(() => {
-          showToast('已复制' + label + '：' + text, 'success');
-        }).catch(() => fallbackCopy(text, label));
+    // Draw realistic desk/outdoor camera scene in viewfinder canvas
+    function drawViewfinderScene(ctx, w, h) {
+      const g = ctx.createLinearGradient(0, 0, w, h);
+      g.addColorStop(0, '#2b211c');
+      g.addColorStop(0.45, '#1e293b');
+      g.addColorStop(1, '#0f766e');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+
+      // Desk mat cyan surface (inspired by Fig 3 scene)
+      ctx.fillStyle = '#248f9d';
+      ctx.beginPath();
+      ctx.moveTo(0, h * 0.34);
+      ctx.lineTo(w, h * 0.62);
+      ctx.lineTo(w, h);
+      ctx.lineTo(0, h * 0.88);
+      ctx.closePath();
+      ctx.fill();
+
+      // Mechanical keyboard perspective block
+      ctx.save();
+      ctx.translate(w * 0.52, h * 0.48);
+      ctx.rotate(0.42);
+      ctx.fillStyle = '#18181b';
+      ctx.fillRect(-360, -150, 720, 290);
+      for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 13; c++) {
+          ctx.fillStyle = (c === 0 || c === 12 || r === 4) ? '#d97706' : '#f4f4f5';
+          ctx.fillRect(-335 + c * 51, -130 + r * 52, 44, 44);
+        }
+      }
+      ctx.restore();
+    }
+
+    function updateLiveOverlay() {
+      const t = getNowTimeParts();
+      const lat = state.coordSys === 'WGS-84' ? state.wgsLat : state.gcjLat;
+      const lon = state.coordSys === 'WGS-84' ? state.wgsLon : state.gcjLon;
+      const coordStr = formatCoords(lat, lon, state.coordFmt) + ' [' + state.coordSys + '] ±' + state.accuracy.toFixed(1) + 'm';
+
+      document.getElementById('gpsPillText').textContent = state.coordSys + ' · ±' + state.accuracy.toFixed(1) + 'm';
+
+      const centered = document.getElementById('wmStyleCentered');
+      const card = document.getElementById('wmStyleCard');
+
+      if (state.styleTemplate === 0) {
+        centered.classList.remove('hidden');
+        card.classList.add('hidden');
+        document.getElementById('wmBigTime').textContent = t.hm;
+        document.getElementById('wmBigTime').style.display = state.showTime ? 'block' : 'none';
+        document.getElementById('wmDateWeekday').textContent = t.dateWeek;
+        document.getElementById('wmDateWeekday').style.display = state.showTime ? 'inline' : 'none';
+        document.getElementById('wmShortPoiText').textContent = state.shortPoi;
+        document.getElementById('wmPinAndPoi').style.display = state.showLoc ? 'inline-flex' : 'none';
+        const pill = document.getElementById('wmCoordPill');
+        pill.textContent = coordStr;
+        pill.style.display = state.showCoords ? 'inline-block' : 'none';
+        const noteEl = document.getElementById('wmExtraNoteLine');
+        if (state.showNote && state.note) {
+          noteEl.textContent = '备注：' + state.note;
+          noteEl.classList.remove('hidden');
+        } else {
+          noteEl.classList.add('hidden');
+        }
       } else {
-        fallbackCopy(text, label);
+        centered.classList.add('hidden');
+        card.classList.remove('hidden');
+        document.getElementById('wmCardSysBadge').textContent = state.coordSys;
+        document.getElementById('wmCardCoordLine').textContent = state.showCoords ? ('经纬：' + coordStr) : '';
+        document.getElementById('wmCardAddrLine').textContent = state.showLoc ? ('地点：' + state.shortPoi + ' (' + state.fullAddr + ')') : '';
+        document.getElementById('wmCardTimeLine').textContent = state.showTime ? ('时间：' + t.fullTs) : '';
+        document.getElementById('wmCardNoteLine').textContent = (state.showNote && state.note) ? ('备注：' + state.note) : '';
       }
     }
 
-    function fallbackCopy(text, label) {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand('copy');
-        showToast('已复制' + label + '：' + text, 'success');
-      } catch (e) {
-        showToast('复制失败，请手动选择复制', 'warn');
-      }
-      ta.remove();
-    }
-
-    // ============================================================================
-    // 4. SIMULATED REAL-TIME VIEWFINDER SCENE & COMPOSITOR ENGINE
-    // ============================================================================
-    let animFrameId = null;
-    let tickCount = 0;
-
-    function drawSimulatedSceneToCanvas(ctx, width, height, theme, timeTick) {
-      // Sky gradient based on theme
-      const palettes = {
-        beijing: ['#0f172a', '#1e3a5f', '#334155'],
-        shanghai: ['#090d16', '#1e1b4b', '#0f766e'],
-        hangzhou: ['#0c2e28', '#115e59', '#334155'],
-        shenzhen: ['#082f49', '#0369a1', '#1e293b'],
-        chengdu: ['#1e1b4b', '#312e81', '#3f3f46']
-      };
-      const pal = palettes[theme] || palettes.beijing;
-      const grad = ctx.createLinearGradient(0, 0, 0, height);
-      grad.addColorStop(0, pal[0]);
-      grad.addColorStop(0.62, pal[1]);
-      grad.addColorStop(1, pal[2]);
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, width, height);
-
-      // Subtle sun/glow
-      const glow = ctx.createRadialGradient(width * 0.78, height * 0.22, 10, width * 0.78, height * 0.22, width * 0.35);
-      glow.addColorStop(0, 'rgba(56, 189, 248, 0.22)');
-      glow.addColorStop(1, 'rgba(56, 189, 248, 0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, width, height);
-
-      // Horizon & urban architecture silhouette
-      const horizonY = height * 0.64;
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-      ctx.fillRect(0, horizonY, width, height - horizonY);
-
-      // Draw crisp architectural skyline blocks
-      const buildings = [
-        { x: 0.06, w: 0.08, h: 0.22 },
-        { x: 0.16, w: 0.11, h: 0.31 },
-        { x: 0.29, w: 0.09, h: 0.19 },
-        { x: 0.41, w: 0.14, h: 0.36 },
-        { x: 0.58, w: 0.10, h: 0.27 },
-        { x: 0.70, w: 0.12, h: 0.33 },
-        { x: 0.84, w: 0.10, h: 0.24 }
-      ];
-      buildings.forEach((b, idx) => {
-        const bx = width * b.x;
-        const bw = width * b.w;
-        const bh = height * b.h;
-        const by = horizonY - bh;
-        ctx.fillStyle = idx % 2 === 0 ? 'rgba(30, 41, 59, 0.92)' : 'rgba(15, 23, 42, 0.95)';
-        ctx.fillRect(bx, by, bw, bh);
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.18)';
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(bx, by, bw, bh);
-      });
-
-      // Road perspective lines on ground
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.22)';
-      ctx.lineWidth = 2;
-      for (let i = -3; i <= 3; i++) {
-        ctx.beginPath();
-        ctx.moveTo(width * 0.5 + i * 45, horizonY);
-        ctx.lineTo(width * 0.5 + i * 260, height);
-        ctx.stroke();
-      }
-
-      // Viewfinder rule-of-thirds grid & center GPS lock reticle
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.11)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(width / 3, 0); ctx.lineTo(width / 3, height);
-      ctx.moveTo(width * 2 / 3, 0); ctx.lineTo(width * 2 / 3, height);
-      ctx.moveTo(0, height / 3); ctx.lineTo(width, height / 3);
-      ctx.moveTo(0, height * 2 / 3); ctx.lineTo(width, height * 2 / 3);
-      ctx.stroke();
-
-      // Center target crosshair with gentle breathing animation
-      const cx = width * 0.5;
-      const cy = height * 0.44;
-      const r = 24 + Math.sin(timeTick * 0.06) * 2.5;
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
-      ctx.lineWidth = 1.8;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, PI * 2);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(cx - r - 10, cy); ctx.lineTo(cx - r + 6, cy);
-      ctx.moveTo(cx + r - 6, cy); ctx.lineTo(cx + r + 10, cy);
-      ctx.moveTo(cx, cy - r - 10); ctx.lineTo(cx, cy - r + 6);
-      ctx.moveTo(cx, cy + r - 6); ctx.lineTo(cx, cy + r + 10);
-      ctx.stroke();
-    }
-
-    function startViewfinderLoop() {
-      if (animFrameId) cancelAnimationFrame(animFrameId);
-      const canvas = document.getElementById('viewfinderCanvas');
-      const ctx = canvas.getContext('2d');
-      function loop() {
-        tickCount++;
-        if (!state.usingRealCamera) {
-          drawSimulatedSceneToCanvas(ctx, canvas.width, canvas.height, state.sceneTheme, tickCount);
-        }
-        if (tickCount % 30 === 0) {
-          updateLiveWatermarkPreview();
-        }
-        animFrameId = requestAnimationFrame(loop);
-      }
-      loop();
-    }
-
-    // High-resolution watermark compositor onto a clean base image (returns DataURL)
-    function compositeWatermarkOnCanvas(cleanImageSource, wmData, callback) {
+    function compositePhotoCanvas(cleanDataUrl, cfg, cb) {
       const img = new Image();
       img.onload = function() {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width || 1280;
-        canvas.height = img.height || 800;
-        const ctx = canvas.getContext('2d');
+        const c = document.createElement('canvas');
+        c.width = 1080;
+        c.height = 1440;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, c.width, c.height);
 
-        // 1. Draw pristine clean base image
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const lat = cfg.coordSys === 'WGS-84' ? cfg.wgsLat : cfg.gcjLat;
+        const lon = cfg.coordSys === 'WGS-84' ? cfg.wgsLon : cfg.gcjLon;
+        const coordLine = formatCoords(lat, lon, cfg.coordFmt) + ' [' + cfg.coordSys + '] ±' + Number(cfg.accuracy).toFixed(1) + 'm';
 
-        // 2. Build watermark text lines from structured wmData
-        const scale = wmData.fontSize === 'lg' ? 1.18 : (wmData.fontSize === 'sm' ? 0.88 : 1.0);
-        const baseFontPx = Math.round((canvas.width / 1280) * 21 * scale);
-        const titleFontPx = Math.round(baseFontPx * 1.08);
-        const lineGap = Math.round(baseFontPx * 1.48);
+        if (cfg.styleTemplate === 0) {
+          // Bottom gradient scrim
+          const grad = ctx.createLinearGradient(0, c.height - 380, 0, c.height);
+          grad.addColorStop(0, 'rgba(0,0,0,0)');
+          grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, c.height - 380, c.width, 380);
 
-        const displayCoords = wmData.coordSystem === 'WGS-84'
-          ? { lat: wmData.wgsLat, lon: wmData.wgsLon }
-          : { lat: wmData.gcjLat, lon: wmData.gcjLon };
+          const cx = c.width / 2;
+          let curY = c.height - 48;
 
-        const lines = [];
-        if (wmData.showCoords) {
-          const coordText = formatCoordPair(displayCoords.lat, displayCoords.lon, wmData.coordFormat);
-          const sysBadge = wmData.showCoordTag ? (' [' + wmData.coordSystem + ']') : '';
-          const accBadge = wmData.showAccuracy ? (' ±' + Number(wmData.accuracy || 2.8).toFixed(1) + 'm') : '';
-          lines.push({ label: '经纬', text: coordText + sysBadge + accBadge, mono: true, highlight: true });
-        }
-        if (wmData.showAddress && wmData.address) {
-          lines.push({ label: '地点', text: wmData.address, mono: false });
-        }
-        if (wmData.showTime && wmData.timestamp) {
-          lines.push({ label: '时间', text: wmData.timestamp, mono: true });
-        }
-        if (wmData.showNote && wmData.note) {
-          lines.push({ label: '备注', text: wmData.note, mono: false });
-        }
-
-        if (lines.length === 0) {
-          callback(canvas.toDataURL('image/jpeg', 0.94));
-          return;
-        }
-
-        ctx.font = '600 ' + baseFontPx + 'px "JetBrains Mono", "Inter", sans-serif';
-        let maxTextWidth = 340;
-        lines.forEach(l => {
-          const w = ctx.measureText(l.label + '：' + l.text).width;
-          if (w > maxTextWidth) maxTextWidth = w;
-        });
-
-        const padX = Math.round(baseFontPx * 1.15);
-        const padY = Math.round(baseFontPx * 1.0);
-        const headerHeight = Math.round(titleFontPx * 1.75);
-        const boxWidth = Math.min(canvas.width - 48, maxTextWidth + padX * 2 + 20);
-        const boxHeight = padY * 2 + headerHeight + lines.length * lineGap;
-
-        const margin = Math.round((canvas.width / 1280) * 28);
-        const boxX = wmData.corner === 'bottom-right'
-          ? (canvas.width - boxWidth - margin)
-          : margin;
-        const boxY = canvas.height - boxHeight - margin;
-
-        // Draw rounded translucent card
-        const alpha = (Number(wmData.opacity) || 72) / 100;
-        ctx.save();
-        ctx.fillStyle = 'rgba(15, 23, 42, ' + alpha + ')';
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.38)';
-        ctx.lineWidth = 2;
-        const radius = 16;
-        ctx.beginPath();
-        ctx.moveTo(boxX + radius, boxY);
-        ctx.lineTo(boxX + boxWidth - radius, boxY);
-        ctx.quadraticCurveTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius);
-        ctx.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
-        ctx.quadraticCurveTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight);
-        ctx.lineTo(boxX + radius, boxY + boxHeight);
-        ctx.quadraticCurveTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius);
-        ctx.lineTo(boxX, boxY + radius);
-        ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        // Accent bar & header
-        ctx.fillStyle = '#38bdf8';
-        ctx.fillRect(boxX + padX, boxY + padY, 6, titleFontPx);
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '700 ' + titleFontPx + 'px "Inter", "PingFang SC", sans-serif';
-        ctx.fillText('高德精准经纬水印 · 零偏差核验', boxX + padX + 14, boxY + padY + titleFontPx - 2);
-
-        // Divider line
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(boxX + padX, boxY + padY + headerHeight - 8);
-        ctx.lineTo(boxX + boxWidth - padX, boxY + padY + headerHeight - 8);
-        ctx.stroke();
-
-        // Render each field line
-        lines.forEach((l, idx) => {
-          const y = boxY + padY + headerHeight + (idx + 0.78) * lineGap;
-          ctx.font = (l.mono ? '600 ' : '500 ') + baseFontPx + 'px "JetBrains Mono", "Inter", "PingFang SC", sans-serif';
-          ctx.fillStyle = '#94a3b8';
-          ctx.fillText(l.label + '：', boxX + padX, y);
-          const labelW = ctx.measureText(l.label + '：').width;
-          ctx.fillStyle = l.highlight ? '#7dd3fc' : '#f8fafc';
-          ctx.fillText(l.text, boxX + padX + labelW, y);
-        });
-
-        ctx.restore();
-        callback(canvas.toDataURL('image/jpeg', 0.94));
-      };
-      img.src = cleanImageSource;
-    }
-
-    // ============================================================================
-    // 5. LIVE WATERMARK OVERLAY UPDATER
-    // ============================================================================
-    function updateLiveWatermarkPreview() {
-      const cfg = state.wmConfig;
-      const offsetMeters = haversineMeters(state.currentGcjLat, state.currentGcjLon, state.currentWgsLat, state.currentWgsLon);
-
-      // Update right panel dual readouts
-      document.getElementById('readoutGcj02').textContent =
-        state.currentGcjLat.toFixed(6) + ', ' + state.currentGcjLon.toFixed(6);
-      document.getElementById('readoutWgs84').textContent =
-        state.currentWgsLat.toFixed(6) + ', ' + state.currentWgsLon.toFixed(6);
-      document.getElementById('readoutOffsetMeters').textContent =
-        '加密偏移 ' + offsetMeters.toFixed(0) + 'm';
-
-      // Header badge
-      const headerBadge = document.getElementById('headerCoordBadge');
-      headerBadge.textContent = cfg.coordSystem === 'GCJ-02' ? 'GCJ-02 高德坐标' : 'WGS-84 原始GPS';
-
-      // Watermark overlay position & opacity
-      const wrapper = document.getElementById('liveWatermarkWrapper');
-      if (cfg.corner === 'bottom-right') {
-        wrapper.classList.remove('left-3');
-        wrapper.classList.add('right-3');
-      } else {
-        wrapper.classList.remove('right-3');
-        wrapper.classList.add('left-3');
-      }
-
-      const box = document.getElementById('liveWatermarkBox');
-      box.style.backgroundColor = 'rgba(15, 23, 42, ' + (cfg.opacity / 100) + ')';
-
-      const tagEl = document.getElementById('wmCoordSysTag');
-      tagEl.textContent = cfg.coordSystem;
-      tagEl.style.display = cfg.showCoordTag ? 'inline-block' : 'none';
-
-      const activeLat = cfg.coordSystem === 'WGS-84' ? state.currentWgsLat : state.currentGcjLat;
-      const activeLon = cfg.coordSystem === 'WGS-84' ? state.currentWgsLon : state.currentGcjLon;
-      const coordStr = formatCoordPair(activeLat, activeLon, cfg.coordFormat);
-
-      const fontClass = cfg.fontSize === 'lg' ? 'text-sm' : (cfg.fontSize === 'sm' ? 'text-[11px]' : 'text-xs');
-      const container = document.getElementById('wmLinesContainer');
-      container.className = 'space-y-0.5 leading-snug ' + fontClass;
-
-      const htmlLines = [];
-      if (cfg.showCoords) {
-        const accHtml = cfg.showAccuracy
-          ? '<span class="ml-1.5 text-emerald-300 font-mono-num">±' + state.currentAccuracy.toFixed(1) + 'm</span>'
-          : '';
-        htmlLines.push(
-          '<div class="font-mono-num text-cyan-300 font-semibold"><span class="text-slate-400 font-normal">经纬：</span>' +
-          coordStr + accHtml + '</div>'
-        );
-      }
-      if (cfg.showAddress && cfg.address) {
-        htmlLines.push('<div><span class="text-slate-400">地点：</span><span class="text-white">' + escapeHtml(cfg.address) + '</span></div>');
-      }
-      if (cfg.showTime) {
-        htmlLines.push('<div class="font-mono-num"><span class="text-slate-400 font-sans">时间：</span><span class="text-slate-200">' + nowTimestampStr() + '</span></div>');
-      }
-      if (cfg.showNote && cfg.note) {
-        htmlLines.push('<div><span class="text-slate-400">备注：</span><span class="text-amber-200">' + escapeHtml(cfg.note) + '</span></div>');
-      }
-      container.innerHTML = htmlLines.join('');
-    }
-
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
-
-    // ============================================================================
-    // 6. ZERO-SHUTTER-LAG CAPTURE + ASYNC OPTIMAL GPS CONVERGENCE (Q3, Q8, Q10)
-    // ============================================================================
-    function captureCleanFrameDataUrl() {
-      const video = document.getElementById('cameraVideo');
-      const simCanvas = document.getElementById('viewfinderCanvas');
-      const outCanvas = document.createElement('canvas');
-      outCanvas.width = 1280;
-      outCanvas.height = 800;
-      const ctx = outCanvas.getContext('2d');
-      if (state.usingRealCamera && video.readyState >= 2) {
-        ctx.drawImage(video, 0, 0, outCanvas.width, outCanvas.height);
-      } else {
-        ctx.drawImage(simCanvas, 0, 0, outCanvas.width, outCanvas.height);
-      }
-      return outCanvas.toDataURL('image/jpeg', 0.95);
-    }
-
-    function triggerShutter() {
-      // 1. Instant 0ms visual flash & freeze clean base frame immediately
-      const flash = document.getElementById('shutterFlashOverlay');
-      flash.classList.remove('animate-flash');
-      void flash.offsetWidth;
-      flash.classList.add('animate-flash');
-
-      const cleanBaseDataUrl = captureCleanFrameDataUrl();
-      const captureTimeStr = nowTimestampStr();
-
-      // Check if current accuracy exceeds threshold and async optimization is active
-      const threshold = state.settings.accuracyThreshold;
-      const needsAsyncOptimal = state.settings.asyncOptimal && state.currentAccuracy > threshold;
-
-      if (needsAsyncOptimal) {
-        const banner = document.getElementById('asyncSamplingBanner');
-        const bannerText = document.getElementById('asyncSamplingText');
-        banner.classList.remove('hidden');
-        bannerText.textContent = '底图已0ms定格 · 当前误差 ±' + state.currentAccuracy.toFixed(1) + 'm > ' + threshold + 'm，正在后台高频寻优...';
-
-        setTimeout(() => {
-          // Converge accuracy to optimal satellite lock
-          state.currentAccuracy = 2.4;
-          updateGpsStatusIndicator();
-          banner.classList.add('hidden');
-          finalizePhotoRecord(cleanBaseDataUrl, captureTimeStr, '本App极速实拍 (异步寻优锁星)');
-        }, 1100);
-      } else {
-        finalizePhotoRecord(cleanBaseDataUrl, captureTimeStr, '本App极速实拍');
-      }
-    }
-
-    function finalizePhotoRecord(cleanBaseDataUrl, timestampStr, sourceTag) {
-      const wmSnapshot = {
-        coordSystem: state.wmConfig.coordSystem,
-        coordFormat: state.wmConfig.coordFormat,
-        gcjLat: state.currentGcjLat,
-        gcjLon: state.currentGcjLon,
-        wgsLat: state.currentWgsLat,
-        wgsLon: state.currentWgsLon,
-        accuracy: state.currentAccuracy,
-        address: state.wmConfig.address,
-        timestamp: timestampStr,
-        note: state.wmConfig.note,
-        showCoords: state.wmConfig.showCoords,
-        showCoordTag: state.wmConfig.showCoordTag,
-        showAccuracy: state.wmConfig.showAccuracy,
-        showAddress: state.wmConfig.showAddress,
-        showTime: state.wmConfig.showTime,
-        showNote: state.wmConfig.showNote,
-        corner: state.wmConfig.corner,
-        fontSize: state.wmConfig.fontSize,
-        opacity: state.wmConfig.opacity
-      };
-
-      compositeWatermarkOnCanvas(cleanBaseDataUrl, wmSnapshot, function(compositedDataUrl) {
-        const newPhoto = {
-          id: 'photo_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-          sourceTag: sourceTag,
-          cleanImageDataUrl: cleanBaseDataUrl,
-          compositedDataUrl: compositedDataUrl,
-          originalCapture: {
-            gcjLat: wmSnapshot.gcjLat,
-            gcjLon: wmSnapshot.gcjLon,
-            wgsLat: wmSnapshot.wgsLat,
-            wgsLon: wmSnapshot.wgsLon,
-            timestamp: timestampStr
-          },
-          watermarkData: wmSnapshot
-        };
-        state.photos.unshift(newPhoto);
-        savePhotosToStorage();
-        updateRecentPhotoBar();
-        renderGallery();
-        showToast('拍照完成！已写入双轨坐标，可一键零偏差跳高德或随时改水印', 'success');
-      });
-    }
-
-    // ============================================================================
-    // 7. BINARY JPEG EXIF GPS PARSER FOR SYSTEM ALBUM PHOTOS (Q4, Q8)
-    // ============================================================================
-    function parseJpegExifGps(arrayBuffer) {
-      try {
-        const view = new DataView(arrayBuffer);
-        if (view.byteLength < 4 || view.getUint16(0, false) !== 0xFFD8) return null;
-        let offset = 2;
-        while (offset + 4 < view.byteLength) {
-          const marker = view.getUint16(offset, false);
-          offset += 2;
-          if ((marker & 0xFF00) !== 0xFF00) break;
-          const length = view.getUint16(offset, false);
-          if (marker === 0xFFE1 && length >= 14) {
-            // Check "Exif\0\0"
-            if (view.getUint32(offset + 2, false) === 0x45786966 && view.getUint16(offset + 6, false) === 0x0000) {
-              return parseTiffHeader(view, offset + 8);
-            }
+          if (cfg.showNote && cfg.note) {
+            ctx.font = '500 26px "Inter", sans-serif';
+            ctx.fillStyle = '#fde68a';
+            ctx.textAlign = 'center';
+            ctx.fillText('备注：' + cfg.note, cx, curY);
+            curY -= 42;
           }
-          offset += length;
-        }
-      } catch (e) {
-        return null;
-      }
-      return null;
-    }
 
-    function parseTiffHeader(view, tiffStart) {
-      const byteOrder = view.getUint16(tiffStart, false);
-      const littleEndian = (byteOrder === 0x4949);
-      const firstIfdOffset = view.getUint32(tiffStart + 4, littleEndian);
-      const ifd0Pos = tiffStart + firstIfdOffset;
-      if (ifd0Pos + 2 > view.byteLength) return null;
-
-      const entriesCount = view.getUint16(ifd0Pos, littleEndian);
-      let gpsIfdPointer = null;
-      for (let i = 0; i < entriesCount; i++) {
-        const entryOffset = ifd0Pos + 2 + i * 12;
-        if (entryOffset + 12 > view.byteLength) break;
-        const tag = view.getUint16(entryOffset, littleEndian);
-        if (tag === 0x8825) { // GPSInfoIFDPointer
-          gpsIfdPointer = view.getUint32(entryOffset + 8, littleEndian);
-          break;
-        }
-      }
-      if (!gpsIfdPointer) return null;
-
-      const gpsPos = tiffStart + gpsIfdPointer;
-      if (gpsPos + 2 > view.byteLength) return null;
-      const gpsCount = view.getUint16(gpsPos, littleEndian);
-
-      let latRef = 'N', lonRef = 'E', latVal = null, lonVal = null;
-      for (let i = 0; i < gpsCount; i++) {
-        const eo = gpsPos + 2 + i * 12;
-        if (eo + 12 > view.byteLength) break;
-        const gTag = view.getUint16(eo, littleEndian);
-        const valueOffset = tiffStart + view.getUint32(eo + 8, littleEndian);
-        if (gTag === 0x0001) {
-          const ch = view.getUint8(eo + 8);
-          if (ch === 83) latRef = 'S';
-        } else if (gTag === 0x0003) {
-          const ch = view.getUint8(eo + 8);
-          if (ch === 87) lonRef = 'W';
-        } else if (gTag === 0x0002 && valueOffset + 24 <= view.byteLength) {
-          latVal = readExifRationalDms(view, valueOffset, littleEndian);
-        } else if (gTag === 0x0004 && valueOffset + 24 <= view.byteLength) {
-          lonVal = readExifRationalDms(view, valueOffset, littleEndian);
-        }
-      }
-      if (latVal !== null && lonVal !== null) {
-        return {
-          wgsLat: Number((latRef === 'S' ? -latVal : latVal).toFixed(6)),
-          wgsLon: Number((lonRef === 'W' ? -lonVal : lonVal).toFixed(6))
-        };
-      }
-      return null;
-    }
-
-    function readExifRationalDms(view, pos, littleEndian) {
-      const dNum = view.getUint32(pos, littleEndian);
-      const dDen = view.getUint32(pos + 4, littleEndian) || 1;
-      const mNum = view.getUint32(pos + 8, littleEndian);
-      const mDen = view.getUint32(pos + 12, littleEndian) || 1;
-      const sNum = view.getUint32(pos + 16, littleEndian);
-      const sDen = view.getUint32(pos + 20, littleEndian) || 1;
-      return (dNum / dDen) + (mNum / mDen) / 60.0 + (sNum / sDen) / 3600.0;
-    }
-
-    // ============================================================================
-    // 8. AMAP ZERO-OFFSET JUMP MODAL & URI BUILDER (Q2, Q7)
-    // ============================================================================
-    function openAmapJumpModal(photo) {
-      const wm = photo.watermarkData;
-      const poiname = encodeURIComponent(wm.note || wm.address || '水印相机实拍点');
-      const gcjLat = Number(wm.gcjLat).toFixed(6);
-      const gcjLon = Number(wm.gcjLon).toFixed(6);
-
-      // Official Amap Android URI Scheme (dev=0 because coordinate is already exact GCJ-02!)
-      const nativePinUri = 'androidamap://viewMap?sourceApplication=FastWatermarkCam&poiname=' + poiname +
-                           '&lat=' + gcjLat + '&lon=' + gcjLon + '&dev=0';
-      const nativeNaviUri = 'androidamap://route/plan/?sourceApplication=FastWatermarkCam&dlat=' + gcjLat +
-                            '&dlon=' + gcjLon + '&dname=' + poiname + '&dev=0&t=0';
-      const webAmapUri = 'https://uri.amap.com/marker?position=' + gcjLon + ',' + gcjLat +
-                         '&name=' + poiname + '&coordinate=gaode&callnative=1';
-
-      document.getElementById('amapTargetName').textContent = wm.address || wm.note || '实拍点位';
-      document.getElementById('amapTargetGcj').textContent = gcjLat + '°N, ' + gcjLon + '°E';
-      document.getElementById('amapTargetWgs').textContent = Number(wm.wgsLat).toFixed(6) + '°N, ' + Number(wm.wgsLon).toFixed(6) + '°E';
-      document.getElementById('amapNativeUriCode').textContent = nativePinUri;
-
-      const pinLink = document.getElementById('linkWakeAndroidAmapPin');
-      const naviLink = document.getElementById('linkWakeAndroidAmapNavi');
-      const webLink = document.getElementById('linkOpenAmapWeb');
-
-      pinLink.href = nativePinUri;
-      naviLink.href = nativeNaviUri;
-      webLink.href = webAmapUri;
-
-      document.getElementById('btnCopyAmapCoordModal').onclick = function() {
-        copyTextSafe(gcjLon + ',' + gcjLat, '高德GCJ-02经纬度');
-      };
-
-      document.getElementById('modalAmapJump').classList.remove('hidden');
-    }
-
-    // ============================================================================
-    // 9. GALLERY RENDERER & NON-DESTRUCTIVE WATERMARK EDITOR (Q10, Q11)
-    // ============================================================================
-    function renderGallery() {
-      document.getElementById('galleryCountBadge').textContent = String(state.photos.length);
-      const grid = document.getElementById('galleryGrid');
-      if (state.photos.length === 0) {
-        grid.innerHTML = '<div class="col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-400 text-sm">暂无照片，去「极速拍摄」按快门或导入系统相册照片吧！</div>';
-        return;
-      }
-
-      grid.innerHTML = '';
-      state.photos.forEach(photo => {
-        const wm = photo.watermarkData;
-        const shownLat = wm.coordSystem === 'WGS-84' ? wm.wgsLat : wm.gcjLat;
-        const shownLon = wm.coordSystem === 'WGS-84' ? wm.wgsLon : wm.gcjLon;
-        const card = document.createElement('div');
-        card.className = 'bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col shadow-lg';
-
-        card.innerHTML = `
-          <div class="relative aspect-[16/10] bg-slate-950 overflow-hidden group">
-            <img src="${photo.compositedDataUrl}" alt="已拍水印照片" class="w-full h-full object-cover" />
-            <div class="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-              <span class="px-2 py-0.5 rounded-md bg-slate-950/85 text-[11px] font-medium text-cyan-300 border border-white/15 backdrop-blur-sm">${escapeHtml(photo.sourceTag)}</span>
-              <span class="px-2 py-0.5 rounded-md bg-blue-600/85 text-[11px] font-mono-num font-semibold text-white backdrop-blur-sm">${wm.coordSystem}</span>
-            </div>
-          </div>
-          <div class="p-3.5 flex-1 flex flex-col justify-between gap-3">
-            <div class="space-y-1 text-xs">
-              <div class="flex items-center justify-between gap-2">
-                <span class="font-mono-num font-bold text-blue-300">${formatCoordPair(shownLat, shownLon, wm.coordFormat)}</span>
-                <span class="text-[11px] font-mono-num text-emerald-400">高德GCJ-02已对齐</span>
-              </div>
-              <div class="text-slate-200 font-medium truncate">${escapeHtml(wm.address || '未填写地址')}</div>
-              <div class="flex items-center justify-between text-[11px] text-slate-400">
-                <span class="font-mono-num">${escapeHtml(wm.timestamp)}</span>
-                <span class="truncate max-w-[50%] text-amber-300">${escapeHtml(wm.note || '')}</span>
-              </div>
-            </div>
-
-            <!-- Action Buttons -->
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-800">
-              <button type="button" data-action="jump-pin" data-id="${photo.id}" class="col-span-2 sm:col-span-1 py-2 px-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition flex items-center justify-center gap-1 shadow">
-                <span>📍 跳高德打点</span>
-              </button>
-              <button type="button" data-action="jump-navi" data-id="${photo.id}" class="py-2 px-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-xs font-semibold text-emerald-300 border border-emerald-500/30 transition flex items-center justify-center gap-1">
-                <span>🧭 导航去这里</span>
-              </button>
-              <button type="button" data-action="edit-wm" data-id="${photo.id}" class="py-2 px-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-xs font-semibold text-amber-300 border border-amber-500/30 transition flex items-center justify-center gap-1">
-                <span>✎ 改水印</span>
-              </button>
-              <button type="button" data-action="download" data-id="${photo.id}" class="py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 border border-slate-700 transition flex items-center justify-center gap-1">
-                <span>⬇ 导出照片</span>
-              </button>
-            </div>
-          </div>
-        `;
-        grid.appendChild(card);
-      });
-
-      // Attach listeners
-      grid.querySelectorAll('button[data-action]').forEach(btn => {
-        btn.addEventListener('click', function() {
-          const id = this.getAttribute('data-id');
-          const action = this.getAttribute('data-action');
-          const photo = state.photos.find(p => p.id === id);
-          if (!photo) return;
-          if (action === 'jump-pin' || action === 'jump-navi') {
-            openAmapJumpModal(photo);
-          } else if (action === 'edit-wm') {
-            openEditWatermarkModal(photo);
-          } else if (action === 'download') {
-            downloadPhotoFiles(photo);
+          if (cfg.showCoords) {
+            ctx.font = '600 26px "JetBrains Mono", monospace';
+            const tw = ctx.measureText(coordLine).width;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
+            ctx.beginPath();
+            ctx.roundRect(cx - tw / 2 - 22, curY - 30, tw + 44, 42, 21);
+            ctx.fill();
+            ctx.fillStyle = '#7dd3fc';
+            ctx.textAlign = 'center';
+            ctx.fillText(coordLine, cx, curY);
+            curY -= 56;
           }
-        });
-      });
-    }
 
-    function openEditWatermarkModal(photo) {
-      state.editingPhotoId = photo.id;
-      const wm = photo.watermarkData;
-      document.getElementById('editModalPreviewImg').src = photo.compositedDataUrl;
-      document.getElementById('editModalOrigCoord').textContent =
-        Number(photo.originalCapture.gcjLat).toFixed(6) + ', ' + Number(photo.originalCapture.gcjLon).toFixed(6);
+          if (cfg.showTime || cfg.showLoc) {
+            ctx.font = '400 36px "Inter", sans-serif';
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            const lineStr = (cfg.showTime ? cfg.dateWeek + ' ' : '') + (cfg.showLoc ? ('📍' + cfg.shortPoi) : '');
+            ctx.fillText(lineStr, cx, curY);
+            curY -= 58;
+          }
 
-      document.getElementById('editCoordSys').value = wm.coordSystem;
-      document.getElementById('editCoordFormat').value = wm.coordFormat;
-      document.getElementById('editGcjLat').value = wm.gcjLat;
-      document.getElementById('editGcjLon').value = wm.gcjLon;
-      document.getElementById('editAddress').value = wm.address;
-      document.getElementById('editTimestamp').value = wm.timestamp;
-      document.getElementById('editNote').value = wm.note;
-      document.getElementById('editCorner').value = wm.corner;
-      document.getElementById('editFontSize').value = wm.fontSize;
-
-      document.getElementById('editChkCoords').checked = wm.showCoords;
-      document.getElementById('editChkAddress').checked = wm.showAddress;
-      document.getElementById('editChkTime').checked = wm.showTime;
-      document.getElementById('editChkNote').checked = wm.showNote;
-      document.getElementById('editChkTag').checked = wm.showCoordTag;
-      document.getElementById('editChkAcc').checked = wm.showAccuracy;
-
-      document.getElementById('modalEditWatermark').classList.remove('hidden');
-    }
-
-    function buildDraftWatermarkFromEditModal(photo) {
-      const gcjLat = parseFloat(document.getElementById('editGcjLat').value) || photo.originalCapture.gcjLat;
-      const gcjLon = parseFloat(document.getElementById('editGcjLon').value) || photo.originalCapture.gcjLon;
-      const wgs = gcj02ToWgs84(gcjLat, gcjLon);
-      return {
-        coordSystem: document.getElementById('editCoordSys').value,
-        coordFormat: document.getElementById('editCoordFormat').value,
-        gcjLat: Number(gcjLat.toFixed(6)),
-        gcjLon: Number(gcjLon.toFixed(6)),
-        wgsLat: wgs.lat,
-        wgsLon: wgs.lon,
-        accuracy: photo.watermarkData.accuracy || 2.8,
-        address: document.getElementById('editAddress').value,
-        timestamp: document.getElementById('editTimestamp').value,
-        note: document.getElementById('editNote').value,
-        corner: document.getElementById('editCorner').value,
-        fontSize: document.getElementById('editFontSize').value,
-        opacity: photo.watermarkData.opacity || 72,
-        showCoords: document.getElementById('editChkCoords').checked,
-        showAddress: document.getElementById('editChkAddress').checked,
-        showTime: document.getElementById('editChkTime').checked,
-        showNote: document.getElementById('editChkNote').checked,
-        showCoordTag: document.getElementById('editChkTag').checked,
-        showAccuracy: document.getElementById('editChkAcc').checked
-      };
-    }
-
-    function refreshEditModalLivePreview() {
-      const photo = state.photos.find(p => p.id === state.editingPhotoId);
-      if (!photo) return;
-      const draftWm = buildDraftWatermarkFromEditModal(photo);
-      compositeWatermarkOnCanvas(photo.cleanImageDataUrl, draftWm, function(newCompositedUrl) {
-        document.getElementById('editModalPreviewImg').src = newCompositedUrl;
-      });
-    }
-
-    function downloadPhotoFiles(photo) {
-      const a = document.createElement('a');
-      a.href = photo.compositedDataUrl;
-      a.download = '高德水印照片_' + photo.watermarkData.gcjLat + '_' + photo.watermarkData.gcjLon + '.jpg';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      if (state.settings.keepCleanExport) {
-        setTimeout(() => {
-          const cleanA = document.createElement('a');
-          cleanA.href = photo.cleanImageDataUrl;
-          cleanA.download = '无水印原图_' + photo.watermarkData.gcjLat + '_' + photo.watermarkData.gcjLon + '.jpg';
-          document.body.appendChild(cleanA);
-          cleanA.click();
-          cleanA.remove();
-        }, 350);
-        showToast('已导出带水印成片与无水印纯净原图！', 'success');
-      } else {
-        showToast('已导出高清带水印照片！', 'success');
-      }
-    }
-
-    function updateRecentPhotoBar() {
-      if (state.photos.length === 0) return;
-      const latest = state.photos[0];
-      document.getElementById('lastPhotoThumb').src = latest.compositedDataUrl;
-      document.getElementById('lastPhotoCoordText').textContent =
-        latest.watermarkData.gcjLat.toFixed(5) + '°, ' + latest.watermarkData.gcjLon.toFixed(5) + '° (点击跳高德)';
-    }
-
-    function savePhotosToStorage() {
-      try {
-        localStorage.setItem('amap_wm_camera_cfg', JSON.stringify(state.wmConfig));
-      } catch (e) {
-        // Ignore storage quota inside sandboxed iframe
-      }
-    }
-
-    function updateGpsStatusIndicator() {
-      const dot = document.getElementById('gpsStatusDot');
-      const txt = document.getElementById('gpsStatusText');
-      const badge = document.getElementById('gpsAccuracyBadge');
-      badge.textContent = '±' + state.currentAccuracy.toFixed(1) + 'm';
-      if (state.currentAccuracy <= state.settings.accuracyThreshold) {
-        dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-indicator';
-        txt.className = 'text-xs font-medium text-emerald-300';
-        txt.textContent = '高精度定位已锁定';
-        badge.className = 'px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-mono-num';
-      } else {
-        dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 pulse-indicator';
-        txt.className = 'text-xs font-medium text-amber-300';
-        txt.textContent = '定位收敛中 (按快门将触发后台寻优)';
-        badge.className = 'px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-mono-num';
-      }
-    }
-
-    // ============================================================================
-    // 10. INITIAL SEED PHOTOS & EVENT BINDINGS
-    // ============================================================================
-    function createInitialDemoPhotos() {
-      const canvas = document.createElement('canvas');
-      canvas.width = 1280;
-      canvas.height = 800;
-      const ctx = canvas.getContext('2d');
-
-      const seeds = [
-        {
-          key: 'bj',
-          sourceTag: '本App极速实拍',
-          note: '1号点位核验完成 · 点击跳高德丝毫不差',
-          timeOffsetSec: -180
-        },
-        {
-          key: 'sh',
-          sourceTag: '系统相册EXIF导入 (已自动WGS84→GCJ02纠偏)',
-          note: '外业巡检归档照片 · 支持随时无损改水印',
-          timeOffsetSec: -3600
-        }
-      ];
-
-      seeds.forEach((s, idx) => {
-        const preset = PRESET_LOCATIONS[s.key];
-        drawSimulatedSceneToCanvas(ctx, 1280, 800, preset.sceneTheme, idx * 40 + 10);
-        const cleanUrl = canvas.toDataURL('image/jpeg', 0.92);
-        const wgs = gcj02ToWgs84(preset.gcjLat, preset.gcjLon);
-        const wmData = {
-          coordSystem: 'GCJ-02',
-          coordFormat: 'DEC',
-          gcjLat: preset.gcjLat,
-          gcjLon: preset.gcjLon,
-          wgsLat: wgs.lat,
-          wgsLon: wgs.lon,
-          accuracy: preset.accuracy,
-          address: preset.address,
-          timestamp: nowTimestampStr(),
-          note: s.note,
-          showCoords: true,
-          showCoordTag: true,
-          showAccuracy: true,
-          showAddress: true,
-          showTime: true,
-          showNote: true,
-          corner: 'bottom-left',
-          fontSize: 'md',
-          opacity: 72
-        };
-        compositeWatermarkOnCanvas(cleanUrl, wmData, function(compUrl) {
-          state.photos.push({
-            id: 'seed_photo_' + idx,
-            sourceTag: s.sourceTag,
-            cleanImageDataUrl: cleanUrl,
-            compositedDataUrl: compUrl,
-            originalCapture: {
-              gcjLat: preset.gcjLat,
-              gcjLon: preset.gcjLon,
-              wgsLat: wgs.lat,
-              wgsLon: wgs.lon,
-              timestamp: wmData.timestamp
-            },
-            watermarkData: wmData
-          });
-          updateRecentPhotoBar();
-          renderGallery();
-        });
-      });
-    }
-
-    function switchTab(tabName) {
-      state.activeTab = tabName;
-      const views = {
-        camera: document.getElementById('viewCamera'),
-        gallery: document.getElementById('viewGallery'),
-        settings: document.getElementById('viewSettings')
-      };
-      const btns = {
-        camera: document.getElementById('tabBtnCamera'),
-        gallery: document.getElementById('tabBtnGallery'),
-        settings: document.getElementById('tabBtnSettings')
-      };
-      Object.keys(views).forEach(k => {
-        if (k === tabName) {
-          views[k].classList.remove('hidden');
-          views[k].classList.add(k === 'camera' ? 'flex' : 'flex');
-          btns[k].className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all bg-blue-600 text-white shadow-sm flex items-center gap-1.5';
+          if (cfg.showTime) {
+            ctx.font = '300 128px "Inter", sans-serif';
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.fillText(cfg.hm, cx, curY);
+          }
         } else {
-          views[k].classList.add('hidden');
-          btns[k].className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-1.5';
+          // Style 1: Left Engineering Card
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+          ctx.beginPath();
+          ctx.roundRect(32, c.height - 260, 820, 220, 20);
+          ctx.fill();
+          ctx.fillStyle = '#38bdf8';
+          ctx.fillRect(56, c.height - 234, 8, 30);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '700 28px "Inter", sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillText('高德精准经纬水印 · ' + cfg.coordSys, 76, c.height - 210);
+          ctx.font = '600 26px "JetBrains Mono", monospace';
+          ctx.fillStyle = '#7dd3fc';
+          ctx.fillText('经纬：' + coordLine, 56, c.height - 160);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText('地点：' + cfg.shortPoi + ' (' + cfg.fullAddr + ')', 56, c.height - 116);
+          ctx.fillText('时间：' + cfg.fullTs, 56, c.height - 72);
         }
+
+        cb(c.toDataURL('image/jpeg', 0.94));
+      };
+      img.src = cleanDataUrl;
+    }
+
+    function capturePhotoNow() {
+      const flashEl = document.getElementById('shutterFlashOverlay');
+      flashEl.classList.remove('animate-flash');
+      void flashEl.offsetWidth;
+      flashEl.classList.add('animate-flash');
+
+      const vfCanvas = document.getElementById('viewfinderCanvas');
+      const video = document.getElementById('cameraVideo');
+      const cleanCanvas = document.createElement('canvas');
+      cleanCanvas.width = 1080;
+      cleanCanvas.height = 1440;
+      const ctx = cleanCanvas.getContext('2d');
+      if (state.usingRealCam && video.readyState >= 2) {
+        ctx.drawImage(video, 0, 0, 1080, 1440);
+      } else {
+        ctx.drawImage(vfCanvas, 0, 0, 1080, 1440);
+      }
+      const cleanUrl = cleanCanvas.toDataURL('image/jpeg', 0.95);
+      const t = getNowTimeParts();
+
+      const cfg = {
+        styleTemplate: state.styleTemplate,
+        coordSys: state.coordSys,
+        coordFmt: state.coordFmt,
+        gcjLat: state.gcjLat,
+        gcjLon: state.gcjLon,
+        wgsLat: state.wgsLat,
+        wgsLon: state.wgsLon,
+        origGcjLat: state.gcjLat,
+        origGcjLon: state.gcjLon,
+        accuracy: state.accuracy,
+        shortPoi: state.shortPoi,
+        fullAddr: state.fullAddr,
+        hm: t.hm,
+        dateWeek: t.dateWeek,
+        fullTs: t.fullTs,
+        note: state.note,
+        showTime: state.showTime,
+        showLoc: state.showLoc,
+        showCoords: state.showCoords,
+        showNote: state.showNote
+      };
+
+      compositePhotoCanvas(cleanUrl, cfg, function(wmUrl) {
+        const entry = {
+          id: 'p_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+          cleanUrl: cleanUrl,
+          wmUrl: wmUrl,
+          cfg: cfg
+        };
+        state.photos.unshift(entry);
+        state.selectedPhotoId = entry.id;
+        document.getElementById('bottomGalleryThumb').src = wmUrl;
+        renderGalleryScreen();
+        showToast('已保存照片 (高德 GCJ-02 零偏差已对齐)');
       });
     }
 
-    function runLabConversion() {
-      const lat = parseFloat(document.getElementById('labInputLat').value) || 39.908823;
-      const lon = parseFloat(document.getElementById('labInputLon').value) || 116.397470;
-      const inType = document.getElementById('labInputType').value;
+    function renderGalleryScreen() {
+      document.getElementById('galleryTitleText').textContent = '已拍相册 (' + state.photos.length + ')';
+      const selected = state.photos.find(p => p.id === state.selectedPhotoId) || state.photos[0];
+      if (!selected) return;
+      state.selectedPhotoId = selected.id;
 
-      let gcj, wgs;
-      if (inType === 'WGS-84') {
-        wgs = { lat: Number(lat.toFixed(6)), lon: Number(lon.toFixed(6)) };
-        gcj = wgs84ToGcj02(lat, lon);
-      } else {
-        gcj = { lat: Number(lat.toFixed(6)), lon: Number(lon.toFixed(6)) };
-        wgs = gcj02ToWgs84(lat, lon);
-      }
-      const dist = haversineMeters(gcj.lat, gcj.lon, wgs.lat, wgs.lon);
-      const box = document.getElementById('labResultBox');
-      box.innerHTML = `
-        <div class="flex justify-between text-blue-300"><span>高德 GCJ-02 坐标：</span><strong>${gcj.lat.toFixed(6)}, ${gcj.lon.toFixed(6)}</strong></div>
-        <div class="flex justify-between text-slate-300"><span>原始 WGS-84 坐标：</span><span>${wgs.lat.toFixed(6)}, ${wgs.lon.toFixed(6)}</span></div>
-        <div class="flex justify-between text-amber-300 pt-1 border-t border-slate-800"><span>未纠偏直接混用偏差：</span><strong>相差 ${dist.toFixed(1)} 米 (本App已自动消除该误差)</strong></div>
-      `;
-      document.getElementById('btnLabJumpAmap').onclick = function() {
-        openAmapJumpModal({
-          watermarkData: {
-            gcjLat: gcj.lat,
-            gcjLon: gcj.lon,
-            wgsLat: wgs.lat,
-            wgsLon: wgs.lon,
-            address: '坐标实验室验证点',
-            note: 'GCJ-02 零偏差验证'
-          }
+      document.getElementById('galleryMainImg').src = selected.wmUrl;
+      document.getElementById('galleryPoiTitle').textContent = '📍 ' + selected.cfg.shortPoi + (selected.cfg.note ? (' · ' + selected.cfg.note) : '');
+      document.getElementById('galleryGcjText').textContent = '高德 GCJ-02: ' + selected.cfg.gcjLat.toFixed(6) + '°N, ' + selected.cfg.gcjLon.toFixed(6) + '°E';
+      document.getElementById('galleryWgsText').textContent = '原始 WGS-84: ' + selected.cfg.wgsLat.toFixed(6) + '°N, ' + selected.cfg.wgsLon.toFixed(6) + '°E';
+
+      const poiname = encodeURIComponent(selected.cfg.shortPoi || '实拍点位');
+      const lat = selected.cfg.gcjLat.toFixed(6);
+      const lon = selected.cfg.gcjLon.toFixed(6);
+
+      document.getElementById('btnGalleryJumpAmapPin').href =
+        'androidamap://viewMap?sourceApplication=FastWatermarkCam&poiname=' + poiname + '&lat=' + lat + '&lon=' + lon + '&dev=0';
+      document.getElementById('btnGalleryJumpAmapNavi').href =
+        'androidamap://route/plan/?sourceApplication=FastWatermarkCam&dlat=' + lat + '&dlon=' + lon + '&dname=' + poiname + '&dev=0&t=0';
+
+      const strip = document.getElementById('galleryThumbStrip');
+      strip.innerHTML = '';
+      state.photos.forEach(p => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'w-14 h-14 rounded-lg overflow-hidden shrink-0 border-2 ' + (p.id === selected.id ? 'border-sky-400' : 'border-neutral-700');
+        btn.innerHTML = '<img src="' + p.wmUrl + '" alt="缩略图" class="w-full h-full object-cover" />';
+        btn.addEventListener('click', function() {
+          state.selectedPhotoId = p.id;
+          renderGalleryScreen();
         });
-      };
+        strip.appendChild(btn);
+      });
     }
 
     window.addEventListener('DOMContentLoaded', function() {
-      startViewfinderLoop();
-      updateLiveWatermarkPreview();
-      updateGpsStatusIndicator();
-      createInitialDemoPhotos();
-      runLabConversion();
+      const vfCanvas = document.getElementById('viewfinderCanvas');
+      const ctx = vfCanvas.getContext('2d');
+      drawViewfinderScene(ctx, vfCanvas.width, vfCanvas.height);
+      updateLiveOverlay();
+      setInterval(updateLiveOverlay, 1000);
 
-      // Tab buttons
-      document.getElementById('tabBtnCamera').addEventListener('click', () => switchTab('camera'));
-      document.getElementById('tabBtnGallery').addEventListener('click', () => switchTab('gallery'));
-      document.getElementById('tabBtnSettings').addEventListener('click', () => switchTab('settings'));
+      // Seed 1 initial photo so thumbnail & gallery work immediately
+      capturePhotoNow();
 
-      // Preset location selector
-      document.getElementById('presetLocationSelect').addEventListener('change', function() {
-        const val = this.value;
-        if (val === 'device') {
-          if (navigator.geolocation) {
-            showToast('正在请求手机硬件高精度 GPS...', 'info');
-            navigator.geolocation.getCurrentPosition(pos => {
-              state.currentWgsLat = Number(pos.coords.latitude.toFixed(6));
-              state.currentWgsLon = Number(pos.coords.longitude.toFixed(6));
-              const gcj = wgs84ToGcj02(state.currentWgsLat, state.currentWgsLon);
-              state.currentGcjLat = gcj.lat;
-              state.currentGcjLon = gcj.lon;
-              state.currentAccuracy = pos.coords.accuracy || 3.5;
-              updateGpsStatusIndicator();
-              updateLiveWatermarkPreview();
-              showToast('已获取硬件真实GPS并自动纠偏为高德GCJ-02！', 'success');
-            }, () => {
-              showToast('当前环境未授权或无硬件GPS，已保持高精演示坐标', 'warn');
-            }, { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 });
-          }
-        } else if (PRESET_LOCATIONS[val]) {
-          const p = PRESET_LOCATIONS[val];
-          state.currentGcjLat = p.gcjLat;
-          state.currentGcjLon = p.gcjLon;
-          const wgs = gcj02ToWgs84(p.gcjLat, p.gcjLon);
-          state.currentWgsLat = wgs.lat;
-          state.currentWgsLon = wgs.lon;
-          state.currentAccuracy = p.accuracy;
-          state.sceneTheme = p.sceneTheme;
-          state.wmConfig.address = p.address;
-          document.getElementById('inputLiveAddress').value = p.address;
-          updateGpsStatusIndicator();
-          updateLiveWatermarkPreview();
-          showToast('已切换定位点：' + p.name, 'info');
-        }
+      // Viewfinder tap to move focus reticle
+      document.getElementById('viewfinderContainer').addEventListener('click', function(e) {
+        if (e.target.closest('#liveWatermarkArea') || e.target.closest('#btnZoomCircle') || e.target.closest('#btnGpsPill')) return;
+        const rect = this.getBoundingClientRect();
+        const x = Math.max(40, Math.min(rect.width - 90, e.clientX - rect.left - 39));
+        const y = Math.max(40, Math.min(rect.height - 90, e.clientY - rect.top - 39));
+        const fb = document.getElementById('focusBoxWrapper');
+        fb.style.left = x + 'px';
+        fb.style.top = y + 'px';
       });
 
-      document.getElementById('btnRefreshGps').addEventListener('click', function() {
-        state.currentAccuracy = Number((1.8 + Math.random() * 1.5).toFixed(1));
-        updateGpsStatusIndicator();
-        updateLiveWatermarkPreview();
-        showToast('已完成高精度卫星重锁定，当前精度 ±' + state.currentAccuracy + 'm', 'success');
+      // Top Bar Controls
+      document.getElementById('btnTopSettings').addEventListener('click', () => {
+        document.getElementById('modalSettings').classList.remove('hidden');
+      });
+      document.getElementById('btnCloseSettingsModal').addEventListener('click', () => {
+        document.getElementById('modalSettings').classList.add('hidden');
+      });
+      document.getElementById('btnDoneSettings').addEventListener('click', () => {
+        document.getElementById('modalSettings').classList.add('hidden');
       });
 
-      document.getElementById('btnSimulateJitter').addEventListener('click', function() {
-        state.currentAccuracy = 24.5;
-        updateGpsStatusIndicator();
-        updateLiveWatermarkPreview();
-        showToast('已模拟冷启动弱GPS (±24.5m)，此时按快门将体验「0ms抓拍+后台异步寻优」', 'warn');
-      });
-
-      // Toggle real hardware camera
-      document.getElementById('btnToggleRealCamera').addEventListener('click', function() {
-        const video = document.getElementById('cameraVideo');
-        const canvas = document.getElementById('viewfinderCanvas');
-        const label = document.getElementById('camSourceLabel');
-        if (state.usingRealCamera) {
-          if (state.mediaStream) {
-            state.mediaStream.getTracks().forEach(t => t.stop());
-          }
-          state.usingRealCamera = false;
-          video.classList.add('hidden');
-          canvas.classList.remove('hidden');
-          label.textContent = '启用手机摄像头';
-          showToast('已切换回实景模拟取景器', 'info');
-        } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-            .then(stream => {
-              state.mediaStream = stream;
-              video.srcObject = stream;
-              state.usingRealCamera = true;
-              video.classList.remove('hidden');
-              canvas.classList.add('hidden');
-              label.textContent = '关闭实景摄像头';
-              showToast('已开启手机光学摄像头！', 'success');
-            })
-            .catch(() => {
-              showToast('当前预览窗口未授权摄像头，已使用内置高帧率取景器', 'warn');
-            });
+      document.getElementById('btnTopTimer').addEventListener('click', function() {
+        state.timerSec = state.timerSec === 0 ? 3 : (state.timerSec === 3 ? 5 : 0);
+        const badge = document.getElementById('timerBadgeText');
+        if (state.timerSec > 0) {
+          badge.textContent = String(state.timerSec);
+          badge.classList.remove('hidden');
         } else {
-          showToast('当前环境不支持摄像头调用，已使用内置取景器', 'warn');
+          badge.classList.add('hidden');
         }
+        showToast(state.timerSec > 0 ? ('已开启 ' + state.timerSec + ' 秒倒计时拍摄') : '已关闭倒计时');
       });
 
-      // Clicking watermark in viewfinder highlights the customizer panel
-      document.getElementById('liveWatermarkWrapper').addEventListener('click', function() {
-        const card = document.getElementById('quickCustomizerCard');
-        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        card.classList.add('ring-2', 'ring-blue-500');
-        setTimeout(() => card.classList.remove('ring-2', 'ring-blue-500'), 1200);
-        showToast('可在右侧/下方定制面板直接开关字段或修改地址备注', 'info');
+      document.getElementById('btnTopFlash').addEventListener('click', function() {
+        state.flashMode = (state.flashMode + 1) % 3;
+        const labels = ['关', '开', '自动'];
+        document.getElementById('flashBadgeText').textContent = labels[state.flashMode];
+        showToast('闪光灯：' + labels[state.flashMode]);
+      });
+
+      document.getElementById('btnTopFlip').addEventListener('click', function() {
+        state.isFront = !state.isFront;
+        showToast(state.isFront ? '已切换至前置镜头' : '已切换至后置镜头');
+      });
+
+      // Zoom button
+      document.getElementById('btnZoomCircle').addEventListener('click', function() {
+        state.zoom = state.zoom === 1.0 ? 1.5 : (state.zoom === 1.5 ? 2.0 : 1.0);
+        this.textContent = state.zoom.toFixed(1) + 'X';
       });
 
       // Shutter button
-      document.getElementById('btnShutter').addEventListener('click', triggerShutter);
-
-      // Quick actions below viewfinder
-      document.getElementById('btnLastPhotoQuick').addEventListener('click', function() {
-        if (state.photos.length > 0) {
-          openAmapJumpModal(state.photos[0]);
+      document.getElementById('btnShutterMain').addEventListener('click', function() {
+        if (state.timerSec > 0) {
+          const ov = document.getElementById('countdownOverlay');
+          const num = document.getElementById('countdownNumText');
+          let rem = state.timerSec;
+          ov.classList.remove('hidden');
+          num.textContent = String(rem);
+          const timer = setInterval(() => {
+            rem--;
+            if (rem <= 0) {
+              clearInterval(timer);
+              ov.classList.add('hidden');
+              capturePhotoNow();
+            } else {
+              num.textContent = String(rem);
+            }
+          }, 1000);
+        } else {
+          capturePhotoNow();
         }
       });
 
-      document.getElementById('btnQuickSwitchCoordSys').addEventListener('click', function() {
-        state.wmConfig.coordSystem = state.wmConfig.coordSystem === 'GCJ-02' ? 'WGS-84' : 'GCJ-02';
-        document.getElementById('selectCoordSystem').value = state.wmConfig.coordSystem;
-        document.getElementById('settingDefaultCoordSys').value = state.wmConfig.coordSystem;
-        updateLiveWatermarkPreview();
-        showToast('水印显示坐标系已切换为：' + state.wmConfig.coordSystem, 'info');
+      // Bottom Bar Controls
+      document.getElementById('btnBottomGallery').addEventListener('click', function() {
+        renderGalleryScreen();
+        document.getElementById('screenGallery').classList.remove('hidden');
+        document.getElementById('screenGallery').classList.add('flex');
+      });
+      document.getElementById('btnGalleryBack').addEventListener('click', function() {
+        document.getElementById('screenGallery').classList.add('hidden');
+        document.getElementById('screenGallery').classList.remove('flex');
       });
 
-      document.getElementById('btnQuickAmapCurrent').addEventListener('click', function() {
-        openAmapJumpModal({
-          watermarkData: {
-            gcjLat: state.currentGcjLat,
-            gcjLon: state.currentGcjLon,
-            wgsLat: state.currentWgsLat,
-            wgsLon: state.currentWgsLon,
-            address: state.wmConfig.address,
-            note: state.wmConfig.note
-          }
+      document.getElementById('btnBottomLocation').addEventListener('click', () => {
+        document.getElementById('modalLocation').classList.remove('hidden');
+      });
+      document.getElementById('btnGpsPill').addEventListener('click', () => {
+        document.getElementById('modalLocation').classList.remove('hidden');
+      });
+      document.getElementById('btnCloseLocationModal').addEventListener('click', () => {
+        document.getElementById('modalLocation').classList.add('hidden');
+      });
+
+      document.getElementById('btnSaveLocationModal').addEventListener('click', () => {
+        state.shortPoi = document.getElementById('inputShortPoi').value || '实拍点位';
+        state.fullAddr = document.getElementById('inputFullAddr').value || '';
+        const newLat = parseFloat(document.getElementById('inputManualLat').value);
+        const newLon = parseFloat(document.getElementById('inputManualLon').value);
+        if (!isNaN(newLat) && !isNaN(newLon)) {
+          state.gcjLat = Number(newLat.toFixed(6));
+          state.gcjLon = Number(newLon.toFixed(6));
+          const wgs = gcj02ToWgs84(state.gcjLat, state.gcjLon);
+          state.wgsLat = wgs.lat;
+          state.wgsLon = wgs.lon;
+        }
+        updateLiveOverlay();
+        document.getElementById('modalLocation').classList.add('hidden');
+        showToast('已更新当前地点与高德坐标');
+      });
+
+      document.getElementById('btnRequestRealGps').addEventListener('click', () => {
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(pos => {
+            state.wgsLat = Number(pos.coords.latitude.toFixed(6));
+            state.wgsLon = Number(pos.coords.longitude.toFixed(6));
+            const gcj = wgs84ToGcj02(state.wgsLat, state.wgsLon);
+            state.gcjLat = gcj.lat;
+            state.gcjLon = gcj.lon;
+            state.accuracy = pos.coords.accuracy || 2.5;
+            document.getElementById('inputManualLat').value = state.gcjLat;
+            document.getElementById('inputManualLon').value = state.gcjLon;
+            document.getElementById('locModalGcj').textContent = state.gcjLat + ', ' + state.gcjLon;
+            document.getElementById('locModalWgs').textContent = state.wgsLat + ', ' + state.wgsLon;
+            updateLiveOverlay();
+            showToast('成功锁定手机真实GPS并对齐高德GCJ-02！');
+          }, () => {
+            showToast('未获取到浏览器定位授权，已保持当前精准坐标');
+          }, { enableHighAccuracy: true, timeout: 5000 });
+        }
+      });
+
+      // Filter strip
+      document.getElementById('btnBottomFilter').addEventListener('click', () => {
+        document.getElementById('filterBarStrip').classList.toggle('hidden');
+      });
+      document.querySelectorAll('.filter-chip').forEach(btn => {
+        btn.addEventListener('click', function() {
+          state.filterIdx = parseInt(this.getAttribute('data-filter'), 10);
+          document.querySelectorAll('.filter-chip').forEach(b => {
+            b.className = 'filter-chip px-3 py-1 rounded-full text-xs text-neutral-300 bg-neutral-800';
+          });
+          this.className = 'filter-chip px-3 py-1 rounded-full text-xs font-semibold bg-sky-600 text-white';
+          const ov = document.getElementById('liveFilterOverlay');
+          const classes = ['', 'bg-sky-500/10', 'bg-amber-500/15', 'bg-cyan-500/15', 'backdrop-grayscale'];
+          ov.className = 'pointer-events-none absolute inset-0 transition-all duration-200 ' + (classes[state.filterIdx] || '');
         });
       });
 
-      document.getElementById('btnCopyLiveCoords').addEventListener('click', function() {
-        const isWgs = state.wmConfig.coordSystem === 'WGS-84';
-        const lat = isWgs ? state.currentWgsLat : state.currentGcjLat;
-        const lon = isWgs ? state.currentWgsLon : state.currentGcjLon;
-        copyTextSafe(lon.toFixed(6) + ',' + lat.toFixed(6), state.wmConfig.coordSystem + ' 经纬度');
+      // Open Watermark Customizer (for live viewfinder)
+      function openWmCustomizer(targetPhoto) {
+        state.editingTargetPhotoId = targetPhoto ? targetPhoto.id : null;
+        document.getElementById('wmModalTitle').textContent = targetPhoto
+          ? '✎ 无损重绘已拍照片水印 (图层分离)'
+          : '🎨 水印模板与字段定制';
+        const row = document.getElementById('wmEditCoordRow');
+        if (targetPhoto) {
+          row.classList.remove('hidden');
+          row.classList.add('grid');
+          document.getElementById('wmSelectStyle').value = String(targetPhoto.cfg.styleTemplate);
+          document.getElementById('wmSelectCoordSys').value = targetPhoto.cfg.coordSys;
+          document.getElementById('wmInputPoi').value = targetPhoto.cfg.shortPoi;
+          document.getElementById('wmSelectDms').value = targetPhoto.cfg.coordFmt;
+          document.getElementById('wmEditLat').value = targetPhoto.cfg.gcjLat;
+          document.getElementById('wmEditLon').value = targetPhoto.cfg.gcjLon;
+          document.getElementById('wmInputNote').value = targetPhoto.cfg.note;
+        } else {
+          row.classList.add('hidden');
+          row.classList.remove('grid');
+          document.getElementById('wmSelectStyle').value = String(state.styleTemplate);
+          document.getElementById('wmSelectCoordSys').value = state.coordSys;
+          document.getElementById('wmInputPoi').value = state.shortPoi;
+          document.getElementById('wmSelectDms').value = state.coordFmt;
+          document.getElementById('wmInputNote').value = state.note;
+        }
+        document.getElementById('modalWatermark').classList.remove('hidden');
+      }
+
+      document.getElementById('btnBottomWatermark').addEventListener('click', () => openWmCustomizer(null));
+      document.getElementById('liveWatermarkArea').addEventListener('click', () => openWmCustomizer(null));
+      document.getElementById('btnCloseWmModal').addEventListener('click', () => {
+        document.getElementById('modalWatermark').classList.add('hidden');
       });
 
-      // Live customizer controls
-      document.getElementById('selectCoordSystem').addEventListener('change', function() {
-        state.wmConfig.coordSystem = this.value;
-        document.getElementById('settingDefaultCoordSys').value = this.value;
-        updateLiveWatermarkPreview();
-      });
-      document.getElementById('selectCoordFormat').addEventListener('change', function() {
-        state.wmConfig.coordFormat = this.value;
-        updateLiveWatermarkPreview();
-      });
-      document.getElementById('inputLiveAddress').addEventListener('input', function() {
-        state.wmConfig.address = this.value;
-        updateLiveWatermarkPreview();
-      });
-      document.getElementById('inputLiveNote').addEventListener('input', function() {
-        state.wmConfig.note = this.value;
-        updateLiveWatermarkPreview();
+      document.getElementById('btnGalleryEditWm').addEventListener('click', function() {
+        const selected = state.photos.find(p => p.id === state.selectedPhotoId);
+        if (selected) openWmCustomizer(selected);
       });
 
-      const checkboxBindings = [
-        ['chkShowCoords', 'showCoords'],
-        ['chkShowCoordTag', 'showCoordTag'],
-        ['chkShowAccuracy', 'showAccuracy'],
-        ['chkShowAddress', 'showAddress'],
-        ['chkShowTime', 'showTime'],
-        ['chkShowNote', 'showNote']
-      ];
-      checkboxBindings.forEach(([id, key]) => {
-        document.getElementById(id).addEventListener('change', function() {
-          state.wmConfig[key] = this.checked;
-          updateLiveWatermarkPreview();
-        });
-      });
+      document.getElementById('btnApplyWmModal').addEventListener('click', function() {
+        const tpl = parseInt(document.getElementById('wmSelectStyle').value, 10);
+        const sys = document.getElementById('wmSelectCoordSys').value;
+        const poi = document.getElementById('wmInputPoi').value || '实拍点位';
+        const fmt = document.getElementById('wmSelectDms').value;
+        const note = document.getElementById('wmInputNote').value;
+        const sTime = document.getElementById('wmChkTime').checked;
+        const sLoc = document.getElementById('wmChkLoc').checked;
+        const sCoords = document.getElementById('wmChkCoords').checked;
+        const sNote = document.getElementById('wmChkNote').checked;
 
-      document.getElementById('selectWmCorner').addEventListener('change', function() {
-        state.wmConfig.corner = this.value;
-        updateLiveWatermarkPreview();
-      });
-      document.getElementById('selectWmFontSize').addEventListener('change', function() {
-        state.wmConfig.fontSize = this.value;
-        updateLiveWatermarkPreview();
-      });
-      document.getElementById('rangeWmOpacity').addEventListener('input', function() {
-        state.wmConfig.opacity = parseInt(this.value, 10);
-        document.getElementById('lblWmOpacity').textContent = this.value + '%';
-        updateLiveWatermarkPreview();
-      });
+        if (state.editingTargetPhotoId) {
+          const target = state.photos.find(p => p.id === state.editingTargetPhotoId);
+          if (target) {
+            const newLat = parseFloat(document.getElementById('wmEditLat').value) || target.cfg.gcjLat;
+            const newLon = parseFloat(document.getElementById('wmEditLon').value) || target.cfg.gcjLon;
+            const wgs = gcj02ToWgs84(newLat, newLon);
+            target.cfg.styleTemplate = tpl;
+            target.cfg.coordSys = sys;
+            target.cfg.shortPoi = poi;
+            target.cfg.coordFmt = fmt;
+            target.cfg.gcjLat = Number(newLat.toFixed(6));
+            target.cfg.gcjLon = Number(newLon.toFixed(6));
+            target.cfg.wgsLat = wgs.lat;
+            target.cfg.wgsLon = wgs.lon;
+            target.cfg.note = note;
+            target.cfg.showTime = sTime;
+            target.cfg.showLoc = sLoc;
+            target.cfg.showCoords = sCoords;
+            target.cfg.showNote = sNote;
 
-      // Import external photo with EXIF GPS parsing
-      document.getElementById('inputImportPhoto').addEventListener('change', function(e) {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-        const readerBuf = new FileReader();
-        readerBuf.onload = function(bufEvt) {
-          const exifCoords = parseJpegExifGps(bufEvt.target.result);
-          const readerUrl = new FileReader();
-          readerUrl.onload = function(urlEvt) {
-            const cleanDataUrl = urlEvt.target.result;
-            let gcjLat = state.currentGcjLat;
-            let gcjLon = state.currentGcjLon;
-            let wgsLat = state.currentWgsLat;
-            let wgsLon = state.currentWgsLon;
-            let tag = '系统相册导入 (已赋当前高精定位)';
-
-            if (exifCoords) {
-              wgsLat = exifCoords.wgsLat;
-              wgsLon = exifCoords.wgsLon;
-              const converted = wgs84ToGcj02(wgsLat, wgsLon);
-              gcjLat = converted.lat;
-              gcjLon = converted.lon;
-              tag = '系统相册EXIF导入 (WGS84已纠偏为GCJ02)';
-              showToast('成功提取照片EXIF原始GPS，并已自动纠偏为高德GCJ-02坐标！', 'success');
-            } else {
-              showToast('该照片不含EXIF定位，已自动绑定当前高德坐标（可在「改水印」中微调）', 'info');
-            }
-
-            const wmSnapshot = {
-              coordSystem: state.wmConfig.coordSystem,
-              coordFormat: state.wmConfig.coordFormat,
-              gcjLat: gcjLat,
-              gcjLon: gcjLon,
-              wgsLat: wgsLat,
-              wgsLon: wgsLon,
-              accuracy: 3.0,
-              address: exifCoords ? ('EXIF解析点位 (' + gcjLat.toFixed(4) + '°N, ' + gcjLon.toFixed(4) + '°E)') : state.wmConfig.address,
-              timestamp: nowTimestampStr(),
-              note: '外部相册导入照片 · 支持无损修改水印',
-              showCoords: true,
-              showCoordTag: true,
-              showAccuracy: true,
-              showAddress: true,
-              showTime: true,
-              showNote: true,
-              corner: state.wmConfig.corner,
-              fontSize: state.wmConfig.fontSize,
-              opacity: state.wmConfig.opacity
-            };
-
-            compositeWatermarkOnCanvas(cleanDataUrl, wmSnapshot, function(compositedUrl) {
-              state.photos.unshift({
-                id: 'import_' + Date.now(),
-                sourceTag: tag,
-                cleanImageDataUrl: cleanDataUrl,
-                compositedDataUrl: compositedUrl,
-                originalCapture: {
-                  gcjLat: gcjLat,
-                  gcjLon: gcjLon,
-                  wgsLat: wgsLat,
-                  wgsLon: wgsLon,
-                  timestamp: wmSnapshot.timestamp
-                },
-                watermarkData: wmSnapshot
-              });
-              updateRecentPhotoBar();
-              renderGallery();
+            compositePhotoCanvas(target.cleanUrl, target.cfg, function(newWmUrl) {
+              target.wmUrl = newWmUrl;
+              renderGalleryScreen();
+              document.getElementById('bottomGalleryThumb').src = state.photos[0].wmUrl;
+              document.getElementById('modalWatermark').classList.add('hidden');
+              showToast('已基于无水印底图无损重绘，高德跳转坐标已同步更新！');
             });
+            return;
+          }
+        }
+
+        state.styleTemplate = tpl;
+        state.coordSys = sys;
+        state.shortPoi = poi;
+        state.coordFmt = fmt;
+        state.note = note;
+        state.showTime = sTime;
+        state.showLoc = sLoc;
+        state.showCoords = sCoords;
+        state.showNote = sNote;
+        updateLiveOverlay();
+        document.getElementById('modalWatermark').classList.add('hidden');
+        showToast('水印设置已实时生效');
+      });
+
+      // Copy & Download in Gallery
+      document.getElementById('btnGalleryCopyCoord').addEventListener('click', function() {
+        const selected = state.photos.find(p => p.id === state.selectedPhotoId);
+        if (!selected) return;
+        const txt = selected.cfg.gcjLon.toFixed(6) + ',' + selected.cfg.gcjLat.toFixed(6);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(txt);
+        }
+        showToast('已复制高德坐标: ' + txt);
+      });
+
+      document.getElementById('btnGalleryDownload').addEventListener('click', function() {
+        const selected = state.photos.find(p => p.id === state.selectedPhotoId);
+        if (!selected) return;
+        const a = document.createElement('a');
+        a.href = selected.wmUrl;
+        a.download = '高德经纬水印_' + selected.cfg.shortPoi + '.jpg';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        showToast('已导出高清水印照片');
+      });
+
+      // Import external photo in Gallery
+      document.getElementById('inputImportExifPhoto').addEventListener('change', function(e) {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+          const cleanUrl = evt.target.result;
+          const t = getNowTimeParts();
+          const cfg = {
+            styleTemplate: state.styleTemplate,
+            coordSys: state.coordSys,
+            coordFmt: state.coordFmt,
+            gcjLat: state.gcjLat,
+            gcjLon: state.gcjLon,
+            wgsLat: state.wgsLat,
+            wgsLon: state.wgsLon,
+            origGcjLat: state.gcjLat,
+            origGcjLon: state.gcjLon,
+            accuracy: 2.8,
+            shortPoi: state.shortPoi,
+            fullAddr: state.fullAddr,
+            hm: t.hm,
+            dateWeek: t.dateWeek,
+            fullTs: t.fullTs,
+            note: '相册导入照片 · 已自动对齐高德GCJ-02',
+            showTime: true,
+            showLoc: true,
+            showCoords: true,
+            showNote: true
           };
-          readerUrl.readAsDataURL(file);
+          compositePhotoCanvas(cleanUrl, cfg, function(wmUrl) {
+            const entry = {
+              id: 'imp_' + Date.now(),
+              cleanUrl: cleanUrl,
+              wmUrl: wmUrl,
+              cfg: cfg
+            };
+            state.photos.unshift(entry);
+            state.selectedPhotoId = entry.id;
+            renderGalleryScreen();
+            showToast('已导入相册照片并对齐高德GCJ-02坐标');
+          });
         };
-        readerBuf.readAsArrayBuffer(file);
+        reader.readAsDataURL(f);
         this.value = '';
       });
 
-      // Edit Watermark Modal bindings
-      const editInputs = [
-        'editCoordSys', 'editCoordFormat', 'editGcjLat', 'editGcjLon',
-        'editAddress', 'editTimestamp', 'editNote', 'editCorner', 'editFontSize',
-        'editChkCoords', 'editChkAddress', 'editChkTime', 'editChkNote', 'editChkTag', 'editChkAcc'
-      ];
-      editInputs.forEach(id => {
-        document.getElementById(id).addEventListener('input', refreshEditModalLivePreview);
-        document.getElementById(id).addEventListener('change', refreshEditModalLivePreview);
+      // Toggle hardware camera in settings
+      document.getElementById('btnToggleHardwareCam').addEventListener('click', function() {
+        const video = document.getElementById('cameraVideo');
+        const canvas = document.getElementById('viewfinderCanvas');
+        if (!state.usingRealCam && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+            .then(stream => {
+              state.stream = stream;
+              video.srcObject = stream;
+              state.usingRealCam = true;
+              video.classList.remove('hidden');
+              canvas.classList.add('hidden');
+              this.textContent = '已开启摄像头';
+              showToast('手机光学摄像头已启用');
+            })
+            .catch(() => showToast('未授予摄像头权限，已使用实景模拟取景'));
+        }
       });
-
-      document.getElementById('btnRestoreOrigCoords').addEventListener('click', function() {
-        const photo = state.photos.find(p => p.id === state.editingPhotoId);
-        if (!photo) return;
-        document.getElementById('editGcjLat').value = photo.originalCapture.gcjLat;
-        document.getElementById('editGcjLon').value = photo.originalCapture.gcjLon;
-        refreshEditModalLivePreview();
-        showToast('已恢复拍摄瞬间的原始实拍坐标！', 'info');
-      });
-
-      document.getElementById('btnCloseEditModal').addEventListener('click', () => {
-        document.getElementById('modalEditWatermark').classList.add('hidden');
-      });
-      document.getElementById('btnCancelEditModal').addEventListener('click', () => {
-        document.getElementById('modalEditWatermark').classList.add('hidden');
-      });
-      document.getElementById('btnSaveEditModal').addEventListener('click', function() {
-        const photo = state.photos.find(p => p.id === state.editingPhotoId);
-        if (!photo) return;
-        const newWm = buildDraftWatermarkFromEditModal(photo);
-        compositeWatermarkOnCanvas(photo.cleanImageDataUrl, newWm, function(newCompositedUrl) {
-          photo.watermarkData = newWm;
-          photo.compositedDataUrl = newCompositedUrl;
-          updateRecentPhotoBar();
-          renderGallery();
-          document.getElementById('modalEditWatermark').classList.add('hidden');
-          showToast('已基于干净底图无损重绘水印，高德跳转坐标已同步更新！', 'success');
-        });
-      });
-
-      // Close Amap Modal
-      document.getElementById('btnCloseAmapModal').addEventListener('click', () => {
-        document.getElementById('modalAmapJump').classList.add('hidden');
-      });
-
-      // Settings tab bindings
-      document.getElementById('settingDefaultCoordSys').addEventListener('change', function() {
-        state.wmConfig.coordSystem = this.value;
-        document.getElementById('selectCoordSystem').value = this.value;
-        updateLiveWatermarkPreview();
-        showToast('默认水印坐标系已设为：' + this.value, 'info');
-      });
-      document.getElementById('settingAsyncOptimal').addEventListener('change', function() {
-        state.settings.asyncOptimal = this.checked;
-      });
-      document.getElementById('settingAccuracyThreshold').addEventListener('input', function() {
-        state.settings.accuracyThreshold = parseInt(this.value, 10);
-        document.getElementById('lblAccuracyThreshold').textContent = this.value + 'm';
-        updateGpsStatusIndicator();
-      });
-      document.getElementById('settingKeepCleanExport').addEventListener('change', function() {
-        state.settings.keepCleanExport = this.checked;
-      });
-
-      document.getElementById('btnLabConvert').addEventListener('click', runLabConversion);
     });
   </script>
 </body>
