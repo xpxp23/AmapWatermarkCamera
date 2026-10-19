@@ -53,7 +53,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
@@ -61,7 +60,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -84,6 +84,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -126,25 +127,63 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
-    val prefs = remember { context.getSharedPreferences("amap_wm_prefs_v3", Context.MODE_PRIVATE) }
+    val prefs = remember { context.getSharedPreferences("amap_wm_prefs_v4", Context.MODE_PRIVATE) }
 
     // Live reactive GPS state
     val loc by locationManager.locationState
 
-    // Gravity sensor orientation listener (0 = Portrait, 90 = Right-Landscape, 180 = UpsideDown, 270 = Left-Landscape)
+    // Gravity sensor orientation listener with 15-degree hysteresis deadband (prevents jitter at diagonal angles!)
+    // 0 = Portrait, 90 = Clockwise Right-Landscape (left side at top), 180 = UpsideDown, 270 = Counter-Clockwise Left-Landscape (right side at top)
     var deviceOrientation by remember { mutableStateOf(0) }
+    var continuousUiRotation by remember { mutableStateOf(0f) }
+
     DisposableEffect(context) {
         val listener = object : OrientationEventListener(context) {
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == ORIENTATION_UNKNOWN) return
-                val newOri = when {
-                    orientation >= 315 || orientation < 45 -> 0
-                    orientation in 45..134 -> 90
-                    orientation in 135..224 -> 180
-                    else -> 270
+                // Hysteresis deadband of 15 degrees around 45, 135, 225, 315
+                val current = deviceOrientation
+                val nextOri = when (current) {
+                    0 -> when {
+                        orientation in 60..120 -> 90
+                        orientation in 150..210 -> 180
+                        orientation in 240..300 -> 270
+                        else -> 0
+                    }
+                    90 -> when {
+                        orientation >= 330 || orientation <= 30 -> 0
+                        orientation in 150..210 -> 180
+                        orientation in 240..300 -> 270
+                        else -> 90
+                    }
+                    180 -> when {
+                        orientation >= 330 || orientation <= 30 -> 0
+                        orientation in 60..120 -> 90
+                        orientation in 240..300 -> 270
+                        else -> 180
+                    }
+                    else -> when {
+                        orientation >= 330 || orientation <= 30 -> 0
+                        orientation in 60..120 -> 90
+                        orientation in 150..210 -> 180
+                        else -> 270
+                    }
                 }
-                if (newOri != deviceOrientation) {
-                    deviceOrientation = newOri
+                if (nextOri != current) {
+                    deviceOrientation = nextOri
+                    // Compute shortest-arc target angle for UI icons:
+                    // When deviceOrientation == 270 (phone rotated CCW), icons on portrait screen must rotate +90f CW to stand upright!
+                    // When deviceOrientation == 90 (phone rotated CW), icons on portrait screen must rotate -90f CCW to stand upright!
+                    val desiredMod = when (nextOri) {
+                        90 -> -90f
+                        270 -> 90f
+                        180 -> 180f
+                        else -> 0f
+                    }
+                    var delta = (desiredMod - continuousUiRotation) % 360f
+                    if (delta > 180f) delta -= 360f
+                    if (delta < -180f) delta += 360f
+                    continuousUiRotation += delta
                 }
             }
         }
@@ -156,16 +195,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         }
     }
 
-    // Target UI icon rotation so icons always stand upright relative to gravity
-    val targetIconRotation = when (deviceOrientation) {
-        90 -> -90f
-        270 -> 90f
-        180 -> 180f
-        else -> 0f
-    }
     val uiIconRotation by animateFloatAsState(
-        targetValue = targetIconRotation,
-        animationSpec = tween(durationMillis = 260),
+        targetValue = continuousUiRotation,
+        animationSpec = tween(durationMillis = 280),
         label = "uiIconRotation"
     )
     val isLandscapeHold = (deviceOrientation == 90 || deviceOrientation == 270)
@@ -179,8 +211,8 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
 
     // Camera hardware states
     var isFrontCamera by remember { mutableStateOf(false) }
-    var flashMode by remember { mutableStateOf(0) } // 0: 关闭, 1: 开启, 2: 自动, 3: 常亮补光
-    var timerSeconds by remember { mutableStateOf(0) } // 0: 关闭, 3: 3秒, 5: 5秒, 10: 10秒
+    var flashMode by remember { mutableStateOf(0) } // 0: 关, 1: 开, 2: 自动, 3: 常亮
+    var timerSeconds by remember { mutableStateOf(0) } // 0: 关, 3: 3s, 5: 5s, 10: 10s
     var activeTopInlineMenu by remember { mutableStateOf(0) } // 0: None, 1: Timer inline menu, 2: Flash inline menu
     var countdownRemaining by remember { mutableStateOf(0) }
     var zoomRatio by remember { mutableStateOf(1.0f) }
@@ -202,7 +234,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     var customNote by remember { mutableStateOf(prefs.getString("customNote", "") ?: "") }
     var fontScale by remember { mutableStateOf(prefs.getFloat("fontScale", 1.0f)) }
     var accentColorIndex by remember { mutableStateOf(prefs.getInt("accentColorIndex", 0)) }
-    var bgAlpha by remember { mutableStateOf(prefs.getInt("bgAlpha", 180)) }
+    var bgAlpha by remember { mutableStateOf(prefs.getInt("bgAlpha", 185)) }
 
     var showTime by remember { mutableStateOf(prefs.getBoolean("showTime", true)) }
     var showLocation by remember { mutableStateOf(prefs.getBoolean("showLocation", true)) }
@@ -257,7 +289,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     var editingPhoto by remember { mutableStateOf<PhotoEntry?>(null) }
     var justCapturedPhoto by remember { mutableStateOf<PhotoEntry?>(null) }
 
-    // Persisted captured photos & system camera photos
+    // Persisted captured photos
     var photos by remember { mutableStateOf<List<PhotoEntry>>(emptyList()) }
     var latestThumbBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
@@ -277,7 +309,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         }
     }
 
-    // Update bottom-left circular thumbnail asynchronously whenever photos list changes
     LaunchedEffect(photos.firstOrNull()?.id, photos.firstOrNull()?.watermarkedFile?.lastModified()) {
         val firstFile = photos.firstOrNull()?.watermarkedFile
         if (firstFile != null) {
@@ -295,7 +326,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     var cameraRef by remember { mutableStateOf<Camera?>(null) }
     var imageCaptureRef by remember { mutableStateOf<ImageCapture?>(null) }
 
-    // Request permissions on launch (including ACCESS_MEDIA_LOCATION for reading system camera EXIF GPS!)
+    // Request permissions on launch
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -416,7 +447,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         }
     }
 
-    // Capture execution logic (supports Portrait & Landscape auto-rotation + DCIM/Camera storage)
+    // Capture execution logic (with exact optical rotation for 0°, 90°, 180°, 270°!)
     fun performCapture() {
         scope.launch {
             activeTopInlineMenu = 0
@@ -442,7 +473,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 delay(180L)
             }
 
-            // 1. Instant 0ms shutter visual feedback + grab clean WYSIWYG frame
             shutterFlashVisible = true
             val rawViewfinderBmp: Bitmap = previewViewRef?.bitmap ?: createFallbackBitmap()
             val captureOrientation = deviceOrientation
@@ -456,7 +486,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 shutterFlashVisible = false
             }
 
-            // 2. Fast non-blocking GPS convergence (capped at 450ms so continuous shooting never lags)
             val finalLoc = if (asyncOptimal && (!loc.hasRealFix || loc.accuracyMeters > accuracyThreshold)) {
                 asyncSamplingBanner = "正在锁定高精高德坐标..."
                 val best = locationManager.awaitOptimalLocation(accuracyThreshold.toFloat(), 450L)
@@ -498,15 +527,20 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 accentColorIndex = accentColorIndex
             )
 
-            // 3. Rotate bitmap to upright Landscape/Portrait based on gravity orientation, render watermark, and save to DCIM/Camera
+            // CRITICAL OPTICAL ROTATION FIX:
+            // - When deviceOrientation == 270 (phone rotated CCW, top points left), the real-world Sky is on the RIGHT edge (+X) of rawViewfinderBmp.
+            //   To move the Right edge (+X) to the Top (-Y) of the output photo, we MUST rotate by -90 degrees (CCW)!
+            // - When deviceOrientation == 90 (phone rotated CW, top points right), the real-world Sky is on the LEFT edge (-X) of rawViewfinderBmp.
+            //   To move the Left edge (-X) to the Top (-Y) of the output photo, we MUST rotate by +90 degrees (CW)!
+            // - When deviceOrientation == 180 (upside down), rotate by 180 degrees!
             val savedEntry = withContext(Dispatchers.IO) {
-                val rotDeg = when (captureOrientation) {
-                    90 -> -90
-                    270 -> 90
+                val bitmapRotDeg = when (captureOrientation) {
+                    270 -> -90
+                    90 -> 90
                     180 -> 180
                     else -> 0
                 }
-                val uprightCleanBmp = WatermarkRenderer.rotateBitmapIfNeeded(rawViewfinderBmp, rotDeg)
+                val uprightCleanBmp = WatermarkRenderer.rotateBitmapIfNeeded(rawViewfinderBmp, bitmapRotDeg)
                 WatermarkRenderer.saveNewPhotoEntry(
                     context = context,
                     cleanBitmap = uprightCleanBmp,
@@ -566,7 +600,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 .background(Color.Black),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. TOP BLACK TOOLBAR WITH INLINE NON-POPUP MENUS (User Request #3)
+            // 1. TOP BLACK TOOLBAR WITH SYMMETRIC CIRCULAR INLINE MENUS (Zero clipping in Landscape!)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -577,43 +611,42 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             ) {
                 when (activeTopInlineMenu) {
                     1 -> {
-                        // Inline Non-Popup Menu for Countdown Timer (关闭 / 3秒 / 5秒 / 10秒)
+                        // Symmetric Circular Inline Menu for Countdown Timer
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(Color(0xFF161F30))
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(Color(0xFF141D2E))
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.rotate(uiIconRotation)
+                            Box(
+                                modifier = Modifier.size(40.dp).rotate(uiIconRotation),
+                                contentAlignment = Alignment.Center
                             ) {
                                 TimerVectorIcon(seconds = timerSeconds)
-                                Text("倒计时", color = Color(0xFF94A3B8), fontSize = 12.sp)
                             }
-                            val timerOptions = listOf(0 to "关闭", 3 to "3秒", 5 to "5秒", 10 to "10秒")
-                            timerOptions.forEach { (sec, title) ->
+                            val timerOptions = listOf(0 to "关", 3 to "3s", 5 to "5s", 10 to "10s")
+                            timerOptions.forEach { (sec, shortLbl) ->
                                 val isSel = (timerSeconds == sec)
                                 Box(
                                     modifier = Modifier
+                                        .size(42.dp)
                                         .rotate(uiIconRotation)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(if (isSel) Color(0xFF0284C7) else Color.Transparent)
+                                        .clip(CircleShape)
+                                        .background(if (isSel) Color(0xFF0284C7) else Color(0xFF1E293B))
                                         .clickable {
                                             timerSeconds = sec
                                             activeTopInlineMenu = 0
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        },
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = title,
-                                        color = if (isSel) Color.White else Color(0xFFCBD5E1),
-                                        fontSize = 12.5.sp,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                        text = shortLbl,
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
                                     )
                                 }
                             }
@@ -621,46 +654,49 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     }
 
                     2 -> {
-                        // Inline Non-Popup Menu for Flash (关闭 / 开启 / 自动 / 常亮)
+                        // Symmetric Circular Inline Menu for Flash
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(Color(0xFF161F30))
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(Color(0xFF141D2E))
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val flashOptions = listOf(0 to "关闭", 1 to "开启", 2 to "自动", 3 to "常亮")
-                            flashOptions.forEach { (mode, title) ->
+                            Box(
+                                modifier = Modifier.size(40.dp).rotate(uiIconRotation),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FlashVectorIcon(statusText = "", active = flashMode != 0)
+                            }
+                            val flashOptions = listOf(0 to "关", 1 to "开", 2 to "自动", 3 to "常亮")
+                            flashOptions.forEach { (mode, shortLbl) ->
                                 val isSel = (flashMode == mode)
                                 Box(
                                     modifier = Modifier
+                                        .size(42.dp)
                                         .rotate(uiIconRotation)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(if (isSel) Color(0xFFF59E0B) else Color.Transparent)
+                                        .clip(CircleShape)
+                                        .background(if (isSel) Color(0xFFF59E0B) else Color(0xFF1E293B))
                                         .clickable {
                                             flashMode = mode
                                             activeTopInlineMenu = 0
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        },
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = title,
+                                        text = shortLbl,
                                         color = if (isSel) Color.Black else Color.White,
-                                        fontSize = 12.5.sp,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
                                     )
                                 }
-                            }
-                            TextButton(onClick = { activeTopInlineMenu = 0 }) {
-                                Text("收起", color = Color(0xFF94A3B8), fontSize = 12.sp)
                             }
                         }
                     }
 
                     else -> {
-                        // Standard Top Bar Icons (smoothly rotate with device orientation)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -735,9 +771,25 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         },
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(Unit) {
+                            .pointerInput(deviceOrientation) {
                                 detectTapGestures { tapOffset ->
                                     activeTopInlineMenu = 0
+                                    val w = size.width.toFloat()
+                                    val h = size.height.toFloat()
+
+                                    // Check if user tapped on the live watermark region in the current orientation:
+                                    val tappedWatermarkZone = when (deviceOrientation) {
+                                        270 -> tapOffset.x < w * 0.28f // Physical bottom is Left edge
+                                        90 -> tapOffset.x > w * 0.72f  // Physical bottom is Right edge
+                                        180 -> tapOffset.y < h * 0.25f // Physical bottom is Top edge
+                                        else -> tapOffset.y > h * 0.75f // Physical bottom is Bottom edge
+                                    }
+                                    if (tappedWatermarkZone) {
+                                        showWatermarkSheet = true
+                                        return@detectTapGestures
+                                    }
+
+                                    // Otherwise trigger CameraX Tap-to-Focus & Exposure
                                     focusPoint = tapOffset
                                     focusTriggerId++
                                     val pv = previewViewRef
@@ -801,10 +853,32 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     Box(modifier = Modifier.fillMaxSize().background(overlayColor))
                 }
 
-                // Top-Left GPS Status & Orientation Mode Pill
+                // 100% WYSIWYG LIVE WATERMARK OVERLAY (Uses the EXACT same Canvas renderer & optical matrix as the captured photo!)
+                WysiwygLiveWatermarkCanvas(
+                    deviceOrientation = deviceOrientation,
+                    styleTemplate = styleTemplate,
+                    customTitle = customTitle,
+                    coordSystem = coordSystem,
+                    useDms = useDms,
+                    loc = loc,
+                    customNote = customNote,
+                    showTime = showTime,
+                    showLocation = showLocation,
+                    showCoords = showCoords,
+                    showCoordTag = showCoordTag,
+                    showAccuracy = showAccuracy,
+                    showAddress = showAddress,
+                    showNote = showNote,
+                    bottomRight = bottomRight,
+                    bgAlpha = bgAlpha,
+                    fontScale = fontScale,
+                    accentColorIndex = accentColorIndex
+                )
+
+                // Compact GPS & Orientation Pill (docked cleanly at top-center in portrait, or top-right in landscape)
                 Row(
                     modifier = Modifier
-                        .align(Alignment.TopStart)
+                        .align(if (deviceOrientation == 270) Alignment.TopEnd else Alignment.TopStart)
                         .padding(12.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(Color(0x990F172A))
@@ -819,9 +893,14 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                             .clip(CircleShape)
                             .background(if (loc.hasRealFix) Color(0xFF34D399) else Color(0xFFFBBF24))
                     )
-                    val modeTag = if (isLandscapeHold) "横屏拍照" else "竖屏拍照"
+                    val modeTag = when (deviceOrientation) {
+                        270 -> "左横屏"
+                        90 -> "右横屏"
+                        180 -> "倒置竖屏"
+                        else -> "竖屏"
+                    }
                     Text(
-                        text = if (loc.hasRealFix) "$coordSystem · ±${String.format(Locale.US, "%.1fm", loc.accuracyMeters)} · $modeTag" else "卫星定位锁定中 · $modeTag",
+                        text = if (loc.hasRealFix) "$coordSystem · ±${String.format(Locale.US, "%.1fm", loc.accuracyMeters)} · $modeTag" else "GPS锁定中 · $modeTag",
                         color = Color.White,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
@@ -832,7 +911,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 justCapturedPhoto?.let { latest ->
                     Row(
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
+                            .align(if (deviceOrientation == 270) Alignment.BottomEnd else Alignment.TopEnd)
                             .padding(12.dp)
                             .clip(RoundedCornerShape(20.dp))
                             .background(Color(0xEE2563EB))
@@ -857,17 +936,17 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 asyncSamplingBanner?.let { msg ->
                     Box(
                         modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 44.dp)
+                            .align(Alignment.Center)
+                            .rotate(uiIconRotation)
                             .clip(RoundedCornerShape(20.dp))
                             .background(Color(0xE6F59E0B))
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
-                        Text(msg, color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(msg, color = Color.Black, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
-                // Tap-to-Focus Square Box + Exposure Sun Icon
+                // Tap-to-Focus Square Box + Exposure Sun Icon (rotates symmetrically with orientation!)
                 focusPoint?.let { pt ->
                     val density = LocalDensity.current
                     val boxSizeDp = 78.dp
@@ -880,6 +959,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                     (pt.y - boxPx / 2f).roundToInt()
                                 )
                             }
+                            .rotate(uiIconRotation)
                             .pointerInput(exposureRange) {
                                 detectVerticalDragGestures { _, dragAmount ->
                                     val step = if (dragAmount < -4f) 1 else if (dragAmount > 4f) -1 else 0
@@ -902,11 +982,11 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     }
                 }
 
-                // Right-Edge Floating Circular Zoom Button ("1.0X" - rotates smoothly in landscape!)
+                // Floating Circular Zoom Button ("1.0X" - moves to top-right when in 90° Right-Landscape so it never overlaps the right-edge watermark!)
                 Box(
                     modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 14.dp, top = 48.dp)
+                        .align(if (deviceOrientation == 90) Alignment.CenterStart else Alignment.CenterEnd)
+                        .padding(horizontal = 14.dp)
                         .size(46.dp)
                         .rotate(uiIconRotation)
                         .clip(CircleShape)
@@ -934,7 +1014,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     )
                 }
 
-                // Countdown big number overlay (rotates with device orientation)
+                // Countdown big number overlay
                 if (countdownRemaining > 0) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
@@ -948,27 +1028,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     }
                 }
 
-                // ISOLATED LIVE WATERMARK OVERLAY (Prevents 1-second full-screen recomposition jank & adapts to Landscape/Portrait!)
-                LiveWatermarkOverlayView(
-                    deviceOrientation = deviceOrientation,
-                    styleTemplate = styleTemplate,
-                    customTitle = customTitle,
-                    coordSystem = coordSystem,
-                    useDms = useDms,
-                    loc = loc,
-                    customNote = customNote,
-                    showTime = showTime,
-                    showLocation = showLocation,
-                    showCoords = showCoords,
-                    showCoordTag = showCoordTag,
-                    showAccuracy = showAccuracy,
-                    showAddress = showAddress,
-                    showNote = showNote,
-                    bottomRight = bottomRight,
-                    accentColorIndex = accentColorIndex,
-                    onClickWatermark = { showWatermarkSheet = true }
-                )
-
                 // Shutter White Flash Overlay
                 androidx.compose.animation.AnimatedVisibility(
                     visible = shutterFlashVisible,
@@ -980,7 +1039,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 }
             }
 
-            // Optional Live Filter Selector Bar
+            // Optional Live Filter Selector Bar (Circular buttons so rotating in landscape never clips!)
             if (showFilterStrip) {
                 Row(
                     modifier = Modifier
@@ -994,13 +1053,14 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         val selected = (idx == filterIndex)
                         Box(
                             modifier = Modifier
+                                .size(44.dp)
                                 .rotate(uiIconRotation)
-                                .clip(RoundedCornerShape(16.dp))
+                                .clip(CircleShape)
                                 .background(if (selected) Color(0xFF0284C7) else Color(0xFF1E293B))
-                                .clickable { filterIndex = idx }
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .clickable { filterIndex = idx },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(name, color = Color.White, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                            Text(name, color = Color.White, fontSize = 11.5.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
                 }
@@ -1016,7 +1076,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Item 1: 相册 (Downsampled cached circular thumbnail + Label)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
@@ -1052,7 +1111,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     Text("相册", color = Color.White, fontSize = 12.sp)
                 }
 
-                // Item 2: 地点
                 CameraBottomBarItem(
                     label = "地点",
                     rotationDegrees = uiIconRotation,
@@ -1061,7 +1119,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     PaperPlaneLocationIcon()
                 }
 
-                // Item 3: Center Big White Ring Shutter Button
                 Box(
                     modifier = Modifier
                         .size(76.dp)
@@ -1079,7 +1136,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     )
                 }
 
-                // Item 4: 滤镜
                 CameraBottomBarItem(
                     label = "滤镜",
                     active = showFilterStrip || filterIndex != 0,
@@ -1089,7 +1145,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     FilterRingsVectorIcon(active = filterIndex != 0)
                 }
 
-                // Item 5: 水印
                 CameraBottomBarItem(
                     label = "水印",
                     rotationDegrees = uiIconRotation,
@@ -1221,7 +1276,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         )
     }
 
-    // ==================== DIALOG 2: 5套专业水印样式与深度自定义面板 (User Request #4) ====================
+    // ==================== DIALOG 2: 5套专业水印样式与深度自定义面板 ====================
     if (showWatermarkSheet) {
         AlertDialog(
             onDismissRequest = { showWatermarkSheet = false },
@@ -1234,7 +1289,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("选择水印样式模板 (共 5 款专业布局)", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                    Text("选择水印样式模板 (预览与实拍 100% 同步)", color = Color(0xFF94A3B8), fontSize = 12.sp)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1281,7 +1336,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         )
                     }
 
-                    // Theme Accent Color & Font Scale
                     Text("主题点缀色与字号大小", color = Color(0xFF94A3B8), fontSize = 12.sp)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1306,9 +1360,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(0.85f to "小", 1.0f to "标准", 1.18f to "大").forEach { (sc, lbl) ->
+                            listOf(0.85f to "小", 1.0f to "标准", 1.15f to "大").forEach { (sc, lbl) ->
                                 FilterChip(
-                                    selected = kotlin.math.abs(fontScale - sc) < 0.05f,
+                                    selected = abs(fontScale - sc) < 0.05f,
                                     onClick = { fontScale = sc },
                                     label = { Text(lbl, fontSize = 11.sp) }
                                 )
@@ -1343,6 +1397,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     WatermarkToggleRow("显示实时定位误差 (±m)", showAccuracy) { showAccuracy = it }
                     WatermarkToggleRow("显示完整省市区街道地址", showAddress) { showAddress = it }
                     WatermarkToggleRow("显示自定义备注", showNote) { showNote = it }
+                    if (styleTemplate in listOf(1, 2, 4)) {
+                        WatermarkToggleRow("卡片靠右下角对齐", bottomRight) { bottomRight = it }
+                    }
                 }
             },
             confirmButton = {
@@ -1376,7 +1433,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         }
                     }
                     Text(
-                        "存储路径：与系统原相机完全一致（DCIM/Camera/IMG_yyyyMMdd_HHmmss.jpg）。\n横竖屏自适应：横握手机拍照时自动切换为横屏UI并合成横屏版水印。",
+                        "存储路径：与系统原相机完全一致（DCIM/Camera/IMG_yyyyMMdd_HHmmss.jpg）。\n四向重力自适应：支持竖屏、左横屏、右横屏、倒立竖屏四向光学对齐，预览与实拍 100% 一致。",
                         color = Color(0xFF94A3B8),
                         fontSize = 11.5.sp
                     )
@@ -1404,6 +1461,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         var editShowCoords by remember(target) { mutableStateOf(target.config.showCoords) }
         var editShowAddr by remember(target) { mutableStateOf(target.config.showAddress) }
         var editShowNote by remember(target) { mutableStateOf(target.config.showNote) }
+        var editBottomRight by remember(target) { mutableStateOf(target.config.bottomRight) }
 
         AlertDialog(
             onDismissRequest = { editingPhoto = null },
@@ -1520,6 +1578,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     WatermarkToggleRow("显示完整街道地址", editShowAddr) { editShowAddr = it }
                     WatermarkToggleRow("显示备注文字", editShowNote) { editShowNote = it }
                     WatermarkToggleRow("使用度分秒 (DMS) 格式", editDms) { editDms = it }
+                    if (editTemplate in listOf(1, 2, 4)) {
+                        WatermarkToggleRow("靠右下角对齐", editBottomRight) { editBottomRight = it }
+                    }
                 }
             },
             confirmButton = {
@@ -1543,7 +1604,8 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         note = editNote,
                         showCoords = editShowCoords,
                         showAddress = editShowAddr,
-                        showNote = editShowNote
+                        showNote = editShowNote,
+                        bottomRight = editBottomRight
                     )
                     scope.launch {
                         withContext(Dispatchers.IO) {
@@ -1575,10 +1637,12 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
 }
 
 // ============================================================================
-// ISOLATED LIVE WATERMARK OVERLAY (Eliminates 1s full-screen recomposition & adapts to Landscape!)
+// 100% WYSIWYG LIVE WATERMARK OVERLAY CANVAS
+// Calls WatermarkRenderer.drawWatermarkOverlay() with the exact inverse optical
+// matrix of performCapture(), guaranteeing 0-pixel discrepancy in all 4 orientations!
 // ============================================================================
 @Composable
-fun BoxScope.LiveWatermarkOverlayView(
+fun WysiwygLiveWatermarkCanvas(
     deviceOrientation: Int,
     styleTemplate: Int,
     customTitle: String,
@@ -1594,8 +1658,9 @@ fun BoxScope.LiveWatermarkOverlayView(
     showAddress: Boolean,
     showNote: Boolean,
     bottomRight: Boolean,
-    accentColorIndex: Int,
-    onClickWatermark: () -> Unit
+    bgAlpha: Int,
+    fontScale: Float,
+    accentColorIndex: Int
 ) {
     var timeTick by remember { mutableStateOf(WatermarkConfig.currentTimeStrings()) }
     LaunchedEffect(Unit) {
@@ -1606,203 +1671,88 @@ fun BoxScope.LiveWatermarkOverlayView(
     }
 
     val (liveHm, liveDateWeek, liveFullTs) = timeTick
-    val liveShownLat = if (coordSystem == "WGS-84") loc.wgsLat else loc.gcjLat
-    val liveShownLon = if (coordSystem == "WGS-84") loc.wgsLon else loc.gcjLon
-    val liveCoordStr = CoordinateConverter.formatCoordinate(liveShownLat, liveShownLon, useDms)
-    val liveSysTag = if (showCoordTag) " [$coordSystem]" else ""
-    val liveAccTag = if (showAccuracy) String.format(Locale.US, " ±%.1fm", loc.accuracyMeters) else ""
-    val fullCoordLine = "$liveCoordStr$liveSysTag$liveAccTag"
-
-    val accentComposeColor = when (accentColorIndex) {
-        1 -> Color(0xFF34D399)
-        2 -> Color(0xFFFBBF24)
-        3 -> Color(0xFFF87171)
-        else -> Color(0xFF38BDF8)
-    }
-
-    // When holding phone horizontally (90 or 270), rotate the watermark overlay and dock it to the physical bottom long edge!
-    val isLandscape = (deviceOrientation == 90 || deviceOrientation == 270)
-    val overlayAlignment = when (deviceOrientation) {
-        90 -> Alignment.CenterStart   // Right-side down: physical bottom is Left edge of portrait screen
-        270 -> Alignment.CenterEnd    // Left-side down: physical bottom is Right edge of portrait screen
-        else -> if (styleTemplate == 0 || styleTemplate == 3) Alignment.BottomCenter
-                else if (bottomRight) Alignment.BottomEnd else Alignment.BottomStart
-    }
-    val rotDeg = when (deviceOrientation) {
-        90 -> -90f
-        270 -> 90f
-        180 -> 180f
-        else -> 0f
-    }
-
-    Box(
-        modifier = Modifier
-            .align(overlayAlignment)
-            .padding(if (isLandscape) 8.dp else 0.dp)
-            .graphicsLayer { rotationZ = rotDeg }
-            .clickable { onClickWatermark() }
+    val liveCfg = remember(
+        styleTemplate, customTitle, coordSystem, useDms,
+        loc, customNote, liveHm, liveDateWeek, liveFullTs,
+        showTime, showLocation, showCoords, showCoordTag,
+        showAccuracy, showAddress, showNote, bottomRight,
+        bgAlpha, fontScale, accentColorIndex
     ) {
-        when (styleTemplate) {
-            0 -> {
-                // Style 0: 经典大字时间
-                Column(
-                    modifier = Modifier
-                        .widthIn(max = 380.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color(0x88000000))
-                            ),
-                            shape = RoundedCornerShape(14.dp)
-                        )
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    if (showTime) {
-                        Text(
-                            text = liveHm,
-                            color = Color.White,
-                            fontSize = if (isLandscape) 44.sp else 54.sp,
-                            fontWeight = FontWeight.Light,
-                            style = TextStyle(shadow = Shadow(Color(0xAA000000), Offset(0f, 3f), 8f))
-                        )
-                    }
-                    if (showTime || showLocation) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            if (showTime) {
-                                Text(
-                                    text = "$liveDateWeek ",
-                                    color = Color.White,
-                                    fontSize = 14.5.sp,
-                                    style = TextStyle(shadow = Shadow(Color(0xCC000000), Offset(0f, 2f), 6f))
-                                )
-                            }
-                            if (showLocation) {
-                                RedPinVectorIcon(modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text(
-                                    text = loc.shortPoi,
-                                    color = Color.White,
-                                    fontSize = 14.5.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = TextStyle(shadow = Shadow(Color(0xCC000000), Offset(0f, 2f), 6f))
-                                )
-                            }
-                        }
-                    }
-                    if (showCoords) {
-                        Spacer(modifier = Modifier.height(5.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0x990F172A))
-                                .padding(horizontal = 10.dp, vertical = 3.dp)
-                        ) {
-                            Text(
-                                text = fullCoordLine,
-                                color = accentComposeColor,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                    if (showAddress && loc.fullAddress.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = loc.fullAddress,
-                            color = Color(0xFFE2E8F0),
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    if (showNote && customNote.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = customNote,
-                            color = Color(0xFFFDE68A),
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
+        WatermarkConfig(
+            styleTemplate = styleTemplate,
+            customTitle = customTitle,
+            coordSystem = coordSystem,
+            useDms = useDms,
+            gcjLat = loc.gcjLat,
+            gcjLon = loc.gcjLon,
+            wgsLat = loc.wgsLat,
+            wgsLon = loc.wgsLon,
+            origGcjLat = loc.gcjLat,
+            origGcjLon = loc.gcjLon,
+            accuracyMeters = loc.accuracyMeters,
+            shortPoi = loc.shortPoi,
+            address = loc.fullAddress,
+            timeHm = liveHm,
+            dateWeek = liveDateWeek,
+            timestamp = liveFullTs,
+            note = customNote,
+            showTime = showTime,
+            showLocation = showLocation,
+            showCoords = showCoords,
+            showCoordTag = showCoordTag,
+            showAccuracy = showAccuracy,
+            showAddress = showAddress,
+            showNote = showNote,
+            bottomRight = bottomRight,
+            bgAlpha = bgAlpha,
+            fontScale = fontScale,
+            accentColorIndex = accentColorIndex
+        )
+    }
 
-            3 -> {
-                // Style 3: 极简胶片底栏
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xCC080C14))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("📍 ${loc.shortPoi}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
-                        Text(customNote.ifBlank { loc.fullAddress }, color = Color(0xFF94A3B8), fontSize = 10.5.sp, maxLines = 1)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(fullCoordLine, color = accentComposeColor, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 10.5.sp)
-                        Text(liveFullTs, color = Color(0xFFE2E8F0), fontFamily = FontFamily.Monospace, fontSize = 10.5.sp)
-                    }
-                }
-            }
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val viewW = size.width.roundToInt()
+        val viewH = size.height.roundToInt()
+        if (viewW <= 0 || viewH <= 0) return@Canvas
 
-            else -> {
-                // Style 1 (工程巡检卡片), Style 2 (经纬网格测绘), Style 4 (外业标准台账)
-                Box(
-                    modifier = Modifier
-                        .padding(14.dp)
-                        .widthIn(max = 330.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xC80F172A))
-                        .border(1.dp, accentComposeColor.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
-                        .padding(12.dp)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Box(modifier = Modifier.width(4.dp).height(14.dp).background(accentComposeColor))
-                            Text(
-                                text = "${customTitle.ifBlank { WatermarkRenderer.STYLE_NAMES.getOrElse(styleTemplate) { "经纬水印" } }} · $coordSystem",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                        }
-                        if (showCoords) {
-                            Text(
-                                text = "经纬：$fullCoordLine",
-                                color = accentComposeColor,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        if (showLocation) {
-                            val addrPart = if (showAddress && loc.fullAddress.isNotBlank()) "${loc.shortPoi} (${loc.fullAddress})" else loc.shortPoi
-                            Text("地点：$addrPart", color = Color.White, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        if (showTime) {
-                            Text("时间：$liveFullTs", color = Color(0xFFE2E8F0), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                        }
-                        if (showNote && customNote.isNotBlank()) {
-                            Text("备注：$customNote", color = Color(0xFFFDE68A), fontSize = 11.sp, maxLines = 1)
-                        }
-                    }
+        drawIntoCanvas { composeCanvas ->
+            val nativeCanvas = composeCanvas.nativeCanvas
+            nativeCanvas.save()
+            when (deviceOrientation) {
+                270 -> {
+                    // Phone rotated 90° CCW (Left-Landscape: top of phone is on the left, shutter bar is on the right).
+                    // Real-world Sky is at x = viewW (Right edge), Ground is at x = 0 (Left edge).
+                    // Virtual upright landscape canvas has width = viewH, height = viewW.
+                    nativeCanvas.translate(viewW.toFloat(), 0f)
+                    nativeCanvas.rotate(90f)
+                    WatermarkRenderer.drawWatermarkOverlay(nativeCanvas, viewH, viewW, liveCfg)
+                }
+                90 -> {
+                    // Phone rotated 90° CW (Right-Landscape: top of phone is on the right, shutter bar is on the left).
+                    // Real-world Sky is at x = 0 (Left edge), Ground is at x = viewW (Right edge).
+                    // Virtual upright landscape canvas has width = viewH, height = viewW.
+                    nativeCanvas.translate(0f, viewH.toFloat())
+                    nativeCanvas.rotate(-90f)
+                    WatermarkRenderer.drawWatermarkOverlay(nativeCanvas, viewH, viewW, liveCfg)
+                }
+                180 -> {
+                    // Upside-down portrait
+                    nativeCanvas.translate(viewW.toFloat(), viewH.toFloat())
+                    nativeCanvas.rotate(180f)
+                    WatermarkRenderer.drawWatermarkOverlay(nativeCanvas, viewW, viewH, liveCfg)
+                }
+                else -> {
+                    // Normal portrait
+                    WatermarkRenderer.drawWatermarkOverlay(nativeCanvas, viewW, viewH, liveCfg)
                 }
             }
+            nativeCanvas.restore()
         }
     }
 }
 
 // ============================================================================
-// DUAL-MODE GALLERY: APP WATERMARK PHOTOS + SYSTEM CAMERA EXIF SCANNER (User Request #6)
+// DUAL-MODE GALLERY: APP WATERMARK PHOTOS + SYSTEM CAMERA EXIF SCANNER
 // ============================================================================
 @Composable
 fun GalleryAndSystemPhotosScreen(
@@ -1816,12 +1766,11 @@ fun GalleryAndSystemPhotosScreen(
     onDeletePhoto: (PhotoEntry) -> Unit
 ) {
     val context = LocalContext.current
-    var galleryTab by remember { mutableStateOf(0) } // 0: 本App实拍/已加水印, 1: 手机原相机照片(识别EXIF秒跳高德)
+    var galleryTab by remember { mutableStateOf(0) }
     var systemPhotos by remember { mutableStateOf<List<SystemCameraPhoto>>(emptyList()) }
     var selectedSysPhoto by remember { mutableStateOf<SystemCameraPhoto?>(null) }
     var isScanningSys by remember { mutableStateOf(false) }
 
-    // Scan system camera photos when switching to Tab 1
     LaunchedEffect(galleryTab) {
         if (galleryTab == 1) {
             isScanningSys = true
@@ -1841,7 +1790,6 @@ fun GalleryAndSystemPhotosScreen(
             .fillMaxSize()
             .background(Color(0xFF090D16))
     ) {
-        // Top Header Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1884,14 +1832,13 @@ fun GalleryAndSystemPhotosScreen(
         }
 
         if (galleryTab == 0) {
-            // ==================== TAB 0: APP WATERMARKED PHOTOS ====================
             if (appPhotos.isEmpty() || selectedPhoto == null) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
                     Text("暂无水印实拍照片", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
@@ -2038,7 +1985,6 @@ fun GalleryAndSystemPhotosScreen(
                 }
             }
 
-            // Downsampled LruCache Thumbnail Strip (Zero scroll jank!)
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2077,7 +2023,6 @@ fun GalleryAndSystemPhotosScreen(
                 }
             }
         } else {
-            // ==================== TAB 1: SYSTEM NATIVE CAMERA EXIF SCANNER (User Request #6) ====================
             if (isScanningSys) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("正在扫描手机系统相册照片并提取EXIF经纬度...", color = Color.White, fontSize = 14.sp)
@@ -2410,12 +2355,14 @@ fun FlashVectorIcon(statusText: String, active: Boolean) {
                 style = Stroke(width = 2.dp.toPx(), join = StrokeJoin.Round)
             )
         }
-        Text(
-            text = statusText,
-            color = if (active) Color(0xFFFACC15) else Color.White,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.SemiBold
-        )
+        if (statusText.isNotEmpty()) {
+            Text(
+                text = statusText,
+                color = if (active) Color(0xFFFACC15) else Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
     }
 }
 
@@ -2534,8 +2481,8 @@ fun WatermarkStampVectorIcon() {
         )
         drawLine(Color.White, Offset(w * 0.26f, h * 0.36f), Offset(w * 0.74f, h * 0.36f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
         drawCircle(Color.White, radius = 1.6.dp.toPx(), center = Offset(w * 0.32f, h * 0.60f))
-        drawCircle(Color.White, radius = 1.6.dp.toPx(), center = Offset(w * 0.50f, h * 0.60f))
-        drawCircle(Color.White, radius = 1.6.dp.toPx(), center = Offset(w * 0.68f, h * 0.60f))
+        drawCircle(color = Color.White, radius = 1.6.dp.toPx(), center = Offset(w * 0.50f, h * 0.60f))
+        drawCircle(color = Color.White, radius = 1.6.dp.toPx(), center = Offset(w * 0.68f, h * 0.60f))
     }
 }
 

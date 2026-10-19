@@ -921,16 +921,32 @@
         });
       });
 
-      // Auto & Manual Landscape/Portrait Switching
+      // 4-Way Optical Orientation Switching (0: 竖屏, 270: 左横屏, 90: 右横屏)
+      state.deviceOri = 0;
       state.isLandscape = false;
       function applyOrientationMode(landscape) {
-        state.isLandscape = landscape;
-        document.getElementById('oriLabelText').textContent = landscape ? '横屏' : '竖屏';
+        if (typeof landscape === 'boolean') {
+          state.deviceOri = landscape ? 270 : 0;
+        } else {
+          state.deviceOri = state.deviceOri === 0 ? 270 : (state.deviceOri === 270 ? 90 : 0);
+        }
+        state.isLandscape = (state.deviceOri === 270 || state.deviceOri === 90);
+        const oriNames = { 0: '竖屏', 270: '左横屏', 90: '右横屏' };
+        document.getElementById('oriLabelText').textContent = oriNames[state.deviceOri] || '竖屏';
+
         const wmArea = document.getElementById('liveWatermarkArea');
-        if (landscape) {
-          wmArea.style.transform = 'rotate(-90deg) scale(0.88)';
+        if (state.deviceOri === 270) {
+          // Left-Landscape: physical bottom is the LEFT edge of the portrait viewfinder!
+          wmArea.className = 'absolute left-0 top-1/2 z-20 p-3 cursor-pointer';
+          wmArea.style.transform = 'translate(-26%, -50%) rotate(90deg) scale(0.84)';
+          wmArea.style.transformOrigin = 'center center';
+        } else if (state.deviceOri === 90) {
+          // Right-Landscape: physical bottom is the RIGHT edge of the portrait viewfinder!
+          wmArea.className = 'absolute right-0 top-1/2 z-20 p-3 cursor-pointer';
+          wmArea.style.transform = 'translate(26%, -50%) rotate(-90deg) scale(0.84)';
           wmArea.style.transformOrigin = 'center center';
         } else {
+          wmArea.className = 'absolute inset-x-0 bottom-0 z-20 pt-10 pb-4 px-4 bg-gradient-to-t from-black/75 via-black/30 to-transparent cursor-pointer';
           wmArea.style.transform = 'none';
         }
         updateLiveOverlay();

@@ -23,18 +23,18 @@ import kotlin.math.min
 
 /**
  * Watermark configuration stored alongside each captured photo's clean base image.
- * Supports unlimited non-destructive re-rendering.
+ * Supports unlimited non-destructive re-rendering in both Portrait and Landscape.
  *
  * styleTemplate:
  *   0 = 经典大字时间 (Big centered time + Date/Weekday/📍POI + Lat/Lon pill)
- *   1 = 工程巡检卡片 (Structured translucent card with custom title & accent bar)
- *   2 = 经纬网格测绘 (GIS/Survey prominent coordinate header + 2-column grid)
- *   3 = 极简胶片底栏 (Full-width bottom dark cinema bar, zero scene obstruction)
- *   4 = 外业标准台账 (Bordered engineering table layout)
+ *   1 = 工程巡检卡片 (Structured glassmorphism card with custom title & accent bar)
+ *   2 = 经纬网格测绘 (GIS/Survey HUD coordinate banner + 2-column grid)
+ *   3 = 极简胶片底栏 (Full-width bottom cinema footer bar, zero scene obstruction)
+ *   4 = 外业标准台账 (Bordered engineering ledger table with strict cell clipping)
  */
 data class WatermarkConfig(
     var styleTemplate: Int = 0,
-    var customTitle: String = "高德精准经纬水印",
+    var customTitle: String = "现场点位核验",
     var coordSystem: String = "GCJ-02", // "GCJ-02" or "WGS-84"
     var useDms: Boolean = false,
     var gcjLat: Double = 39.908823,
@@ -59,8 +59,8 @@ data class WatermarkConfig(
     var showNote: Boolean = true,
     var bottomRight: Boolean = false,
     var filterIndex: Int = 0,
-    var bgAlpha: Int = 180,
-    var fontScale: Float = 1.0f, // 0.85f (小), 1.0f (标准), 1.18f (大)
+    var bgAlpha: Int = 185,
+    var fontScale: Float = 1.0f, // 0.85f (小), 1.0f (标准), 1.15f (大)
     var accentColorIndex: Int = 0, // 0: 天际蓝, 1: 翡翠绿, 2: 琥珀金, 3: 珊瑚红
     var mediaStoreUri: String = ""
 ) {
@@ -104,7 +104,7 @@ data class WatermarkConfig(
             val o = JSONObject(jsonStr)
             return WatermarkConfig(
                 styleTemplate = o.optInt("styleTemplate", 0),
-                customTitle = o.optString("customTitle", "高德精准经纬水印"),
+                customTitle = o.optString("customTitle", "现场点位核验"),
                 coordSystem = o.optString("coordSystem", "GCJ-02"),
                 useDms = o.optBoolean("useDms", false),
                 gcjLat = o.optDouble("gcjLat", 39.908823),
@@ -129,7 +129,7 @@ data class WatermarkConfig(
                 showNote = o.optBoolean("showNote", true),
                 bottomRight = o.optBoolean("bottomRight", false),
                 filterIndex = o.optInt("filterIndex", 0),
-                bgAlpha = o.optInt("bgAlpha", 180),
+                bgAlpha = o.optInt("bgAlpha", 185),
                 fontScale = o.optDouble("fontScale", 1.0).toFloat(),
                 accentColorIndex = o.optInt("accentColorIndex", 0),
                 mediaStoreUri = o.optString("mediaStoreUri", "")
@@ -154,9 +154,6 @@ data class PhotoEntry(
     var config: WatermarkConfig
 )
 
-/**
- * Represents a photo scanned directly from the phone's system camera (DCIM/Camera or MediaStore)
- */
 data class SystemCameraPhoto(
     val mediaId: Long,
     val contentUri: Uri,
@@ -170,9 +167,6 @@ data class SystemCameraPhoto(
     val labelText: String
 )
 
-/**
- * High-performance LruCache + downsampled Bitmap loader to eliminate gallery scroll jank & OOM
- */
 object BitmapCacheManager {
     private val maxMem = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     private val cache = object : LruCache<String, Bitmap>(maxMem / 8) {
@@ -274,8 +268,9 @@ object WatermarkRenderer {
     )
 
     fun rotateBitmapIfNeeded(source: Bitmap, rotationDegrees: Int): Bitmap {
-        if (rotationDegrees % 360 == 0) return source
-        val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+        val norm = ((rotationDegrees % 360) + 360) % 360
+        if (norm == 0) return source
+        val matrix = Matrix().apply { postRotate(norm.toFloat()) }
         return try {
             Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
         } catch (_: Exception) {
@@ -315,8 +310,7 @@ object WatermarkRenderer {
     }
 
     /**
-     * Render watermark (and optional color filter) onto clean base Bitmap without mutating the clean source.
-     * Automatically adapts typography scale to both Portrait and Landscape photos!
+     * Render watermark onto a clean Bitmap (used when saving photos or re-editing watermarks).
      */
     fun renderWatermarkedBitmap(cleanBitmap: Bitmap, cfg: WatermarkConfig): Bitmap {
         val out = Bitmap.createBitmap(cleanBitmap.width, cleanBitmap.height, Bitmap.Config.ARGB_8888)
@@ -328,18 +322,30 @@ object WatermarkRenderer {
         }
         canvas.drawBitmap(cleanBitmap, 0f, 0f, basePaint)
 
-        // Use min(width, height) so landscape photos (e.g. 1440x1080) keep proportional watermark sizing
-        val baseScale = (min(out.width, out.height) / 1080f) * cfg.fontScale.coerceIn(0.75f, 1.35f)
+        drawWatermarkOverlay(canvas, out.width, out.height, cfg)
+        return out
+    }
+
+    /**
+     * Shared 100% WYSIWYG Canvas Watermark Renderer!
+     * Called BOTH by the Live Camera Viewfinder (with orientation matrix applied)
+     * AND by renderWatermarkedBitmap() on capture!
+     * Guarantees zero discrepancy between live preview and captured photo in Portrait & Landscape!
+     */
+    fun drawWatermarkOverlay(canvas: Canvas, width: Int, height: Int, cfg: WatermarkConfig) {
+        val isLandscape = width > height
+        // In landscape (e.g. 1440x1080), scale slightly more compactly (0.86x) so vertical height is sleek
+        val orientFactor = if (isLandscape) 0.86f else 1.0f
+        val baseScale = (min(width, height) / 1080f) * orientFactor * cfg.fontScale.coerceIn(0.78f, 1.25f)
 
         when (cfg.styleTemplate) {
-            0 -> drawStyle0CenteredBigTime(canvas, out.width, out.height, baseScale, cfg)
-            1 -> drawStyle1EngineeringCard(canvas, out.width, out.height, baseScale, cfg)
-            2 -> drawStyle2GisSurveyGrid(canvas, out.width, out.height, baseScale, cfg)
-            3 -> drawStyle3MinimalistFilmBar(canvas, out.width, out.height, baseScale, cfg)
-            4 -> drawStyle4LedgerTable(canvas, out.width, out.height, baseScale, cfg)
-            else -> drawStyle0CenteredBigTime(canvas, out.width, out.height, baseScale, cfg)
+            0 -> drawStyle0CenteredBigTime(canvas, width, height, baseScale, isLandscape, cfg)
+            1 -> drawStyle1EngineeringCard(canvas, width, height, baseScale, isLandscape, cfg)
+            2 -> drawStyle2GisSurveyGrid(canvas, width, height, baseScale, isLandscape, cfg)
+            3 -> drawStyle3MinimalistFilmBar(canvas, width, height, baseScale, isLandscape, cfg)
+            4 -> drawStyle4LedgerTable(canvas, width, height, baseScale, isLandscape, cfg)
+            else -> drawStyle0CenteredBigTime(canvas, width, height, baseScale, isLandscape, cfg)
         }
-        return out
     }
 
     private fun buildCoordString(cfg: WatermarkConfig): String {
@@ -351,129 +357,172 @@ object WatermarkRenderer {
         return "$coordStr$sysTag$accTag"
     }
 
+    private fun ellipsizeToWidth(text: String, paint: Paint, maxWidth: Float): String {
+        if (text.isEmpty() || maxWidth <= 0f) return ""
+        if (paint.measureText(text) <= maxWidth) return text
+        val ellipsis = "..."
+        val ellW = paint.measureText(ellipsis)
+        var end = text.length
+        while (end > 1 && paint.measureText(text, 0, end) + ellW > maxWidth) {
+            end--
+        }
+        return text.substring(0, end) + ellipsis
+    }
+
     /**
-     * Style 0: 经典大字时间 (Centered Big Time + Date/Weekday/📍POI + Lat/Lon Pill)
+     * Style 0: 经典大字时间
+     * In Portrait: Stacked centered big time + Date/Weekday/📍POI + Frosted Coordinate Pill
+     * In Landscape: Compact vertical spacing with refined glass pill so it never crowds the center
      */
-    private fun drawStyle0CenteredBigTime(canvas: Canvas, width: Int, height: Int, scale: Float, cfg: WatermarkConfig) {
+    private fun drawStyle0CenteredBigTime(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        scale: Float,
+        isLandscape: Boolean,
+        cfg: WatermarkConfig
+    ) {
         val cx = width / 2f
         val fullCoordLine = buildCoordString(cfg)
+        val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
 
-        val scrimTop = height - 360f * scale
+        val scrimH = if (isLandscape) 270f * scale else 340f * scale
+        val scrimTop = height - scrimH
         val scrimPaint = Paint().apply {
             shader = LinearGradient(
                 0f, scrimTop, 0f, height.toFloat(),
-                Color.TRANSPARENT, Color.argb(125, 0, 0, 0),
+                Color.TRANSPARENT, Color.argb(135, 0, 0, 0),
                 Shader.TileMode.CLAMP
             )
         }
         canvas.drawRect(0f, scrimTop, width.toFloat(), height.toFloat(), scrimPaint)
 
-        var cursorBottomY = height - 38f * scale
+        var cursorBottomY = height - (if (isLandscape) 28f * scale else 38f * scale)
+        val maxLineW = width * 0.86f
 
         if (cfg.showNote && cfg.note.isNotBlank()) {
             val notePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.rgb(253, 230, 138)
-                textSize = 26f * scale
+                textSize = 25f * scale
                 textAlign = Paint.Align.CENTER
-                setShadowLayer(6f * scale, 0f, 2f * scale, Color.argb(190, 0, 0, 0))
+                setShadowLayer(6f * scale, 0f, 2f * scale, Color.argb(200, 0, 0, 0))
             }
-            canvas.drawText(cfg.note, cx, cursorBottomY, notePaint)
-            cursorBottomY -= 40f * scale
+            val clippedNote = ellipsizeToWidth(cfg.note, notePaint, maxLineW)
+            canvas.drawText(clippedNote, cx, cursorBottomY, notePaint)
+            cursorBottomY -= 36f * scale
         }
 
         if (cfg.showAddress && cfg.address.isNotBlank()) {
             val addrPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.argb(235, 241, 245, 249)
-                textSize = 25f * scale
+                textSize = 24f * scale
                 textAlign = Paint.Align.CENTER
-                setShadowLayer(6f * scale, 0f, 2f * scale, Color.argb(190, 0, 0, 0))
+                setShadowLayer(6f * scale, 0f, 2f * scale, Color.argb(200, 0, 0, 0))
             }
-            canvas.drawText(cfg.address, cx, cursorBottomY, addrPaint)
-            cursorBottomY -= 40f * scale
+            val clippedAddr = ellipsizeToWidth(cfg.address, addrPaint, maxLineW)
+            canvas.drawText(clippedAddr, cx, cursorBottomY, addrPaint)
+            cursorBottomY -= 36f * scale
         }
 
         if (cfg.showCoords) {
             val coordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(125, 211, 252)
-                textSize = 26f * scale
+                color = accentColor
+                textSize = 25f * scale
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             }
-            val textW = coordPaint.measureText(fullCoordLine)
+            val clippedCoord = ellipsizeToWidth(fullCoordLine, coordPaint, maxLineW - 44f * scale)
+            val textW = coordPaint.measureText(clippedCoord)
             val pillPadX = 22f * scale
-            val pillH = 42f * scale
-            val pillTop = cursorBottomY - 31f * scale
+            val pillH = 40f * scale
+            val pillTop = cursorBottomY - 29f * scale
             val pillRect = RectF(cx - textW / 2f - pillPadX, pillTop, cx + textW / 2f + pillPadX, pillTop + pillH)
+
             val pillBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.argb(cfg.bgAlpha.coerceIn(90, 230), 15, 23, 42)
+                color = Color.argb(cfg.bgAlpha.coerceIn(110, 235), 11, 19, 43)
                 style = Paint.Style.FILL
             }
-            canvas.drawRoundRect(pillRect, 21f * scale, 21f * scale, pillBgPaint)
+            val pillBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.argb(95, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
+                style = Paint.Style.STROKE
+                strokeWidth = 1.5f * scale
+            }
+            canvas.drawRoundRect(pillRect, 20f * scale, 20f * scale, pillBgPaint)
+            canvas.drawRoundRect(pillRect, 20f * scale, 20f * scale, pillBorderPaint)
+
             coordPaint.textAlign = Paint.Align.CENTER
-            canvas.drawText(fullCoordLine, cx, cursorBottomY, coordPaint)
-            cursorBottomY -= 54f * scale
+            canvas.drawText(clippedCoord, cx, cursorBottomY, coordPaint)
+            cursorBottomY -= 48f * scale
         }
 
         if (cfg.showTime || cfg.showLocation) {
             val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.WHITE
-                textSize = 36f * scale
-                setShadowLayer(8f * scale, 0f, 2.5f * scale, Color.argb(180, 0, 0, 0))
+                textSize = 34f * scale
+                setShadowLayer(8f * scale, 0f, 2.5f * scale, Color.argb(190, 0, 0, 0))
             }
             val datePart = if (cfg.showTime) cfg.dateWeek else ""
-            val poiPart = if (cfg.showLocation) cfg.shortPoi else ""
-            val pinWidth = if (poiPart.isNotEmpty()) 34f * scale else 0f
-            val dateW = if (datePart.isNotEmpty()) subPaint.measureText("$datePart ") else 0f
+            val rawPoi = if (cfg.showLocation) cfg.shortPoi else ""
+            val poiPart = ellipsizeToWidth(rawPoi, subPaint, width * 0.48f)
+            val pinWidth = if (poiPart.isNotEmpty()) 32f * scale else 0f
+            val dateW = if (datePart.isNotEmpty()) subPaint.measureText("$datePart  ") else 0f
             val poiW = if (poiPart.isNotEmpty()) subPaint.measureText(poiPart) else 0f
             val totalW = dateW + pinWidth + poiW
             var startX = cx - totalW / 2f
 
             if (datePart.isNotEmpty()) {
                 subPaint.textAlign = Paint.Align.LEFT
-                canvas.drawText("$datePart ", startX, cursorBottomY, subPaint)
+                canvas.drawText("$datePart  ", startX, cursorBottomY, subPaint)
                 startX += dateW
             }
             if (poiPart.isNotEmpty()) {
-                val pinCenterX = startX + 14f * scale
-                val pinHeadY = cursorBottomY - 22f * scale
+                val pinCenterX = startX + 13f * scale
+                val pinHeadY = cursorBottomY - 20f * scale
                 val pinPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.rgb(239, 68, 68)
                     style = Paint.Style.FILL
                 }
                 val needlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.rgb(220, 38, 38)
-                    strokeWidth = 3.5f * scale
+                    strokeWidth = 3.2f * scale
                     strokeCap = Paint.Cap.ROUND
                 }
-                canvas.drawLine(pinCenterX, pinHeadY + 6f * scale, pinCenterX, cursorBottomY - 2f * scale, needlePaint)
-                canvas.drawCircle(pinCenterX, pinHeadY, 9.5f * scale, pinPaint)
+                canvas.drawLine(pinCenterX, pinHeadY + 5f * scale, pinCenterX, cursorBottomY - 2f * scale, needlePaint)
+                canvas.drawCircle(pinCenterX, pinHeadY, 9f * scale, pinPaint)
                 val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.rgb(254, 202, 202)
                 }
-                canvas.drawCircle(pinCenterX - 2.5f * scale, pinHeadY - 2.5f * scale, 2.8f * scale, highlightPaint)
+                canvas.drawCircle(pinCenterX - 2.2f * scale, pinHeadY - 2.2f * scale, 2.5f * scale, highlightPaint)
 
                 startX += pinWidth
                 subPaint.textAlign = Paint.Align.LEFT
                 canvas.drawText(poiPart, startX, cursorBottomY, subPaint)
             }
-            cursorBottomY -= 82f * scale
+            cursorBottomY -= (if (isLandscape) 66f * scale else 76f * scale)
         }
 
         if (cfg.showTime) {
             val bigTimePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.WHITE
-                textSize = 124f * scale
+                textSize = (if (isLandscape) 104f else 120f) * scale
                 textAlign = Paint.Align.CENTER
                 typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-                setShadowLayer(10f * scale, 0f, 3f * scale, Color.argb(175, 0, 0, 0))
+                setShadowLayer(10f * scale, 0f, 3f * scale, Color.argb(180, 0, 0, 0))
             }
             canvas.drawText(cfg.timeHm, cx, cursorBottomY, bigTimePaint)
         }
     }
 
     /**
-     * Style 1: 工程巡检卡片 (Translucent dark card with accent bar & custom title)
+     * Style 1: 工程巡检卡片 (Compact glassmorphism card with bounded width & accent badge)
      */
-    private fun drawStyle1EngineeringCard(canvas: Canvas, width: Int, height: Int, scale: Float, cfg: WatermarkConfig) {
+    private fun drawStyle1EngineeringCard(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        scale: Float,
+        isLandscape: Boolean,
+        cfg: WatermarkConfig
+    ) {
         val lines = mutableListOf<Pair<String, String>>()
         if (cfg.showCoords) {
             lines.add("经纬" to buildCoordString(cfg))
@@ -485,209 +534,347 @@ object WatermarkRenderer {
             lines.add("地点" to cfg.address)
         }
         if (cfg.showTime && cfg.timestamp.isNotBlank()) {
-            lines.add("时间" to "${cfg.timestamp} (${cfg.dateWeek.substringAfter(" ")})")
+            lines.add("时间" to "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ")}")
         }
         if (cfg.showNote && cfg.note.isNotBlank()) {
             lines.add("备注" to cfg.note)
         }
         if (lines.isEmpty()) return
 
+        val margin = 28f * scale
+        val maxAllowedBoxW = if (isLandscape) (width * 0.56f) else (width - margin * 2)
+        val padX = 24f * scale
+        val padY = 20f * scale
+        val lineGap = 38f * scale
+        val headerHeight = 46f * scale
+
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 27f * scale
+            textSize = 25f * scale
             color = Color.WHITE
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
 
-        val padX = 28f * scale
-        val padY = 22f * scale
-        val lineGap = 40f * scale
-        val headerHeight = 46f * scale
-
-        val titleText = cfg.customTitle.ifBlank { "高德精准经纬水印" }
-        var maxW = textPaint.measureText(titleText) + 60f * scale
+        val titleText = cfg.customTitle.ifBlank { "现场点位核验" }
+        var naturalMaxW = textPaint.measureText(titleText) + 160f * scale
         for ((label, value) in lines) {
             val w = textPaint.measureText("$label：$value")
-            if (w > maxW) maxW = w
+            if (w > naturalMaxW) naturalMaxW = w
         }
 
-        val boxW = (maxW + padX * 2).coerceAtMost(width - 48f * scale)
+        val boxW = (naturalMaxW + padX * 2).coerceIn(380f * scale, maxAllowedBoxW)
         val boxH = padY * 2 + headerHeight + lines.size * lineGap
-        val margin = 28f * scale
         val boxLeft = if (cfg.bottomRight) (width - boxW - margin) else margin
         val boxTop = height - boxH - margin
 
+        val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(cfg.bgAlpha.coerceIn(80, 240), 15, 23, 42)
+            color = Color.argb(cfg.bgAlpha.coerceIn(100, 240), 11, 19, 43)
             style = Paint.Style.FILL
+        }
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(90, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
+            style = Paint.Style.STROKE
+            strokeWidth = 1.8f * scale
         }
         val rect = RectF(boxLeft, boxTop, boxLeft + boxW, boxTop + boxH)
         canvas.drawRoundRect(rect, 18f * scale, 18f * scale, bgPaint)
+        canvas.drawRoundRect(rect, 18f * scale, 18f * scale, borderPaint)
 
-        val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
+        // Header bar
         val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = accentColor }
-        canvas.drawRect(boxLeft + padX, boxTop + padY, boxLeft + padX + 8f * scale, boxTop + padY + 30f * scale, accentPaint)
-        canvas.drawText(titleText, boxLeft + padX + 18f * scale, boxTop + padY + 26f * scale, textPaint)
+        canvas.drawRoundRect(
+            RectF(boxLeft + padX, boxTop + padY, boxLeft + padX + 7f * scale, boxTop + padY + 28f * scale),
+            3.5f * scale, 3.5f * scale, accentPaint
+        )
+        val headerTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 27f * scale
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val maxTitleW = boxW - padX * 2 - 130f * scale
+        canvas.drawText(ellipsizeToWidth(titleText, headerTitlePaint, maxTitleW), boxLeft + padX + 16f * scale, boxTop + padY + 24f * scale, headerTitlePaint)
 
+        // Coordinate system pill on top-right of card
+        val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(55, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
+        }
+        val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = accentColor
+            textSize = 20f * scale
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+        val badgeW = 96f * scale
+        val badgeRect = RectF(boxLeft + boxW - padX - badgeW, boxTop + padY - 2f * scale, boxLeft + boxW - padX, boxTop + padY + 30f * scale)
+        canvas.drawRoundRect(badgeRect, 8f * scale, 8f * scale, badgePaint)
+        canvas.drawText(cfg.coordSystem, badgeRect.centerX(), boxTop + padY + 21f * scale, badgeTextPaint)
+
+        // Divider line
+        val divPaint = Paint().apply {
+            color = Color.argb(45, 255, 255, 255)
+            strokeWidth = 1.2f * scale
+        }
+        canvas.drawLine(boxLeft + padX, boxTop + padY + headerHeight - 8f * scale, boxLeft + boxW - padX, boxTop + padY + headerHeight - 8f * scale, divPaint)
+
+        val maxContentW = boxW - padX * 2
         lines.forEachIndexed { idx, (label, value) ->
-            val y = boxTop + padY + headerHeight + (idx + 0.8f) * lineGap
+            val y = boxTop + padY + headerHeight + (idx + 0.78f) * lineGap
             textPaint.color = Color.rgb(148, 163, 184)
-            canvas.drawText("$label：", boxLeft + padX, y, textPaint)
-            val lw = textPaint.measureText("$label：")
-            textPaint.color = if (idx == 0) accentColor else Color.WHITE
-            canvas.drawText(value, boxLeft + padX + lw, y, textPaint)
+            val prefix = "$label："
+            canvas.drawText(prefix, boxLeft + padX, y, textPaint)
+            val lw = textPaint.measureText(prefix)
+            textPaint.color = if (label == "经纬") accentColor else if (label == "备注") Color.rgb(253, 230, 138) else Color.WHITE
+            val clippedVal = ellipsizeToWidth(value, textPaint, maxContentW - lw)
+            canvas.drawText(clippedVal, boxLeft + padX + lw, y, textPaint)
         }
     }
 
     /**
-     * Style 2: 经纬网格测绘 (GIS/Survey prominent top-banner coordinate badge + grid)
+     * Style 2: 经纬网格测绘 (GIS/Survey HUD coordinate banner + 2-column metadata grid)
      */
-    private fun drawStyle2GisSurveyGrid(canvas: Canvas, width: Int, height: Int, scale: Float, cfg: WatermarkConfig) {
+    private fun drawStyle2GisSurveyGrid(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        scale: Float,
+        isLandscape: Boolean,
+        cfg: WatermarkConfig
+    ) {
         val margin = 28f * scale
-        val boxW = (680f * scale).coerceAtMost(width - margin * 2)
-        val boxH = 210f * scale
+        val maxAllowedW = if (isLandscape) (width * 0.58f) else (width - margin * 2)
+        val boxW = (680f * scale).coerceAtMost(maxAllowedW)
+        val hasFooter = (cfg.showAddress && cfg.address.isNotBlank()) || (cfg.showNote && cfg.note.isNotBlank())
+        val boxH = if (hasFooter) 196f * scale else 150f * scale
         val boxLeft = if (cfg.bottomRight) (width - boxW - margin) else margin
         val boxTop = height - boxH - margin
 
         val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(cfg.bgAlpha.coerceIn(95, 240), 9, 13, 22)
+            color = Color.argb(cfg.bgAlpha.coerceIn(110, 240), 9, 14, 26)
         }
         val rect = RectF(boxLeft, boxTop, boxLeft + boxW, boxTop + boxH)
         canvas.drawRoundRect(rect, 16f * scale, 16f * scale, bgPaint)
 
-        // Top header band with accent fill
-        val headerRect = RectF(boxLeft, boxTop, boxLeft + boxW, boxTop + 54f * scale)
-        val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = accentColor }
-        canvas.drawRoundRect(headerRect, 16f * scale, 16f * scale, headerPaint)
+        // Top Accent Coordinate Header Band
+        val headerH = 56f * scale
+        val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(48, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
+        }
+        canvas.drawRoundRect(RectF(boxLeft, boxTop, boxLeft + boxW, boxTop + headerH), 16f * scale, 16f * scale, headerPaint)
 
-        val headerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(9, 13, 22)
-            textSize = 26f * scale
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(130, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
+            style = Paint.Style.STROKE
+            strokeWidth = 1.8f * scale
+        }
+        canvas.drawRoundRect(rect, 16f * scale, 16f * scale, borderPaint)
+
+        val coordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = accentColor
+            textSize = 25f * scale
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
-        canvas.drawText(buildCoordString(cfg), boxLeft + 20f * scale, boxTop + 36f * scale, headerTextPaint)
+        val clippedCoord = ellipsizeToWidth(buildCoordString(cfg), coordPaint, boxW - 36f * scale)
+        canvas.drawText(clippedCoord, boxLeft + 18f * scale, boxTop + 37f * scale, coordPaint)
 
-        val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = 25f * scale
+        // Grid lines
+        val gridLinePaint = Paint().apply {
+            color = Color.argb(55, 148, 163, 184)
+            strokeWidth = 1.2f * scale
         }
-        val locText = if (cfg.showAddress && cfg.address.isNotBlank()) "${cfg.shortPoi} (${cfg.address})" else cfg.shortPoi
-        canvas.drawText("📍 测绘点位：$locText", boxLeft + 20f * scale, boxTop + 98f * scale, bodyPaint)
-        canvas.drawText("🕒 采样时间：${cfg.timestamp}", boxLeft + 20f * scale, boxTop + 142f * scale, bodyPaint)
-        val noteStr = cfg.note.ifBlank { cfg.customTitle }
-        bodyPaint.color = Color.rgb(253, 230, 138)
-        canvas.drawText("📝 现场记录：$noteStr", boxLeft + 20f * scale, boxTop + 186f * scale, bodyPaint)
+        canvas.drawLine(boxLeft, boxTop + headerH, boxLeft + boxW, boxTop + headerH, gridLinePaint)
+
+        val midX = boxLeft + boxW * 0.48f
+        val row2Bottom = boxTop + headerH + 88f * scale
+        canvas.drawLine(midX, boxTop + headerH, midX, row2Bottom, gridLinePaint)
+
+        val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(148, 163, 184)
+            textSize = 19f * scale
+        }
+        val valPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 24f * scale
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+
+        // Left Cell: 点位名称
+        canvas.drawText("测绘点位", boxLeft + 18f * scale, boxTop + headerH + 30f * scale, labelPaint)
+        val poiStr = ellipsizeToWidth(cfg.shortPoi.ifBlank { "实拍点位" }, valPaint, boxW * 0.48f - 28f * scale)
+        canvas.drawText(poiStr, boxLeft + 18f * scale, boxTop + headerH + 68f * scale, valPaint)
+
+        // Right Cell: 采样时间
+        canvas.drawText("采样时间", midX + 18f * scale, boxTop + headerH + 30f * scale, labelPaint)
+        val timePaint = Paint(valPaint).apply {
+            textSize = 22f * scale
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+        val timeStr = ellipsizeToWidth(cfg.timestamp, timePaint, boxW * 0.52f - 28f * scale)
+        canvas.drawText(timeStr, midX + 18f * scale, boxTop + headerH + 68f * scale, timePaint)
+
+        if (hasFooter) {
+            canvas.drawLine(boxLeft, row2Bottom, boxLeft + boxW, row2Bottom, gridLinePaint)
+            val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(253, 230, 138)
+                textSize = 21f * scale
+            }
+            val footerRaw = buildString {
+                if (cfg.showAddress && cfg.address.isNotBlank()) append(cfg.address)
+                if (cfg.showNote && cfg.note.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append(cfg.note)
+                }
+            }
+            val clippedFooter = ellipsizeToWidth(footerRaw, footerPaint, boxW - 36f * scale)
+            canvas.drawText(clippedFooter, boxLeft + 18f * scale, row2Bottom + 34f * scale, footerPaint)
+        }
     }
 
     /**
-     * Style 3: 极简胶片底栏 (Full-width bottom dark cinema bar)
+     * Style 3: 极简胶片底栏 (Full-width bottom cinema footer bar with strict left/right width bounds)
      */
-    private fun drawStyle3MinimalistFilmBar(canvas: Canvas, width: Int, height: Int, scale: Float, cfg: WatermarkConfig) {
-        val barH = 112f * scale
+    private fun drawStyle3MinimalistFilmBar(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        scale: Float,
+        isLandscape: Boolean,
+        cfg: WatermarkConfig
+    ) {
+        val barH = (if (isLandscape) 92f else 106f) * scale
         val barTop = height - barH
         val bgPaint = Paint().apply {
-            color = Color.argb(cfg.bgAlpha.coerceIn(140, 245), 8, 12, 20)
+            color = Color.argb(cfg.bgAlpha.coerceIn(150, 245), 8, 12, 20)
         }
         canvas.drawRect(0f, barTop, width.toFloat(), height.toFloat(), bgPaint)
 
         val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
         val linePaint = Paint().apply {
             color = accentColor
-            strokeWidth = 3f * scale
+            strokeWidth = 2.5f * scale
         }
         canvas.drawLine(0f, barTop, width.toFloat(), barTop, linePaint)
 
-        // Left: Location + Note
-        val leftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val padX = 26f * scale
+        val maxLeftW = width * 0.44f
+        val maxRightW = width * 0.50f
+
+        val leftTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = 30f * scale
+            textSize = 28f * scale
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        canvas.drawText("📍 ${cfg.shortPoi}", 28f * scale, barTop + 46f * scale, leftPaint)
+        val poiText = ellipsizeToWidth(cfg.shortPoi.ifBlank { cfg.customTitle }, leftTitlePaint, maxLeftW)
+        canvas.drawText(poiText, padX, barTop + 40f * scale, leftTitlePaint)
 
         val subLeftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(148, 163, 184)
-            textSize = 23f * scale
+            textSize = 21f * scale
         }
-        val subLeftStr = cfg.note.ifBlank { cfg.address.ifBlank { cfg.customTitle } }
-        canvas.drawText(subLeftStr, 32f * scale, barTop + 88f * scale, subLeftPaint)
+        val subLeftRaw = cfg.note.ifBlank { cfg.address.ifBlank { cfg.dateWeek } }
+        canvas.drawText(ellipsizeToWidth(subLeftRaw, subLeftPaint, maxLeftW), padX, barTop + 76f * scale, subLeftPaint)
 
-        // Right: Coordinates + Timestamp
-        val rightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val rightCoordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = accentColor
-            textSize = 25f * scale
+            textSize = 23f * scale
             textAlign = Paint.Align.RIGHT
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
-        canvas.drawText(buildCoordString(cfg), width - 28f * scale, barTop + 46f * scale, rightPaint)
+        val coordClipped = ellipsizeToWidth(buildCoordString(cfg), rightCoordPaint, maxRightW)
+        canvas.drawText(coordClipped, width - padX, barTop + 40f * scale, rightCoordPaint)
 
         val subRightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(226, 232, 240)
-            textSize = 23f * scale
+            textSize = 21f * scale
             textAlign = Paint.Align.RIGHT
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
         }
-        canvas.drawText(cfg.timestamp, width - 28f * scale, barTop + 88f * scale, subRightPaint)
+        val timeLine = "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ")}"
+        canvas.drawText(ellipsizeToWidth(timeLine, subRightPaint, maxRightW), width - padX, barTop + 76f * scale, subRightPaint)
     }
 
     /**
-     * Style 4: 外业标准台账 (Bordered engineering table layout)
+     * Style 4: 外业标准台账 (Bordered engineering ledger table with strict cell clipping)
      */
-    private fun drawStyle4LedgerTable(canvas: Canvas, width: Int, height: Int, scale: Float, cfg: WatermarkConfig) {
+    private fun drawStyle4LedgerTable(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        scale: Float,
+        isLandscape: Boolean,
+        cfg: WatermarkConfig
+    ) {
         val margin = 28f * scale
         val rows = mutableListOf<Pair<String, String>>()
-        rows.add("核验项目" to cfg.customTitle.ifBlank { "外业定点巡检记录" })
         if (cfg.showCoords) rows.add("经纬坐标" to buildCoordString(cfg))
-        if (cfg.showLocation) rows.add("点位地址" to if (cfg.address.isNotBlank()) "${cfg.shortPoi} · ${cfg.address}" else cfg.shortPoi)
+        if (cfg.showLocation) {
+            val locVal = if (cfg.showAddress && cfg.address.isNotBlank()) "${cfg.shortPoi} · ${cfg.address}" else cfg.shortPoi
+            rows.add("点位地址" to locVal)
+        }
         if (cfg.showTime) rows.add("记录时间" to "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ")}")
         if (cfg.showNote && cfg.note.isNotBlank()) rows.add("现场备注" to cfg.note)
+        if (rows.isEmpty()) rows.add("核验状态" to "高德GCJ-02已对齐")
 
-        val rowH = 44f * scale
-        val boxW = (720f * scale).coerceAtMost(width - margin * 2)
-        val boxH = rows.size * rowH
+        val headerH = 44f * scale
+        val rowH = 40f * scale
+        val maxAllowedW = if (isLandscape) (width * 0.58f) else (width - margin * 2)
+        val boxW = (700f * scale).coerceAtMost(maxAllowedW)
+        val boxH = headerH + rows.size * rowH
         val boxLeft = if (cfg.bottomRight) (width - boxW - margin) else margin
         val boxTop = height - boxH - margin
 
+        val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(cfg.bgAlpha.coerceIn(110, 240), 15, 23, 42)
+            color = Color.argb(cfg.bgAlpha.coerceIn(120, 240), 11, 19, 43)
         }
         canvas.drawRect(boxLeft, boxTop, boxLeft + boxW, boxTop + boxH, bgPaint)
 
-        val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
+        // Table Header Fill
+        val headerFillPaint = Paint().apply {
+            color = Color.argb(65, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
+        }
+        canvas.drawRect(boxLeft, boxTop, boxLeft + boxW, boxTop + headerH, headerFillPaint)
+
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = accentColor
             style = Paint.Style.STROKE
-            strokeWidth = 2.5f * scale
+            strokeWidth = 2.0f * scale
         }
         canvas.drawRect(boxLeft, boxTop, boxLeft + boxW, boxTop + boxH, borderPaint)
 
-        val colSplitX = boxLeft + 150f * scale
-        canvas.drawLine(colSplitX, boxTop, colSplitX, boxTop + boxH, borderPaint)
-
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val headerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
             textSize = 24f * scale
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val titleStr = "${cfg.customTitle.ifBlank { "外业定点巡检台账" }} · ${cfg.coordSystem}"
+        canvas.drawText(ellipsizeToWidth(titleStr, headerTextPaint, boxW - 28f * scale), boxLeft + 14f * scale, boxTop + 30f * scale, headerTextPaint)
+
+        val colSplitX = boxLeft + 136f * scale
+        borderPaint.strokeWidth = 1.2f * scale
+        canvas.drawLine(boxLeft, boxTop + headerH, boxLeft + boxW, boxTop + headerH, borderPaint)
+        canvas.drawLine(colSplitX, boxTop + headerH, colSplitX, boxTop + boxH, borderPaint)
+
+        val cellPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 22f * scale
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
+        val maxValW = (boxLeft + boxW) - colSplitX - 24f * scale
 
         rows.forEachIndexed { i, (k, v) ->
-            val topY = boxTop + i * rowH
+            val topY = boxTop + headerH + i * rowH
             if (i > 0) {
-                borderPaint.strokeWidth = 1.2f * scale
                 canvas.drawLine(boxLeft, topY, boxLeft + boxW, topY, borderPaint)
             }
-            val baselineY = topY + 30f * scale
-            textPaint.color = accentColor
-            canvas.drawText(k, boxLeft + 16f * scale, baselineY, textPaint)
-            textPaint.color = Color.WHITE
-            canvas.drawText(v, colSplitX + 16f * scale, baselineY, textPaint)
+            val baselineY = topY + 28f * scale
+            cellPaint.color = accentColor
+            canvas.drawText(k, boxLeft + 14f * scale, baselineY, cellPaint)
+            cellPaint.color = if (k == "现场备注") Color.rgb(253, 230, 138) else Color.WHITE
+            val clippedV = ellipsizeToWidth(v, cellPaint, maxValW)
+            canvas.drawText(clippedV, colSplitX + 12f * scale, baselineY, cellPaint)
         }
     }
 
-    /**
-     * Save composited JPEG with Dual-Track EXIF:
-     * - Standard GPSLatitude / GPSLongitude written in WGS-84 (universal compatibility)
-     * - TAG_USER_COMMENT written with full JSON containing exact GCJ-02 & WGS-84 (prevents double-offset!)
-     */
     fun saveJpegWithDualTrackExif(bitmap: Bitmap, targetFile: File, cfg: WatermarkConfig) {
         FileOutputStream(targetFile).use { fos ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
@@ -704,13 +891,8 @@ object WatermarkRenderer {
         } catch (_: Exception) {}
     }
 
-    /**
-     * Export or update the watermarked JPEG directly inside the native system camera folder (DCIM/Camera)
-     * using standard IMG_yyyyMMdd_HHmmss.jpg naming!
-     */
     fun exportOrUpdateSystemCameraGallery(context: Context, wmFile: File, cfg: WatermarkConfig): String {
         val resolver = context.contentResolver
-        // 1. If we already have a MediaStore URI from initial capture, overwrite it in-place to avoid duplicates!
         if (cfg.mediaStoreUri.isNotBlank()) {
             try {
                 val existingUri = Uri.parse(cfg.mediaStoreUri)
@@ -720,12 +902,9 @@ object WatermarkRenderer {
                     }
                     return cfg.mediaStoreUri
                 }
-            } catch (_: Exception) {
-                // If deleted by user in system gallery, fall through and insert a fresh entry
-            }
+            } catch (_: Exception) {}
         }
 
-        // 2. Insert into standard DCIM/Camera directory
         return try {
             val tsName = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val filename = "IMG_${tsName}.jpg"
@@ -755,9 +934,6 @@ object WatermarkRenderer {
         }
     }
 
-    /**
-     * Persist a newly captured clean bitmap + config into app layer-separated storage & DCIM/Camera
-     */
     fun saveNewPhotoEntry(context: Context, cleanBitmap: Bitmap, cfg: WatermarkConfig, alsoExportOriginal: Boolean = false): PhotoEntry {
         val dir = File(context.filesDir, "captured_photos").apply { mkdirs() }
         val id = System.currentTimeMillis().toString()
@@ -783,9 +959,6 @@ object WatermarkRenderer {
         return PhotoEntry(id = id, cleanFile = cleanFile, watermarkedFile = wmFile, metaFile = metaFile, config = cfg)
     }
 
-    /**
-     * Load all previously saved photos from app storage (sorted newest first)
-     */
     fun loadSavedPhotos(context: Context): List<PhotoEntry> {
         val dir = File(context.filesDir, "captured_photos")
         if (!dir.exists()) return emptyList()
@@ -805,11 +978,6 @@ object WatermarkRenderer {
         return list.sortedByDescending { it.id }
     }
 
-    /**
-     * Scan photos taken by the phone's native system camera (or saved in MediaStore),
-     * automatically extracting EXIF GPS coordinates via MediaStore.setRequireOriginal()
-     * and converting WGS-84 to Amap GCJ-02 so the user can 1-click jump to Amap on ANY system camera photo!
-     */
     fun scanSystemCameraPhotos(context: Context, maxCount: Int = 50): List<SystemCameraPhoto> {
         val results = mutableListOf<SystemCameraPhoto>()
         val projection = arrayOf(
@@ -899,10 +1067,6 @@ object WatermarkRenderer {
         return results
     }
 
-    /**
-     * Import an external image from system gallery URI, parse its EXIF GPS (auto-convert WGS84 -> GCJ02),
-     * and save as a layer-separated PhotoEntry!
-     */
     fun importExternalPhotoUri(context: Context, uri: Uri, fallbackLoc: LocationSnapshot, defaultSys: String): PhotoEntry? {
         return try {
             val originalUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
