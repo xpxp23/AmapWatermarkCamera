@@ -10,14 +10,17 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
+import android.os.SystemClock
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 data class LocationSnapshot(
@@ -41,8 +44,12 @@ class FastLocationManager(private val context: Context) {
 
     private var customPoiOverride: String? = null
     private var customAddressOverride: String? = null
+    private var lastAutoPoi: String? = null
+    private var lastAutoAddress: String? = null
     private var lastGeocodedLat: Double = 0.0
     private var lastGeocodedLon: Double = 0.0
+    private var lastFixElapsedRealtimeMs: Long = 0L
+    private var geocodeJob: Job? = null
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(loc: Location) {
@@ -56,6 +63,7 @@ class FastLocationManager(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun startHighFrequencyUpdates() {
         try {
+            locationManager.removeUpdates(listener)
             val allProviders = mutableListOf(
                 LocationManager.GPS_PROVIDER,
                 LocationManager.NETWORK_PROVIDER,
@@ -96,19 +104,35 @@ class FastLocationManager(private val context: Context) {
         } catch (_: Exception) {}
     }
 
+    /**
+     * Set or clear custom location text overrides.
+     * When cleared (null/blank), immediately restores cached geocoded text and forces a fresh reverse geocode.
+     */
     fun setCustomLocationText(shortPoi: String?, fullAddress: String?) {
         customPoiOverride = shortPoi?.takeIf { it.isNotBlank() }
         customAddressOverride = fullAddress?.takeIf { it.isNotBlank() }
         val current = _locationState.value
+        val restoredPoi = customPoiOverride
+            ?: lastAutoPoi
+            ?: if (current.hasRealFix) "已锁定高精位置 (点此改名)" else "定位中..."
+        val restoredAddr = customAddressOverride
+            ?: lastAutoAddress
+            ?: "高德坐标 ${String.format(Locale.US, "%.6f, %.6f", current.gcjLat, current.gcjLon)}"
+
         _locationState.value = current.copy(
-            shortPoi = customPoiOverride ?: current.shortPoi,
-            fullAddress = customAddressOverride ?: current.fullAddress
+            shortPoi = restoredPoi,
+            fullAddress = restoredAddr
         )
+
+        if (customPoiOverride == null || customAddressOverride == null) {
+            triggerReverseGeocode(current.wgsLat, current.wgsLon, current.gcjLat, current.gcjLon, force = true)
+        }
     }
 
     fun updateManualCoordinates(newGcjLat: Double, newGcjLon: Double) {
         val wgs = CoordinateConverter.gcj02ToWgs84(newGcjLat, newGcjLon)
         val curr = _locationState.value
+        lastFixElapsedRealtimeMs = SystemClock.elapsedRealtime()
         _locationState.value = curr.copy(
             wgsLat = wgs.lat,
             wgsLon = wgs.lon,
@@ -127,7 +151,7 @@ class FastLocationManager(private val context: Context) {
     suspend fun awaitOptimalLocation(thresholdMeters: Float = 10f, maxWaitMs: Long = 1000L): LocationSnapshot {
         var best = _locationState.value
         if (best.hasRealFix && best.accuracyMeters <= thresholdMeters) return best
-        val step = 120L
+        val step = 100L
         var waited = 0L
         while (waited < maxWaitMs) {
             delay(step)
@@ -146,22 +170,31 @@ class FastLocationManager(private val context: Context) {
     private fun handleNewLocation(loc: Location) {
         if (loc.latitude == 0.0 && loc.longitude == 0.0) return
         val curr = _locationState.value
-        // Do not overwrite a high-accuracy GPS fix with a coarse 500m network fix if recent
-        if (curr.hasRealFix && loc.accuracy > curr.accuracyMeters * 2.5f && loc.accuracy > 35f) {
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val ageSinceLastFixMs = nowElapsed - lastFixElapsedRealtimeMs
+
+        // Do not overwrite a recent (< 20s) high-accuracy GPS fix with a coarse network fix,
+        // but DO accept newer fixes once the previous fix becomes stale (> 20s) so moving indoors never freezes coordinates.
+        if (curr.hasRealFix &&
+            ageSinceLastFixMs in 0..20_000L &&
+            loc.accuracy > curr.accuracyMeters * 2.5f &&
+            loc.accuracy > 35f
+        ) {
             return
         }
 
+        lastFixElapsedRealtimeMs = nowElapsed
         val wgsLat = loc.latitude
         val wgsLon = loc.longitude
         val gcj = CoordinateConverter.wgs84ToGcj02(wgsLat, wgsLon)
         val acc = if (loc.hasAccuracy()) loc.accuracy else 6.0f
 
-        val fallbackPoi = if (curr.hasRealFix && curr.shortPoi != "定位中...") {
+        val fallbackPoi = lastAutoPoi ?: if (curr.hasRealFix && curr.shortPoi != "定位中...") {
             curr.shortPoi
         } else {
             "已锁定高精位置 (点此改名)"
         }
-        val fallbackAddr = if (curr.hasRealFix && !curr.fullAddress.startsWith("正在获取")) {
+        val fallbackAddr = lastAutoAddress ?: if (curr.hasRealFix && !curr.fullAddress.startsWith("正在获取")) {
             curr.fullAddress
         } else {
             "高德坐标 ${String.format(Locale.US, "%.6f, %.6f", gcj.lat, gcj.lon)}"
@@ -194,21 +227,27 @@ class FastLocationManager(private val context: Context) {
         lastGeocodedLat = wgsLat
         lastGeocodedLon = wgsLon
 
-        scope.launch {
-            val resolved = withContext(Dispatchers.IO) {
-                try {
-                    val geocoder = Geocoder(context, Locale.CHINA)
-                    @Suppress("DEPRECATION")
-                    val list = geocoder.getFromLocation(wgsLat, wgsLon, 1)
-                    if (!list.isNullOrEmpty()) {
-                        extractPoiAndAddress(list[0], gcjLat, gcjLon)
-                    } else null
-                } catch (_: Exception) {
-                    null
+        geocodeJob?.cancel()
+        geocodeJob = scope.launch {
+            val resolved = withTimeoutOrNull(2500L) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        if (!Geocoder.isPresent()) return@withContext null
+                        val geocoder = Geocoder(context, Locale.CHINA)
+                        @Suppress("DEPRECATION")
+                        val list = geocoder.getFromLocation(wgsLat, wgsLon, 1)
+                        if (!list.isNullOrEmpty()) {
+                            extractPoiAndAddress(list[0], gcjLat, gcjLon)
+                        } else null
+                    } catch (_: Exception) {
+                        null
+                    }
                 }
             }
             if (resolved != null) {
                 val (poi, fullAddr) = resolved
+                lastAutoPoi = poi
+                lastAutoAddress = fullAddr
                 val latest = _locationState.value
                 _locationState.value = latest.copy(
                     shortPoi = customPoiOverride ?: poi,

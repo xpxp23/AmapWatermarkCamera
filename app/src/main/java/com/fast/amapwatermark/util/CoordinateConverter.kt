@@ -67,13 +67,17 @@ object CoordinateConverter {
         }
     }
 
+    /**
+     * Fixed DMS conversion with centisecond carry-over to prevent "59°60'60.00"" rounding overflow.
+     */
     private fun toDms(deg: Double, isLat: Boolean): String {
         val dir = if (isLat) (if (deg >= 0) "N" else "S") else (if (deg >= 0) "E" else "W")
-        val absVal = abs(deg)
-        val d = floor(absVal).toInt()
-        val mFloat = (absVal - d) * 60.0
-        val m = floor(mFloat).toInt()
-        val s = (mFloat - m) * 60.0
+        val totalCentiseconds = (abs(deg) * 3600.0 * 100.0).roundToLong()
+        val d = (totalCentiseconds / 360_000L).toInt()
+        val remAfterDeg = totalCentiseconds % 360_000L
+        val m = (remAfterDeg / 6_000L).toInt()
+        val secCentis = remAfterDeg % 6_000L
+        val s = secCentis / 100.0
         return String.format(Locale.US, "%d°%02d'%05.2f\"%s", d, m, s, dir)
     }
 

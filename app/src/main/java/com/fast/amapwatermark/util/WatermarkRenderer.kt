@@ -17,9 +17,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToLong
 
 /**
  * Watermark configuration stored alongside each captured photo's clean base image.
@@ -136,12 +136,31 @@ data class WatermarkConfig(
             )
         }
 
-        fun currentTimeStrings(): Triple<String, String, String> {
-            val now = Date()
-            val hm = SimpleDateFormat("HH:mm", Locale.CHINA).format(now)
-            val datePart = SimpleDateFormat("yyyy-MM-dd EEEE", Locale.CHINA).format(now)
-            val fullTs = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(now)
+        fun currentTimeStrings(date: Date = Date()): Triple<String, String, String> {
+            val hm = SimpleDateFormat("HH:mm", Locale.CHINA).format(date)
+            val datePart = SimpleDateFormat("yyyy-MM-dd EEEE", Locale.CHINA).format(date)
+            val fullTs = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(date)
             return Triple(hm, datePart, fullTs)
+        }
+
+        /**
+         * Parse EXIF DateTimeOriginal ("yyyy:MM:dd HH:mm:ss" or "yyyy-MM-dd HH:mm:ss")
+         * into accurate (timeHm, dateWeek, normalizedTimestamp).
+         */
+        fun parseExifDateStrings(rawExifDate: String?): Triple<String, String, String> {
+            if (rawExifDate.isNullOrBlank()) return currentTimeStrings()
+            return try {
+                val clean = rawExifDate.trim()
+                val pattern = if (clean.length >= 10 && clean[4] == ':') {
+                    "yyyy:MM:dd HH:mm:ss"
+                } else {
+                    "yyyy-MM-dd HH:mm:ss"
+                }
+                val parsed = SimpleDateFormat(pattern, Locale.CHINA).parse(clean)
+                if (parsed != null) currentTimeStrings(parsed) else currentTimeStrings()
+            } catch (_: Exception) {
+                currentTimeStrings()
+            }
         }
     }
 }
@@ -232,8 +251,16 @@ object BitmapCacheManager {
         }
     }
 
+    /**
+     * Selective invalidation: only evict keys matching the target file path
+     * instead of wiping the entire thumbnail LruCache.
+     */
     fun invalidate(file: File) {
-        cache.evictAll()
+        val pathPrefix = file.absolutePath
+        val keysToRemove = cache.snapshot().keys.filter { it.contains(pathPrefix) }
+        for (k in keysToRemove) {
+            cache.remove(k)
+        }
     }
 
     private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
@@ -260,12 +287,25 @@ object WatermarkRenderer {
         "极简胶片底栏",
         "外业标准台账"
     )
+    val STYLE_SHORT_NAMES = listOf(
+        "大字时间",
+        "巡检卡片",
+        "网格测绘",
+        "胶片底栏",
+        "标准台账"
+    )
     val ACCENT_COLORS = listOf(
         Color.rgb(56, 189, 248),  // 天际蓝
         Color.rgb(52, 211, 153),  // 翡翠绿
         Color.rgb(251, 191, 36),  // 琥珀金
         Color.rgb(248, 113, 113)  // 珊瑚红
     )
+
+    // Pre-cached Typefaces to eliminate per-frame JNI font lookups on the UI thread
+    private val TYPEFACE_MONO_BOLD: Typeface by lazy { Typeface.create(Typeface.MONOSPACE, Typeface.BOLD) }
+    private val TYPEFACE_MONO_NORMAL: Typeface by lazy { Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL) }
+    private val TYPEFACE_SANS_LIGHT: Typeface by lazy { Typeface.create("sans-serif-light", Typeface.NORMAL) }
+    private val TYPEFACE_DEFAULT_BOLD: Typeface by lazy { Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
 
     fun rotateBitmapIfNeeded(source: Bitmap, rotationDegrees: Int): Bitmap {
         val norm = ((rotationDegrees % 360) + 360) % 360
@@ -334,7 +374,6 @@ object WatermarkRenderer {
      */
     fun drawWatermarkOverlay(canvas: Canvas, width: Int, height: Int, cfg: WatermarkConfig) {
         val isLandscape = width > height
-        // In landscape (e.g. 1440x1080), scale slightly more compactly (0.86x) so vertical height is sleek
         val orientFactor = if (isLandscape) 0.86f else 1.0f
         val baseScale = (min(width, height) / 1080f) * orientFactor * cfg.fontScale.coerceIn(0.78f, 1.25f)
 
@@ -371,8 +410,6 @@ object WatermarkRenderer {
 
     /**
      * Style 0: 经典大字时间
-     * In Portrait: Stacked centered big time + Date/Weekday/📍POI + Frosted Coordinate Pill
-     * In Landscape: Compact vertical spacing with refined glass pill so it never crowds the center
      */
     private fun drawStyle0CenteredBigTime(
         canvas: Canvas,
@@ -428,7 +465,7 @@ object WatermarkRenderer {
             val coordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = accentColor
                 textSize = 25f * scale
-                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                typeface = TYPEFACE_MONO_BOLD
             }
             val clippedCoord = ellipsizeToWidth(fullCoordLine, coordPaint, maxLineW - 44f * scale)
             val textW = coordPaint.measureText(clippedCoord)
@@ -438,7 +475,7 @@ object WatermarkRenderer {
             val pillRect = RectF(cx - textW / 2f - pillPadX, pillTop, cx + textW / 2f + pillPadX, pillTop + pillH)
 
             val pillBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.argb(cfg.bgAlpha.coerceIn(110, 235), 11, 19, 43)
+                color = Color.argb(cfg.bgAlpha.coerceIn(90, 240), 11, 19, 43)
                 style = Paint.Style.FILL
             }
             val pillBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -505,7 +542,7 @@ object WatermarkRenderer {
                 color = Color.WHITE
                 textSize = (if (isLandscape) 104f else 120f) * scale
                 textAlign = Paint.Align.CENTER
-                typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+                typeface = TYPEFACE_SANS_LIGHT
                 setShadowLayer(10f * scale, 0f, 3f * scale, Color.argb(180, 0, 0, 0))
             }
             canvas.drawText(cfg.timeHm, cx, cursorBottomY, bigTimePaint)
@@ -539,7 +576,9 @@ object WatermarkRenderer {
         if (cfg.showNote && cfg.note.isNotBlank()) {
             lines.add("备注" to cfg.note)
         }
-        if (lines.isEmpty()) return
+        if (lines.isEmpty()) {
+            lines.add("状态" to "高德 ${cfg.coordSystem} 零偏差已对齐")
+        }
 
         val margin = 28f * scale
         val maxAllowedBoxW = if (isLandscape) (width * 0.56f) else (width - margin * 2)
@@ -551,7 +590,7 @@ object WatermarkRenderer {
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 25f * scale
             color = Color.WHITE
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            typeface = TYPEFACE_MONO_BOLD
         }
 
         val titleText = cfg.customTitle.ifBlank { "现场点位核验" }
@@ -568,7 +607,7 @@ object WatermarkRenderer {
 
         val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(cfg.bgAlpha.coerceIn(100, 240), 11, 19, 43)
+            color = Color.argb(cfg.bgAlpha.coerceIn(90, 240), 11, 19, 43)
             style = Paint.Style.FILL
         }
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -589,25 +628,26 @@ object WatermarkRenderer {
         val headerTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = 27f * scale
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            typeface = TYPEFACE_DEFAULT_BOLD
         }
         val maxTitleW = boxW - padX * 2 - 130f * scale
         canvas.drawText(ellipsizeToWidth(titleText, headerTitlePaint, maxTitleW), boxLeft + padX + 16f * scale, boxTop + padY + 24f * scale, headerTitlePaint)
 
-        // Coordinate system pill on top-right of card
-        val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(55, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
+        if (cfg.showCoordTag) {
+            val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.argb(55, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
+            }
+            val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = accentColor
+                textSize = 20f * scale
+                textAlign = Paint.Align.CENTER
+                typeface = TYPEFACE_MONO_BOLD
+            }
+            val badgeW = 96f * scale
+            val badgeRect = RectF(boxLeft + boxW - padX - badgeW, boxTop + padY - 2f * scale, boxLeft + boxW - padX, boxTop + padY + 30f * scale)
+            canvas.drawRoundRect(badgeRect, 8f * scale, 8f * scale, badgePaint)
+            canvas.drawText(cfg.coordSystem, badgeRect.centerX(), boxTop + padY + 21f * scale, badgeTextPaint)
         }
-        val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = accentColor
-            textSize = 20f * scale
-            textAlign = Paint.Align.CENTER
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        }
-        val badgeW = 96f * scale
-        val badgeRect = RectF(boxLeft + boxW - padX - badgeW, boxTop + padY - 2f * scale, boxLeft + boxW - padX, boxTop + padY + 30f * scale)
-        canvas.drawRoundRect(badgeRect, 8f * scale, 8f * scale, badgePaint)
-        canvas.drawText(cfg.coordSystem, badgeRect.centerX(), boxTop + padY + 21f * scale, badgeTextPaint)
 
         // Divider line
         val divPaint = Paint().apply {
@@ -631,6 +671,7 @@ object WatermarkRenderer {
 
     /**
      * Style 2: 经纬网格测绘 (GIS/Survey HUD coordinate banner + 2-column metadata grid)
+     * Now strictly respects showCoords, showLocation, showTime, showAddress, and showNote!
      */
     private fun drawStyle2GisSurveyGrid(
         canvas: Canvas,
@@ -650,7 +691,7 @@ object WatermarkRenderer {
 
         val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(cfg.bgAlpha.coerceIn(110, 240), 9, 14, 26)
+            color = Color.argb(cfg.bgAlpha.coerceIn(90, 240), 9, 14, 26)
         }
         val rect = RectF(boxLeft, boxTop, boxLeft + boxW, boxTop + boxH)
         canvas.drawRoundRect(rect, 16f * scale, 16f * scale, bgPaint)
@@ -672,9 +713,14 @@ object WatermarkRenderer {
         val coordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = accentColor
             textSize = 25f * scale
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            typeface = TYPEFACE_MONO_BOLD
         }
-        val clippedCoord = ellipsizeToWidth(buildCoordString(cfg), coordPaint, boxW - 36f * scale)
+        val headerLineText = if (cfg.showCoords) {
+            buildCoordString(cfg)
+        } else {
+            "${cfg.customTitle.ifBlank { "经纬网格测绘" }} · ${cfg.coordSystem}"
+        }
+        val clippedCoord = ellipsizeToWidth(headerLineText, coordPaint, boxW - 36f * scale)
         canvas.drawText(clippedCoord, boxLeft + 18f * scale, boxTop + 37f * scale, coordPaint)
 
         // Grid lines
@@ -695,21 +741,25 @@ object WatermarkRenderer {
         val valPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = 24f * scale
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            typeface = TYPEFACE_DEFAULT_BOLD
         }
 
-        // Left Cell: 点位名称
-        canvas.drawText("测绘点位", boxLeft + 18f * scale, boxTop + headerH + 30f * scale, labelPaint)
-        val poiStr = ellipsizeToWidth(cfg.shortPoi.ifBlank { "实拍点位" }, valPaint, boxW * 0.48f - 28f * scale)
+        // Left Cell: 点位名称 or 项目标题
+        val leftLabel = if (cfg.showLocation) "测绘点位" else "核验项目"
+        val leftValRaw = if (cfg.showLocation) cfg.shortPoi.ifBlank { "实拍点位" } else cfg.customTitle.ifBlank { "现场点位核验" }
+        canvas.drawText(leftLabel, boxLeft + 18f * scale, boxTop + headerH + 30f * scale, labelPaint)
+        val poiStr = ellipsizeToWidth(leftValRaw, valPaint, boxW * 0.48f - 28f * scale)
         canvas.drawText(poiStr, boxLeft + 18f * scale, boxTop + headerH + 68f * scale, valPaint)
 
-        // Right Cell: 采样时间
-        canvas.drawText("采样时间", midX + 18f * scale, boxTop + headerH + 30f * scale, labelPaint)
+        // Right Cell: 采样时间 or 坐标基准
+        val rightLabel = if (cfg.showTime) "采样时间" else "定位基准"
+        val rightValRaw = if (cfg.showTime) cfg.timestamp else "${cfg.coordSystem} 零偏差对齐"
+        canvas.drawText(rightLabel, midX + 18f * scale, boxTop + headerH + 30f * scale, labelPaint)
         val timePaint = Paint(valPaint).apply {
             textSize = 22f * scale
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            typeface = TYPEFACE_MONO_BOLD
         }
-        val timeStr = ellipsizeToWidth(cfg.timestamp, timePaint, boxW * 0.52f - 28f * scale)
+        val timeStr = ellipsizeToWidth(rightValRaw, timePaint, boxW * 0.52f - 28f * scale)
         canvas.drawText(timeStr, midX + 18f * scale, boxTop + headerH + 68f * scale, timePaint)
 
         if (hasFooter) {
@@ -732,6 +782,7 @@ object WatermarkRenderer {
 
     /**
      * Style 3: 极简胶片底栏 (Full-width bottom cinema footer bar with strict left/right width bounds)
+     * Now strictly respects showLocation, showNote, showAddress, showCoords, and showTime!
      */
     private fun drawStyle3MinimalistFilmBar(
         canvas: Canvas,
@@ -744,7 +795,7 @@ object WatermarkRenderer {
         val barH = (if (isLandscape) 92f else 106f) * scale
         val barTop = height - barH
         val bgPaint = Paint().apply {
-            color = Color.argb(cfg.bgAlpha.coerceIn(150, 245), 8, 12, 20)
+            color = Color.argb(cfg.bgAlpha.coerceIn(110, 245), 8, 12, 20)
         }
         canvas.drawRect(0f, barTop, width.toFloat(), height.toFloat(), bgPaint)
 
@@ -762,35 +813,50 @@ object WatermarkRenderer {
         val leftTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = 28f * scale
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            typeface = TYPEFACE_DEFAULT_BOLD
         }
-        val poiText = ellipsizeToWidth(cfg.shortPoi.ifBlank { cfg.customTitle }, leftTitlePaint, maxLeftW)
+        val leftPrimary = if (cfg.showLocation && cfg.shortPoi.isNotBlank()) {
+            cfg.shortPoi
+        } else {
+            cfg.customTitle.ifBlank { "极速高德水印" }
+        }
+        val poiText = ellipsizeToWidth(leftPrimary, leftTitlePaint, maxLeftW)
         canvas.drawText(poiText, padX, barTop + 40f * scale, leftTitlePaint)
 
         val subLeftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(148, 163, 184)
             textSize = 21f * scale
         }
-        val subLeftRaw = cfg.note.ifBlank { cfg.address.ifBlank { cfg.dateWeek } }
+        val subLeftRaw = when {
+            cfg.showNote && cfg.note.isNotBlank() -> cfg.note
+            cfg.showAddress && cfg.address.isNotBlank() -> cfg.address
+            cfg.showTime -> cfg.dateWeek
+            else -> cfg.customTitle
+        }
         canvas.drawText(ellipsizeToWidth(subLeftRaw, subLeftPaint, maxLeftW), padX, barTop + 76f * scale, subLeftPaint)
 
-        val rightCoordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = accentColor
-            textSize = 23f * scale
-            textAlign = Paint.Align.RIGHT
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        if (cfg.showCoords) {
+            val rightCoordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = accentColor
+                textSize = 23f * scale
+                textAlign = Paint.Align.RIGHT
+                typeface = TYPEFACE_MONO_BOLD
+            }
+            val coordClipped = ellipsizeToWidth(buildCoordString(cfg), rightCoordPaint, maxRightW)
+            canvas.drawText(coordClipped, width - padX, barTop + 40f * scale, rightCoordPaint)
         }
-        val coordClipped = ellipsizeToWidth(buildCoordString(cfg), rightCoordPaint, maxRightW)
-        canvas.drawText(coordClipped, width - padX, barTop + 40f * scale, rightCoordPaint)
 
-        val subRightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(226, 232, 240)
-            textSize = 21f * scale
-            textAlign = Paint.Align.RIGHT
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+        if (cfg.showTime) {
+            val subRightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(226, 232, 240)
+                textSize = 21f * scale
+                textAlign = Paint.Align.RIGHT
+                typeface = TYPEFACE_MONO_NORMAL
+            }
+            val timeLine = "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ")}"
+            val yPos = if (cfg.showCoords) (barTop + 76f * scale) else (barTop + 56f * scale)
+            canvas.drawText(ellipsizeToWidth(timeLine, subRightPaint, maxRightW), width - padX, yPos, subRightPaint)
         }
-        val timeLine = "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ")}"
-        canvas.drawText(ellipsizeToWidth(timeLine, subRightPaint, maxRightW), width - padX, barTop + 76f * scale, subRightPaint)
     }
 
     /**
@@ -810,6 +876,8 @@ object WatermarkRenderer {
         if (cfg.showLocation) {
             val locVal = if (cfg.showAddress && cfg.address.isNotBlank()) "${cfg.shortPoi} · ${cfg.address}" else cfg.shortPoi
             rows.add("点位地址" to locVal)
+        } else if (cfg.showAddress && cfg.address.isNotBlank()) {
+            rows.add("点位地址" to cfg.address)
         }
         if (cfg.showTime) rows.add("记录时间" to "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ")}")
         if (cfg.showNote && cfg.note.isNotBlank()) rows.add("现场备注" to cfg.note)
@@ -825,7 +893,7 @@ object WatermarkRenderer {
 
         val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(cfg.bgAlpha.coerceIn(120, 240), 11, 19, 43)
+            color = Color.argb(cfg.bgAlpha.coerceIn(95, 240), 11, 19, 43)
         }
         canvas.drawRect(boxLeft, boxTop, boxLeft + boxW, boxTop + boxH, bgPaint)
 
@@ -845,7 +913,7 @@ object WatermarkRenderer {
         val headerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = 24f * scale
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            typeface = TYPEFACE_DEFAULT_BOLD
         }
         val titleStr = "${cfg.customTitle.ifBlank { "外业定点巡检台账" }} · ${cfg.coordSystem}"
         canvas.drawText(ellipsizeToWidth(titleStr, headerTextPaint, boxW - 28f * scale), boxLeft + 14f * scale, boxTop + 30f * scale, headerTextPaint)
@@ -857,7 +925,7 @@ object WatermarkRenderer {
 
         val cellPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 22f * scale
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            typeface = TYPEFACE_MONO_BOLD
         }
         val maxValW = (boxLeft + boxW) - colSplitX - 24f * scale
 
@@ -875,6 +943,10 @@ object WatermarkRenderer {
         }
     }
 
+    /**
+     * Save JPEG with standard EXIF GPS (WGS-84) + EXIF-compliant DateTime ("yyyy:MM:dd HH:mm:ss")
+     * + Dual-track JSON in UserComment.
+     */
     fun saveJpegWithDualTrackExif(bitmap: Bitmap, targetFile: File, cfg: WatermarkConfig) {
         FileOutputStream(targetFile).use { fos ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
@@ -885,7 +957,14 @@ object WatermarkRenderer {
             exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, if (cfg.wgsLon >= 0) "E" else "W")
             exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE, decimalToExifDms(cfg.wgsLat))
             exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, decimalToExifDms(cfg.wgsLon))
-            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, cfg.timestamp)
+            // Standard EXIF 2.3 format requires "yyyy:MM:dd HH:mm:ss"
+            val exifFormattedDate = if (cfg.timestamp.length >= 10) {
+                cfg.timestamp.substring(0, 10).replace('-', ':') + cfg.timestamp.substring(10)
+            } else {
+                cfg.timestamp
+            }
+            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, exifFormattedDate)
+            exif.setAttribute(ExifInterface.TAG_DATETIME, exifFormattedDate)
             exif.setAttribute(ExifInterface.TAG_USER_COMMENT, cfg.toJson())
             exif.saveAttributes()
         } catch (_: Exception) {}
@@ -896,9 +975,14 @@ object WatermarkRenderer {
         if (cfg.mediaStoreUri.isNotBlank()) {
             try {
                 val existingUri = Uri.parse(cfg.mediaStoreUri)
-                resolver.openOutputStream(existingUri, "wt")?.use { outStream ->
+                val outStream = try {
+                    resolver.openOutputStream(existingUri, "wt")
+                } catch (_: Exception) {
+                    resolver.openOutputStream(existingUri)
+                }
+                outStream?.use { out ->
                     wmFile.inputStream().use { inStream ->
-                        inStream.copyTo(outStream)
+                        inStream.copyTo(out)
                     }
                     return cfg.mediaStoreUri
                 }
@@ -946,6 +1030,9 @@ object WatermarkRenderer {
         }
         val wmBitmap = renderWatermarkedBitmap(cleanBitmap, cfg)
         saveJpegWithDualTrackExif(wmBitmap, wmFile, cfg)
+        if (wmBitmap !== cleanBitmap && !wmBitmap.isRecycled) {
+            wmBitmap.recycle()
+        }
 
         val savedUriStr = exportOrUpdateSystemCameraGallery(context, wmFile, cfg)
         cfg.mediaStoreUri = savedUriStr
@@ -1089,29 +1176,36 @@ object WatermarkRenderer {
             val maxDim = max(rawBmp.width, rawBmp.height)
             val cleanBmp = if (maxDim > 2400) {
                 val ratio = 2400f / maxDim
-                Bitmap.createScaledBitmap(rawBmp, (rawBmp.width * ratio).toInt(), (rawBmp.height * ratio).toInt(), true)
+                Bitmap.createScaledBitmap(rawBmp, (rawBmp.width * ratio).toInt(), (rawBmp.height * ratio).toInt(), true).also {
+                    if (it !== rawBmp && !rawBmp.isRecycled) rawBmp.recycle()
+                }
             } else rawBmp
 
-            saveNewPhotoEntry(context, cleanBmp, parsedCfg, alsoExportOriginal = false)
+            saveNewPhotoEntry(context, cleanBmp, parsedCfg, alsoExportOriginal = false).also {
+                if (!cleanBmp.isRecycled) cleanBmp.recycle()
+            }
         } catch (_: Exception) {
             null
         }
     }
 
     private fun readPhotoMetadataOrExif(file: File, fallbackLoc: LocationSnapshot, defaultSys: String): WatermarkConfig {
-        val (hm, dateWeek, fullTs) = WatermarkConfig.currentTimeStrings()
+        val (nowHm, nowDateWeek, nowFullTs) = WatermarkConfig.currentTimeStrings()
         try {
             val exif = ExifInterface(file.absolutePath)
             val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
             if (!comment.isNullOrBlank() && comment.trim().startsWith("{")) {
                 return WatermarkConfig.fromJson(comment.trim())
             }
+            val rawExifDate = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+            val (exifHm, exifDateWeek, exifFullTs) = WatermarkConfig.parseExifDateStrings(rawExifDate)
+
             val latLong = FloatArray(2)
             if (exif.getLatLong(latLong)) {
                 val wgsLat = latLong[0].toDouble()
                 val wgsLon = latLong[1].toDouble()
                 val gcj = CoordinateConverter.wgs84ToGcj02(wgsLat, wgsLon)
-                val exifDate = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: fullTs
                 return WatermarkConfig(
                     styleTemplate = 0,
                     coordSystem = defaultSys,
@@ -1124,9 +1218,9 @@ object WatermarkRenderer {
                     accuracyMeters = 3.0f,
                     shortPoi = String.format(Locale.US, "EXIF点位(%.4f°N)", gcj.lat),
                     address = String.format(Locale.US, "原相机EXIF坐标: %.6f, %.6f", gcj.lat, gcj.lon),
-                    timeHm = hm,
-                    dateWeek = dateWeek,
-                    timestamp = exifDate,
+                    timeHm = exifHm,
+                    dateWeek = exifDateWeek,
+                    timestamp = exifFullTs,
                     note = "原相机EXIF识别 · 已对齐高德坐标"
                 )
             }
@@ -1144,19 +1238,19 @@ object WatermarkRenderer {
             accuracyMeters = fallbackLoc.accuracyMeters,
             shortPoi = fallbackLoc.shortPoi,
             address = fallbackLoc.fullAddress,
-            timeHm = hm,
-            dateWeek = dateWeek,
-            timestamp = fullTs,
+            timeHm = nowHm,
+            dateWeek = nowDateWeek,
+            timestamp = nowFullTs,
             note = "外部相册导入"
         )
     }
 
     private fun decimalToExifDms(coord: Double): String {
-        val absVal = abs(coord)
-        val deg = floor(absVal).toInt()
-        val minFloat = (absVal - deg) * 60.0
-        val min = floor(minFloat).toInt()
-        val sec = ((minFloat - min) * 60.0 * 10000).toInt()
-        return "$deg/1,$min/1,$sec/10000"
+        val totalTenThousandthsSec = (abs(coord) * 3600.0 * 10000.0).roundToLong()
+        val deg = (totalTenThousandthsSec / 36_000_000L).toInt()
+        val remAfterDeg = totalTenThousandthsSec % 36_000_000L
+        val min = (remAfterDeg / 600_000L).toInt()
+        val secTenThousandths = (remAfterDeg % 600_000L).toInt()
+        return "$deg/1,$min/1,$secTenThousandths/10000"
     }
 }

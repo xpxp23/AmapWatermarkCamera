@@ -28,13 +28,19 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -63,6 +69,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -79,6 +86,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.fast.amapwatermark.util.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -121,6 +129,10 @@ class MainActivity : ComponentActivity() {
         fastLocationManager.stopUpdates()
     }
 }
+
+private val QUICK_TITLE_TAGS = listOf("现场点位核验", "工程巡检记录", "隐蔽工程验收", "外业测绘定桩", "安全隐患排查", "物资进场取证")
+private val QUICK_NOTE_TAGS = listOf("核验合格", "定位已校准", "施工进行中", "待整改复核", "初检通过", "已闭环归档")
+private val QUICK_POI_TAGS = listOf("1号点位", "施工现场", "巡检点A", "北门入口", "主楼基坑")
 
 @Composable
 fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
@@ -215,6 +227,8 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     var timerSeconds by remember { mutableStateOf(0) } // 0: 关, 3: 3s, 5: 5s, 10: 10s
     var activeTopInlineMenu by remember { mutableStateOf(0) } // 0: None, 1: Timer inline menu, 2: Flash inline menu
     var countdownRemaining by remember { mutableStateOf(0) }
+    var countdownJob by remember { mutableStateOf<Job?>(null) }
+    var isCapturing by remember { mutableStateOf(false) }
     var zoomRatio by remember { mutableStateOf(1.0f) }
     var maxZoomRatio by remember { mutableStateOf(4.0f) }
     var shutterFlashVisible by remember { mutableStateOf(false) }
@@ -248,15 +262,34 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
 
     // App settings
     var asyncOptimal by remember { mutableStateOf(prefs.getBoolean("asyncOptimal", true)) }
-    var accuracyThreshold by remember { mutableStateOf(10) }
+    var accuracyThreshold by remember { mutableStateOf(prefs.getInt("accuracyThreshold", 10)) }
     var keepCleanOriginal by remember { mutableStateOf(prefs.getBoolean("keepCleanOriginal", false)) }
+    var showGridLines by remember { mutableStateOf(prefs.getBoolean("showGridLines", false)) }
+    var templateSwitchBanner by remember { mutableStateOf<String?>(null) }
+    var templateBannerTrigger by remember { mutableStateOf(0) }
+
+    fun switchWatermarkTemplate(newIndex: Int) {
+        val total = WatermarkRenderer.STYLE_NAMES.size
+        val normalized = ((newIndex % total) + total) % total
+        styleTemplate = normalized
+        templateSwitchBanner = "🎨 模板 ${normalized + 1}/$total · ${WatermarkRenderer.STYLE_NAMES[normalized]}"
+        templateBannerTrigger++
+    }
+
+    LaunchedEffect(templateBannerTrigger) {
+        if (templateSwitchBanner != null) {
+            delay(1600L)
+            templateSwitchBanner = null
+        }
+    }
 
     LaunchedEffect(
         styleTemplate, customTitle, coordSystem, useDms, customNote,
         fontScale, accentColorIndex, bgAlpha, showTime, showLocation,
         showCoords, showCoordTag, showAccuracy, showAddress, showNote,
-        bottomRight, asyncOptimal, keepCleanOriginal
+        bottomRight, asyncOptimal, accuracyThreshold, keepCleanOriginal, showGridLines
     ) {
+        delay(250L)
         prefs.edit()
             .putInt("styleTemplate", styleTemplate)
             .putString("customTitle", customTitle)
@@ -275,7 +308,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             .putBoolean("showNote", showNote)
             .putBoolean("bottomRight", bottomRight)
             .putBoolean("asyncOptimal", asyncOptimal)
+            .putInt("accuracyThreshold", accuracyThreshold)
             .putBoolean("keepCleanOriginal", keepCleanOriginal)
+            .putBoolean("showGridLines", showGridLines)
             .apply()
     }
 
@@ -283,6 +318,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     var showFilterStrip by remember { mutableStateOf(false) }
     var showLocationSheet by remember { mutableStateOf(false) }
     var showWatermarkSheet by remember { mutableStateOf(false) }
+    var watermarkSheetTab by remember { mutableStateOf(0) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showGalleryScreen by remember { mutableStateOf(false) }
     var selectedGalleryPhoto by remember { mutableStateOf<PhotoEntry?>(null) }
@@ -447,18 +483,28 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         }
     }
 
-    // Capture execution logic (with exact optical rotation for 0°, 90°, 180°, 270°!)
+    // Capture execution logic (with countdown cancellation, concurrency guard & optical rotation!)
     fun performCapture() {
-        scope.launch {
-            activeTopInlineMenu = 0
-            if (countdownRemaining > 0) return@launch
-            if (timerSeconds > 0) {
-                for (sec in timerSeconds downTo 1) {
-                    countdownRemaining = sec
-                    delay(1000L)
+        if (countdownRemaining > 0) {
+            countdownJob?.cancel()
+            countdownJob = null
+            countdownRemaining = 0
+            isCapturing = false
+            Toast.makeText(context, "已取消倒计时拍摄", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (isCapturing) return
+        countdownJob = scope.launch {
+            isCapturing = true
+            try {
+                activeTopInlineMenu = 0
+                if (timerSeconds > 0) {
+                    for (sec in timerSeconds downTo 1) {
+                        countdownRemaining = sec
+                        delay(1000L)
+                    }
+                    countdownRemaining = 0
                 }
-                countdownRemaining = 0
-            }
 
             val needRearTorchPulse = (flashMode == 1 && !isFrontCamera)
             val needFrontScreenFlash = (flashMode == 1 && isFrontCamera)
@@ -541,12 +587,17 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     else -> 0
                 }
                 val uprightCleanBmp = WatermarkRenderer.rotateBitmapIfNeeded(rawViewfinderBmp, bitmapRotDeg)
+                if (uprightCleanBmp !== rawViewfinderBmp && !rawViewfinderBmp.isRecycled) {
+                    rawViewfinderBmp.recycle()
+                }
                 WatermarkRenderer.saveNewPhotoEntry(
                     context = context,
                     cleanBitmap = uprightCleanBmp,
                     cfg = snapshotCfg,
                     alsoExportOriginal = keepCleanOriginal
-                )
+                ).also {
+                    if (!uprightCleanBmp.isRecycled) uprightCleanBmp.recycle()
+                }
             }
             photos = listOf(savedEntry) + photos
             selectedGalleryPhoto = savedEntry
@@ -556,6 +607,10 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 if (justCapturedPhoto?.id == savedEntry.id) {
                     justCapturedPhoto = null
                 }
+            }
+            } finally {
+                countdownRemaining = 0
+                isCapturing = false
             }
         }
     }
@@ -584,12 +639,19 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             },
             onEditWatermark = { editingPhoto = it },
             onDeletePhoto = { target ->
-                target.cleanFile.delete()
-                target.watermarkedFile.delete()
-                target.metaFile.delete()
-                val remaining = photos.filterNot { it.id == target.id }
-                photos = remaining
-                selectedGalleryPhoto = remaining.firstOrNull()
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        BitmapCacheManager.invalidate(target.watermarkedFile)
+                        BitmapCacheManager.invalidate(target.cleanFile)
+                        target.cleanFile.delete()
+                        target.watermarkedFile.delete()
+                        target.metaFile.delete()
+                    }
+                    val remaining = photos.filterNot { it.id == target.id }
+                    photos = remaining
+                    selectedGalleryPhoto = remaining.firstOrNull()
+                    if (justCapturedPhoto?.id == target.id) justCapturedPhoto = null
+                }
             }
         )
     } else {
@@ -711,9 +773,17 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                             }
 
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(26.dp),
+                                horizontalArrangement = Arrangement.spacedBy(20.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                CameraTopBarItem(
+                                    label = if (showGridLines) "网格开" else "网格",
+                                    rotationDegrees = uiIconRotation,
+                                    onClick = { showGridLines = !showGridLines }
+                                ) {
+                                    GridLinesVectorIcon(active = showGridLines)
+                                }
+
                                 CameraTopBarItem(
                                     label = if (timerSeconds == 0) "倒计时" else "${timerSeconds}秒",
                                     rotationDegrees = uiIconRotation,
@@ -771,50 +841,87 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         },
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(deviceOrientation) {
-                                detectTapGestures { tapOffset ->
-                                    activeTopInlineMenu = 0
-                                    val w = size.width.toFloat()
-                                    val h = size.height.toFloat()
+                            .pointerInput(deviceOrientation, maxZoomRatio) {
+                                val swipeThresholdPx = 42.dp.toPx()
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    var totalPanX = 0f
+                                    var totalPanY = 0f
+                                    var isPinching = false
+                                    var swipeTriggered = false
 
-                                    // Check if user tapped on the live watermark region in the current orientation:
-                                    val tappedWatermarkZone = when (deviceOrientation) {
-                                        270 -> tapOffset.x < w * 0.28f // Physical bottom is Left edge
-                                        90 -> tapOffset.x > w * 0.72f  // Physical bottom is Right edge
-                                        180 -> tapOffset.y < h * 0.25f // Physical bottom is Top edge
-                                        else -> tapOffset.y > h * 0.75f // Physical bottom is Bottom edge
-                                    }
-                                    if (tappedWatermarkZone) {
-                                        showWatermarkSheet = true
-                                        return@detectTapGestures
-                                    }
-
-                                    // Otherwise trigger CameraX Tap-to-Focus & Exposure
-                                    focusPoint = tapOffset
-                                    focusTriggerId++
-                                    val pv = previewViewRef
-                                    val cam = cameraRef
-                                    if (pv != null && cam != null) {
-                                        try {
-                                            val pt = pv.meteringPointFactory.createPoint(tapOffset.x, tapOffset.y)
-                                            val action = FocusMeteringAction.Builder(pt, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
-                                                .setAutoCancelDuration(3, TimeUnit.SECONDS)
-                                                .build()
-                                            cam.cameraControl.startFocusAndMetering(action)
-                                        } catch (_: Exception) {}
-                                    }
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val activePointers = event.changes.count { it.pressed }
+                                        if (activePointers >= 2) {
+                                            isPinching = true
+                                            val zoomChange = event.calculateZoom()
+                                            if (zoomChange != 1.0f && event.calculateCentroidSize(useCurrent = false) > 0f) {
+                                                val nextZoom = (zoomRatio * zoomChange).coerceIn(1.0f, maxZoomRatio)
+                                                zoomRatio = nextZoom
+                                                try {
+                                                    cameraRef?.cameraControl?.setZoomRatio(nextZoom)
+                                                } catch (_: Exception) {}
+                                            }
+                                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                        } else if (!isPinching && !swipeTriggered && activePointers == 1) {
+                                            val pan = event.calculatePan()
+                                            totalPanX += pan.x
+                                            totalPanY += pan.y
+                                            if (abs(totalPanX) > swipeThresholdPx && abs(totalPanX) > abs(totalPanY) * 1.35f) {
+                                                swipeTriggered = true
+                                                val delta = if (totalPanX < 0f) 1 else -1
+                                                switchWatermarkTemplate(styleTemplate + delta)
+                                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                            }
+                                        }
+                                    } while (event.changes.any { it.pressed })
                                 }
                             }
-                            .pointerInput(maxZoomRatio) {
-                                detectTransformGestures { _, _, zoomChange, _ ->
-                                    if (zoomChange != 1.0f) {
-                                        val nextZoom = (zoomRatio * zoomChange).coerceIn(1.0f, maxZoomRatio)
+                            .pointerInput(deviceOrientation, maxZoomRatio) {
+                                detectTapGestures(
+                                    onDoubleTap = {
+                                        val nextZoom = if (zoomRatio < 1.8f) 2.0f.coerceAtMost(maxZoomRatio) else 1.0f
                                         zoomRatio = nextZoom
                                         try {
                                             cameraRef?.cameraControl?.setZoomRatio(nextZoom)
                                         } catch (_: Exception) {}
+                                    },
+                                    onTap = { tapOffset ->
+                                        activeTopInlineMenu = 0
+                                        if (showWatermarkSheet) {
+                                            showWatermarkSheet = false
+                                            return@detectTapGestures
+                                        }
+                                        val w = size.width.toFloat()
+                                        val h = size.height.toFloat()
+
+                                        val tappedWatermarkZone = when (deviceOrientation) {
+                                            270 -> tapOffset.x < w * 0.28f
+                                            90 -> tapOffset.x > w * 0.72f
+                                            180 -> tapOffset.y < h * 0.25f
+                                            else -> tapOffset.y > h * 0.75f
+                                        }
+                                        if (tappedWatermarkZone) {
+                                            showWatermarkSheet = true
+                                            return@detectTapGestures
+                                        }
+
+                                        focusPoint = tapOffset
+                                        focusTriggerId++
+                                        val pv = previewViewRef
+                                        val cam = cameraRef
+                                        if (pv != null && cam != null) {
+                                            try {
+                                                val pt = pv.meteringPointFactory.createPoint(tapOffset.x, tapOffset.y)
+                                                val action = FocusMeteringAction.Builder(pt, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                                                    .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                                                    .build()
+                                                cam.cameraControl.startFocusAndMetering(action)
+                                            } catch (_: Exception) {}
+                                        }
                                     }
-                                }
+                                )
                             }
                     )
                 } else {
@@ -838,6 +945,20 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         }) {
                             Text("立即授权开启相机")
                         }
+                    }
+                }
+
+                // Optional 3x3 Rule-of-Thirds Composition Gridlines
+                if (showGridLines) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val w = size.width
+                        val h = size.height
+                        val gridColor = Color(0x40FFFFFF)
+                        val strokePx = 1.dp.toPx()
+                        drawLine(gridColor, Offset(w / 3f, 0f), Offset(w / 3f, h), strokeWidth = strokePx)
+                        drawLine(gridColor, Offset(w * 2f / 3f, 0f), Offset(w * 2f / 3f, h), strokeWidth = strokePx)
+                        drawLine(gridColor, Offset(0f, h / 3f), Offset(w, h / 3f), strokeWidth = strokePx)
+                        drawLine(gridColor, Offset(0f, h * 2f / 3f), Offset(w, h * 2f / 3f), strokeWidth = strokePx)
                     }
                 }
 
@@ -929,6 +1050,32 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     ) {
                         RedPinVectorIcon(modifier = Modifier.size(14.dp))
                         Text("已存DCIM · 一键跳高德 →", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // Floating Template Switch HUD Pill (appears when swiping left/right)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = templateSwitchBanner != null,
+                    enter = fadeIn(tween(150)),
+                    exit = fadeOut(tween(250)),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 48.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .rotate(uiIconRotation)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xD90F172A))
+                            .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 16.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            text = templateSwitchBanner ?: "",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 
@@ -1039,6 +1186,43 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 }
             }
 
+            // Direct 5-Template Quick Switcher Bar (Swipe on viewfinder or 1-Tap here with 0 dialogs!)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF060911))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                WatermarkRenderer.STYLE_SHORT_NAMES.forEachIndexed { idx, shortName ->
+                    val isSel = (styleTemplate == idx)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 2.5.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (isSel) Color(0xFF0284C7) else Color(0xFF141D2E))
+                            .border(
+                                width = if (isSel) 1.dp else 0.dp,
+                                color = if (isSel) Color(0xFF38BDF8) else Color.Transparent,
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .clickable { switchWatermarkTemplate(idx) }
+                            .padding(vertical = 5.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = shortName,
+                            color = if (isSel) Color.White else Color(0xFF94A3B8),
+                            fontSize = 11.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
             // Optional Live Filter Selector Bar (Circular buttons so rotating in landscape never clips!)
             if (showFilterStrip) {
                 Row(
@@ -1119,11 +1303,12 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     PaperPlaneLocationIcon()
                 }
 
+                val isCountdownActive = countdownRemaining > 0
                 Box(
                     modifier = Modifier
                         .size(76.dp)
                         .clip(CircleShape)
-                        .border(4.dp, Color.White, CircleShape)
+                        .border(4.dp, if (isCountdownActive) Color(0xFFF59E0B) else Color.White, CircleShape)
                         .clickable { performCapture() }
                         .padding(6.dp),
                     contentAlignment = Alignment.Center
@@ -1132,8 +1317,13 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         modifier = Modifier
                             .fillMaxSize()
                             .clip(CircleShape)
-                            .background(Color(0x22FFFFFF))
-                    )
+                            .background(if (isCountdownActive) Color(0x66F59E0B) else Color(0x22FFFFFF)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isCountdownActive) {
+                            Text("停止", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
 
                 CameraBottomBarItem(
@@ -1146,9 +1336,10 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 }
 
                 CameraBottomBarItem(
-                    label = "水印",
+                    label = "水印设置",
+                    active = showWatermarkSheet,
                     rotationDegrees = uiIconRotation,
-                    onClick = { showWatermarkSheet = true }
+                    onClick = { showWatermarkSheet = !showWatermarkSheet }
                 ) {
                     WatermarkStampVectorIcon()
                 }
@@ -1180,18 +1371,36 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                "高德 GCJ-02: ${String.format(Locale.US, "%.6f, %.6f", loc.gcjLat, loc.gcjLon)}",
-                                color = Color(0xFF38BDF8),
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "高德 GCJ-02: ${String.format(Locale.US, "%.6f, %.6f", loc.gcjLat, loc.gcjLon)}",
+                                    color = Color(0xFF38BDF8),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.5.sp
+                                )
+                                Text(
+                                    text = "复制",
+                                    color = Color(0xFF38BDF8),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable {
+                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val txt = String.format(Locale.US, "%.6f,%.6f", loc.gcjLon, loc.gcjLat)
+                                        cm.setPrimaryClip(ClipData.newPlainText("GCJ-02", txt))
+                                        Toast.makeText(context, "已复制高德坐标: $txt", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
                             Text(
                                 "原始 WGS-84: ${String.format(Locale.US, "%.6f, %.6f", loc.wgsLat, loc.wgsLon)}",
                                 color = Color(0xFF94A3B8),
                                 fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp
+                                fontSize = 11.5.sp
                             )
                             Text(
                                 "已自动消除加密偏移 ${String.format(Locale.US, "%.1f", offsetDist)} 米 · 当前精度 ±${String.format(Locale.US, "%.1f", loc.accuracyMeters)}m",
@@ -1208,6 +1417,19 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        QUICK_POI_TAGS.forEach { tag ->
+                            SuggestionChip(
+                                onClick = { poiInput = tag },
+                                label = { Text(tag, fontSize = 11.sp) }
+                            )
+                        }
+                    }
                     OutlinedTextField(
                         value = addrInput,
                         onValueChange = { addrInput = it },
@@ -1236,11 +1458,11 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                             onClick = {
                                 locationManager.setCustomLocationText(null, null)
                                 locationManager.startHighFrequencyUpdates()
-                                Toast.makeText(context, "已重新请求硬件GPS定位", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "已恢复自动逆地理编码并刷新GPS", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("🛰 刷新GPS", fontSize = 12.sp)
+                            Text("🛰 自动定位", fontSize = 12.sp)
                         }
                         Button(
                             onClick = {
@@ -1276,136 +1498,267 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         )
     }
 
-    // ==================== DIALOG 2: 5套专业水印样式与深度自定义面板 ====================
+    // ==================== DIALOG 2: 半屏非遮挡式水印快捷设置面板 (上半屏实时预览可见) ====================
     if (showWatermarkSheet) {
-        AlertDialog(
-            onDismissRequest = { showWatermarkSheet = false },
-            containerColor = Color(0xFF0F172A),
-            title = {
-                Text("🎨 水印样式库与深度自定义", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-            },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+        BackHandler { showWatermarkSheet = false }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0x33000000))
+                .clickable { showWatermarkSheet = false },
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 450.dp)
+                    .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                    .background(Color(0xF20B132B))
+                    .border(1.dp, Color(0x3338BDF8), RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                    .clickable(enabled = false) {}
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("选择水印样式模板 (预览与实拍 100% 同步)", color = Color(0xFF94A3B8), fontSize = 12.sp)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        WatermarkRenderer.STYLE_NAMES.forEachIndexed { idx, title ->
-                            FilterChip(
-                                selected = styleTemplate == idx,
-                                onClick = { styleTemplate = idx },
-                                label = { Text(title, fontSize = 12.sp) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("🎨 水印快捷设置", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text("⇄ 取景框左右滑动可秒切模板", color = Color(0xFF38BDF8), fontSize = 11.sp)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            onClick = {
+                                styleTemplate = 0; coordSystem = "GCJ-02"; useDms = false
+                                fontScale = 1.0f; accentColorIndex = 0; bgAlpha = 185
+                                showTime = true; showLocation = true; showCoords = true
+                                showCoordTag = true; showAccuracy = true; showAddress = false
+                                showNote = true; bottomRight = false
+                                Toast.makeText(context, "已恢复默认水印配置", Toast.LENGTH_SHORT).show()
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("重置", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = { showWatermarkSheet = false },
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("完成", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF141D2E))
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    val tabs = listOf("⚡ 预设与开关", "🎨 外观与透明度", "✍️ 标题与常用词")
+                    tabs.forEachIndexed { idx, title ->
+                        val sel = (watermarkSheetTab == idx)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (sel) Color(0xFF0284C7) else Color.Transparent)
+                                .clickable { watermarkSheetTab = idx }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = title,
+                                color = if (sel) Color.White else Color(0xFF94A3B8),
+                                fontSize = 12.sp,
+                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium
                             )
                         }
                     }
+                }
 
-                    Text("画面显示坐标系 (高德跳转自动对齐GCJ-02)", color = Color(0xFF94A3B8), fontSize = 12.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        FilterChip(
-                            selected = coordSystem == "GCJ-02",
-                            onClick = { coordSystem = "GCJ-02" },
-                            label = { Text("GCJ-02 高德坐标") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = coordSystem == "WGS-84",
-                            onClick = { coordSystem = "WGS-84" },
-                            label = { Text("WGS-84 原始GPS") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    when (watermarkSheetTab) {
+                        0 -> {
+                            Text("一键场景方案 (1秒配齐模板与要素)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                QuickPresetButton("极简打卡", Modifier.weight(1f)) {
+                                    styleTemplate = 0; showTime = true; showLocation = true; showCoords = true
+                                    showCoordTag = true; showAccuracy = true; showAddress = false; showNote = false
+                                }
+                                QuickPresetButton("工程全要素", Modifier.weight(1f)) {
+                                    styleTemplate = 1; showTime = true; showLocation = true; showCoords = true
+                                    showCoordTag = true; showAccuracy = true; showAddress = true; showNote = true
+                                }
+                                QuickPresetButton("GIS测绘", Modifier.weight(1f)) {
+                                    styleTemplate = 2; useDms = true; showTime = true; showLocation = true
+                                    showCoords = true; showCoordTag = true; showAccuracy = true; showAddress = true; showNote = false
+                                }
+                                QuickPresetButton("标准台账", Modifier.weight(1f)) {
+                                    styleTemplate = 4; showTime = true; showLocation = true; showCoords = true
+                                    showCoordTag = true; showAccuracy = true; showAddress = true; showNote = true
+                                }
+                            }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        FilterChip(
-                            selected = !useDms,
-                            onClick = { useDms = false },
-                            label = { Text("十进制 (6位小数)") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = useDms,
-                            onClick = { useDms = true },
-                            label = { Text("度分秒 (DMS)") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                CompactToggleChip("高德 GCJ-02", coordSystem == "GCJ-02", Modifier.weight(1f)) { coordSystem = "GCJ-02" }
+                                CompactToggleChip("原始 WGS-84", coordSystem == "WGS-84", Modifier.weight(1f)) { coordSystem = "WGS-84" }
+                                CompactToggleChip(if (useDms) "格式: 度分秒" else "格式: 十进制", useDms, Modifier.weight(1f)) { useDms = !useDms }
+                            }
 
-                    Text("主题点缀色与字号大小", color = Color(0xFF94A3B8), fontSize = 12.sp)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            val colors = listOf(Color(0xFF38BDF8), Color(0xFF34D399), Color(0xFFFBBF24), Color(0xFFF87171))
-                            colors.forEachIndexed { idx, c ->
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .background(c)
-                                        .border(
-                                            width = if (accentColorIndex == idx) 2.5.dp else 0.dp,
-                                            color = Color.White,
-                                            shape = CircleShape
+                            Text("显示要素开关 (双列矩阵，点击即切)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                CompactToggleChip("✓ 时间与星期", showTime, Modifier.weight(1f)) { showTime = !showTime }
+                                CompactToggleChip("✓ 地点名称(📍)", showLocation, Modifier.weight(1f)) { showLocation = !showLocation }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                CompactToggleChip("✓ 经纬度坐标", showCoords, Modifier.weight(1f)) { showCoords = !showCoords }
+                                CompactToggleChip("✓ 坐标系标签", showCoordTag, Modifier.weight(1f)) { showCoordTag = !showCoordTag }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                CompactToggleChip("✓ 精度误差(±m)", showAccuracy, Modifier.weight(1f)) { showAccuracy = !showAccuracy }
+                                CompactToggleChip("✓ 完整街道地址", showAddress, Modifier.weight(1f)) { showAddress = !showAddress }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                CompactToggleChip("✓ 自定义备注", showNote, Modifier.weight(1f)) { showNote = !showNote }
+                                CompactToggleChip("✓ 卡片右下对齐", bottomRight, Modifier.weight(1f)) { bottomRight = !bottomRight }
+                            }
+                        }
+
+                        1 -> {
+                            Text("5款专业水印模板", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                WatermarkRenderer.STYLE_NAMES.forEachIndexed { idx, title ->
+                                    FilterChip(
+                                        selected = styleTemplate == idx,
+                                        onClick = { styleTemplate = idx },
+                                        label = { Text("${idx + 1}. $title", fontSize = 12.sp) }
+                                    )
+                                }
+                            }
+
+                            Text("点缀主题色与字号缩放", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    val colors = listOf(Color(0xFF38BDF8), Color(0xFF34D399), Color(0xFFFBBF24), Color(0xFFF87171))
+                                    colors.forEachIndexed { idx, c ->
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .background(c)
+                                                .border(if (accentColorIndex == idx) 2.5.dp else 0.dp, Color.White, CircleShape)
+                                                .clickable { accentColorIndex = idx }
                                         )
-                                        .clickable { accentColorIndex = idx }
-                                )
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(0.85f to "小号", 1.0f to "标准", 1.15f to "大号").forEach { (sc, lbl) ->
+                                        CompactToggleChip(lbl, abs(fontScale - sc) < 0.05f) { fontScale = sc }
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("卡片底色不透明度: ${(bgAlpha * 100 / 255)}%", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(120 to "通透", 185 to "标准", 230 to "深色").forEach { (alphaVal, lbl) ->
+                                        CompactToggleChip(lbl, abs(bgAlpha - alphaVal) < 20) { bgAlpha = alphaVal }
+                                    }
+                                }
+                            }
+                            Slider(
+                                value = bgAlpha.toFloat(),
+                                onValueChange = { bgAlpha = it.roundToInt().coerceIn(95, 240) },
+                                valueRange = 95f..240f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        2 -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("卡片标题 (点击标签一秒填入)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                                if (customTitle.isNotEmpty()) {
+                                    Text("清空", color = Color(0xFF38BDF8), fontSize = 11.5.sp, modifier = Modifier.clickable { customTitle = "" })
+                                }
+                            }
+                            OutlinedTextField(
+                                value = customTitle,
+                                onValueChange = { customTitle = it },
+                                placeholder = { Text("输入自定义卡片标题...") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                QUICK_TITLE_TAGS.forEach { tag ->
+                                    SuggestionChip(onClick = { customTitle = tag }, label = { Text(tag, fontSize = 11.sp) })
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("现场备注 (点击标签快捷追加)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                                if (customNote.isNotEmpty()) {
+                                    Text("清空", color = Color(0xFF38BDF8), fontSize = 11.5.sp, modifier = Modifier.clickable { customNote = "" })
+                                }
+                            }
+                            OutlinedTextField(
+                                value = customNote,
+                                onValueChange = { customNote = it },
+                                placeholder = { Text("例如：1号点位核验完成") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                QUICK_NOTE_TAGS.forEach { tag ->
+                                    SuggestionChip(
+                                        onClick = {
+                                            customNote = if (customNote.isBlank()) tag else "$customNote · $tag"
+                                            showNote = true
+                                        },
+                                        label = { Text("+ $tag", fontSize = 11.sp) }
+                                    )
+                                }
                             }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(0.85f to "小", 1.0f to "标准", 1.15f to "大").forEach { (sc, lbl) ->
-                                FilterChip(
-                                    selected = abs(fontScale - sc) < 0.05f,
-                                    onClick = { fontScale = sc },
-                                    label = { Text(lbl, fontSize = 11.sp) }
-                                )
-                            }
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = customTitle,
-                        onValueChange = { customTitle = it },
-                        label = { Text("水印卡片自定义标题") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = customNote,
-                        onValueChange = { customNote = it },
-                        label = { Text("自定义现场备注 (选填)") },
-                        placeholder = { Text("例如：1号点位核验完成") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Divider(color = Color(0xFF1E293B))
-                    Text("显示要素勾选开关", color = Color(0xFF94A3B8), fontSize = 12.sp)
-
-                    WatermarkToggleRow("显示时间与日期星期", showTime) { showTime = it }
-                    WatermarkToggleRow("显示地点名称 (📍POI)", showLocation) { showLocation = it }
-                    WatermarkToggleRow("显示高精度经纬度数值", showCoords) { showCoords = it }
-                    WatermarkToggleRow("显示坐标系标识 [GCJ-02/WGS-84]", showCoordTag) { showCoordTag = it }
-                    WatermarkToggleRow("显示实时定位误差 (±m)", showAccuracy) { showAccuracy = it }
-                    WatermarkToggleRow("显示完整省市区街道地址", showAddress) { showAddress = it }
-                    WatermarkToggleRow("显示自定义备注", showNote) { showNote = it }
-                    if (styleTemplate in listOf(1, 2, 4)) {
-                        WatermarkToggleRow("卡片靠右下角对齐", bottomRight) { bottomRight = it }
                     }
                 }
-            },
-            confirmButton = {
-                Button(onClick = { showWatermarkSheet = false }) { Text("完成") }
             }
-        )
+        }
     }
 
     // ==================== DIALOG 3: 顶部设置面板 ====================
@@ -1417,15 +1770,32 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 Text("⚙ 相机与定位核心设置", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     WatermarkToggleRow("默认采用高德 GCJ-02 火星坐标", coordSystem == "GCJ-02") {
                         coordSystem = if (it) "GCJ-02" else "WGS-84"
                     }
                     WatermarkToggleRow("秒拍0延迟 + 弱信号后台异步寻优", asyncOptimal) {
                         asyncOptimal = it
                     }
+                    if (asyncOptimal) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("异步收敛精度阈值", color = Color(0xFF94A3B8), fontSize = 12.5.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(5, 10, 20).forEach { th ->
+                                    CompactToggleChip("≤${th}m", accuracyThreshold == th) { accuracyThreshold = th }
+                                }
+                            }
+                        }
+                    }
                     WatermarkToggleRow("同时保存无水印纯净原图到系统相册", keepCleanOriginal) {
                         keepCleanOriginal = it
+                    }
+                    WatermarkToggleRow("取景框显示九宫格构图辅助线", showGridLines) {
+                        showGridLines = it
                     }
                     if (styleTemplate in listOf(1, 2, 4)) {
                         WatermarkToggleRow("卡片水印靠右下角对齐", bottomRight) {
@@ -1433,7 +1803,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         }
                     }
                     Text(
-                        "存储路径：与系统原相机完全一致（DCIM/Camera/IMG_yyyyMMdd_HHmmss.jpg）。\n四向重力自适应：支持竖屏、左横屏、右横屏、倒立竖屏四向光学对齐，预览与实拍 100% 一致。",
+                        "存储路径：与系统原相机完全一致（DCIM/Camera/IMG_yyyyMMdd_HHmmss.jpg）。\n快捷手势：取景框左右滑动直接切换5款水印模板；双击画面快速2X变焦。",
                         color = Color(0xFF94A3B8),
                         fontSize = 11.5.sp
                     )
@@ -1458,6 +1828,8 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         var editDateWeek by remember(target) { mutableStateOf(target.config.dateWeek) }
         var editLat by remember(target) { mutableStateOf(String.format(Locale.US, "%.6f", target.config.gcjLat)) }
         var editLon by remember(target) { mutableStateOf(String.format(Locale.US, "%.6f", target.config.gcjLon)) }
+        var editShowTime by remember(target) { mutableStateOf(target.config.showTime) }
+        var editShowLoc by remember(target) { mutableStateOf(target.config.showLocation) }
         var editShowCoords by remember(target) { mutableStateOf(target.config.showCoords) }
         var editShowAddr by remember(target) { mutableStateOf(target.config.showAddress) }
         var editShowNote by remember(target) { mutableStateOf(target.config.showNote) }
@@ -1494,18 +1866,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = editSys == "GCJ-02",
-                            onClick = { editSys = "GCJ-02" },
-                            label = { Text("GCJ-02 高德") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = editSys == "WGS-84",
-                            onClick = { editSys = "WGS-84" },
-                            label = { Text("WGS-84 原始") },
-                            modifier = Modifier.weight(1f)
-                        )
+                        CompactToggleChip("GCJ-02 高德", editSys == "GCJ-02", Modifier.weight(1f)) { editSys = "GCJ-02" }
+                        CompactToggleChip("WGS-84 原始", editSys == "WGS-84", Modifier.weight(1f)) { editSys = "WGS-84" }
+                        CompactToggleChip(if (editDms) "度分秒" else "十进制", editDms, Modifier.weight(1f)) { editDms = !editDms }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
@@ -1574,12 +1937,15 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         label = { Text("现场备注内容") },
                         modifier = Modifier.fillMaxWidth()
                     )
-                    WatermarkToggleRow("显示经纬度坐标", editShowCoords) { editShowCoords = it }
-                    WatermarkToggleRow("显示完整街道地址", editShowAddr) { editShowAddr = it }
-                    WatermarkToggleRow("显示备注文字", editShowNote) { editShowNote = it }
-                    WatermarkToggleRow("使用度分秒 (DMS) 格式", editDms) { editDms = it }
-                    if (editTemplate in listOf(1, 2, 4)) {
-                        WatermarkToggleRow("靠右下角对齐", editBottomRight) { editBottomRight = it }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        CompactToggleChip("✓ 时间", editShowTime, Modifier.weight(1f)) { editShowTime = !editShowTime }
+                        CompactToggleChip("✓ 地点", editShowLoc, Modifier.weight(1f)) { editShowLoc = !editShowLoc }
+                        CompactToggleChip("✓ 经纬", editShowCoords, Modifier.weight(1f)) { editShowCoords = !editShowCoords }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        CompactToggleChip("✓ 详细地址", editShowAddr, Modifier.weight(1f)) { editShowAddr = !editShowAddr }
+                        CompactToggleChip("✓ 备注", editShowNote, Modifier.weight(1f)) { editShowNote = !editShowNote }
+                        CompactToggleChip("✓ 右下对齐", editBottomRight, Modifier.weight(1f)) { editBottomRight = !editBottomRight }
                     }
                 }
             },
@@ -1588,6 +1954,12 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     val newGcjLat = editLat.toDoubleOrNull() ?: target.config.origGcjLat
                     val newGcjLon = editLon.toDoubleOrNull() ?: target.config.origGcjLon
                     val newWgs = CoordinateConverter.gcj02ToWgs84(newGcjLat, newGcjLon)
+                    val datePartOnly = editDateWeek.trim().substringBefore(" ").ifBlank {
+                        target.config.timestamp.substringBefore(" ")
+                    }
+                    val oldSecPart = target.config.timestamp.substringAfterLast(":", "00").take(2).ifBlank { "00" }
+                    val syncedFullTs = "${datePartOnly} ${editTimeHm.trim()}:$oldSecPart"
+
                     val updatedCfg = target.config.copy(
                         styleTemplate = editTemplate,
                         customTitle = editTitle,
@@ -1601,27 +1973,34 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         address = editAddr,
                         timeHm = editTimeHm,
                         dateWeek = editDateWeek,
+                        timestamp = syncedFullTs,
                         note = editNote,
+                        showTime = editShowTime,
+                        showLocation = editShowLoc,
                         showCoords = editShowCoords,
                         showAddress = editShowAddr,
                         showNote = editShowNote,
                         bottomRight = editBottomRight
                     )
                     scope.launch {
-                        withContext(Dispatchers.IO) {
+                        val reloaded = withContext(Dispatchers.IO) {
                             val cleanBmp = BitmapCacheManager.loadDisplayBitmap(target.cleanFile, 2400)
                             if (cleanBmp != null) {
                                 val recomposited = WatermarkRenderer.renderWatermarkedBitmap(cleanBmp, updatedCfg)
                                 WatermarkRenderer.saveJpegWithDualTrackExif(recomposited, target.watermarkedFile, updatedCfg)
+                                if (recomposited !== cleanBmp && !recomposited.isRecycled) {
+                                    recomposited.recycle()
+                                }
                                 val newUri = WatermarkRenderer.exportOrUpdateSystemCameraGallery(context, target.watermarkedFile, updatedCfg)
                                 updatedCfg.mediaStoreUri = newUri
                                 target.metaFile.writeText(updatedCfg.toJson())
                                 BitmapCacheManager.invalidate(target.watermarkedFile)
                             }
+                            WatermarkRenderer.loadSavedPhotos(context)
                         }
                         target.config = updatedCfg
-                        photos = WatermarkRenderer.loadSavedPhotos(context)
-                        selectedGalleryPhoto = photos.find { it.id == target.id } ?: photos.firstOrNull()
+                        photos = reloaded
+                        selectedGalleryPhoto = reloaded.find { it.id == target.id } ?: reloaded.firstOrNull()
                         editingPhoto = null
                         Toast.makeText(context, "水印已无损重绘并同步更新至系统相册 DCIM/Camera！", Toast.LENGTH_SHORT).show()
                     }
@@ -1663,9 +2042,13 @@ fun WysiwygLiveWatermarkCanvas(
     accentColorIndex: Int
 ) {
     var timeTick by remember { mutableStateOf(WatermarkConfig.currentTimeStrings()) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(styleTemplate, showTime) {
+        if (!showTime) return@LaunchedEffect
         while (true) {
-            timeTick = WatermarkConfig.currentTimeStrings()
+            val next = WatermarkConfig.currentTimeStrings()
+            if (styleTemplate != 0 || next.first != timeTick.first || next.second != timeTick.second) {
+                timeTick = next
+            }
             delay(1000L)
         }
     }
@@ -1772,7 +2155,7 @@ fun GalleryAndSystemPhotosScreen(
     var isScanningSys by remember { mutableStateOf(false) }
 
     LaunchedEffect(galleryTab) {
-        if (galleryTab == 1) {
+        if (galleryTab == 1 && systemPhotos.isEmpty()) {
             isScanningSys = true
             val scanned = withContext(Dispatchers.IO) {
                 WatermarkRenderer.scanSystemCameraPhotos(context, maxCount = 60)
@@ -2213,6 +2596,73 @@ fun GalleryAndSystemPhotosScreen(
 // ============================================================================
 // CUSTOM VECTOR ICONS & REUSABLE UI COMPONENTS
 // ============================================================================
+@Composable
+fun CompactToggleChip(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Color(0xFF0369A1) else Color(0xFF1E293B))
+            .border(1.dp, if (selected) Color(0xFF38BDF8) else Color(0xFF334155), RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = if (selected) Color.White else Color(0xFF94A3B8),
+            fontSize = 11.5.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+fun QuickPresetButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF1E293B))
+            .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+@Composable
+fun GridLinesVectorIcon(active: Boolean) {
+    val tint = if (active) Color(0xFF38BDF8) else Color.White
+    Canvas(modifier = Modifier.size(24.dp)) {
+        val w = size.width
+        val h = size.height
+        val stroke = 1.8.dp.toPx()
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.1f, h * 0.1f),
+            size = Size(w * 0.8f, h * 0.8f),
+            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        drawLine(tint, Offset(w * 0.37f, h * 0.1f), Offset(w * 0.37f, h * 0.9f), strokeWidth = stroke)
+        drawLine(tint, Offset(w * 0.63f, h * 0.1f), Offset(w * 0.63f, h * 0.9f), strokeWidth = stroke)
+        drawLine(tint, Offset(w * 0.1f, h * 0.37f), Offset(w * 0.9f, h * 0.37f), strokeWidth = stroke)
+        drawLine(tint, Offset(w * 0.1f, h * 0.63f), Offset(w * 0.9f, h * 0.63f), strokeWidth = stroke)
+    }
+}
+
 @Composable
 fun CameraTopBarItem(
     label: String,
