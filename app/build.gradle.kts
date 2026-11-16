@@ -11,8 +11,8 @@ android {
         applicationId = "com.fast.amapwatermark"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "5.0.0"
+        versionCode = 6
+        versionName = "6.0.0"
     }
 
     buildTypes {
@@ -47,7 +47,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
 
-    // CameraX for real hardware viewfinder, tap-to-focus, zoom, flash, and zero-shutter-lag capture
+    // CameraX for real hardware viewfinder, tap-to-focus, zoom, flash, and dual-mode capture
     val cameraxVersion = "1.3.4"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")

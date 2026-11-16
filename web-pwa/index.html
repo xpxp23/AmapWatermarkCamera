@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>极速经纬水印相机 · 专业实景高德零偏差版</title>
+  <title>极速经纬水印相机 v6.0.0 · 专业实景高德零偏差版</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -36,21 +36,18 @@
 </head>
 <body class="min-h-screen bg-black text-white flex flex-col items-center justify-center select-none">
 
-  <!-- Phone Frame Container (Full screen on mobile, sleek phone frame on desktop) -->
   <div class="w-full max-w-[460px] min-h-screen sm:min-h-[840px] sm:max-h-[92vh] sm:rounded-[32px] sm:border sm:border-neutral-800 bg-black flex flex-col justify-between overflow-hidden shadow-2xl relative">
 
-    <!-- ==================== 1. TOP BLACK CAMERA BAR (1:1 FIGURE 3) ==================== -->
-    <header class="w-full h-[82px] bg-black px-6 flex items-center justify-between shrink-0 z-20">
-      <!-- Left: 设置 -->
+    <!-- ==================== 1. TOP BLACK CAMERA BAR ==================== -->
+    <header class="w-full h-[82px] bg-black px-5 flex items-center justify-between shrink-0 z-20">
       <button id="btnTopSettings" type="button" class="flex flex-col items-center gap-1 group active:scale-95 transition">
-        <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
         </svg>
         <span class="text-[11px] text-neutral-200 tracking-wide">设置</span>
       </button>
 
-      <!-- Inline Non-Popup Submenu for Timer -->
       <div id="inlineTimerBar" class="hidden flex-1 mx-2 bg-slate-900 border border-slate-700 rounded-full px-3 py-1 items-center justify-between text-xs">
         <span class="text-slate-400">⏱ 倒计时</span>
         <button type="button" data-timer="0" class="timer-opt px-2.5 py-0.5 rounded-full bg-sky-600 text-white font-bold">关闭</button>
@@ -59,7 +56,6 @@
         <button type="button" data-timer="10" class="timer-opt px-2.5 py-0.5 rounded-full text-slate-300">10秒</button>
       </div>
 
-      <!-- Inline Non-Popup Submenu for Flash -->
       <div id="inlineFlashBar" class="hidden flex-1 mx-2 bg-slate-900 border border-slate-700 rounded-full px-3 py-1 items-center justify-between text-xs">
         <span class="text-slate-400">⚡ 闪光</span>
         <button type="button" data-flash="0" class="flash-opt px-2.5 py-0.5 rounded-full bg-amber-500 text-black font-bold">关闭</button>
@@ -68,17 +64,25 @@
         <button type="button" data-flash="3" class="flash-opt px-2.5 py-0.5 rounded-full text-slate-300">常亮</button>
       </div>
 
-      <!-- Right: 横竖屏 | 倒计时 | 闪光灯 | 翻转 -->
-      <div id="topRightIconsRow" class="flex items-center gap-5">
-        <button id="btnTopOrientation" type="button" class="flex flex-col items-center gap-1 active:scale-95 transition" title="自动/手动切换横竖屏拍照模式">
+      <div id="topRightIconsRow" class="flex items-center gap-4">
+        <button id="btnTopCaptureMode" type="button" class="flex flex-col items-center gap-1 active:scale-95 transition" title="切换光学拍照与极速截屏模式">
           <svg class="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+            <rect x="3" y="6" width="18" height="13" rx="2.5"/>
+            <circle cx="12" cy="12.5" r="3.5"/>
+          </svg>
+          <span id="captureModeLabel" class="text-[11px] text-sky-300">光学拍照</span>
+        </button>
+
+        <button id="btnTopOrientation" type="button" class="flex flex-col items-center gap-1 active:scale-95 transition">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
             <rect x="5" y="3" width="14" height="18" rx="2"/>
             <path stroke-linecap="round" d="M9 18h6"/>
           </svg>
-          <span id="oriLabelText" class="text-[11px] text-sky-300">竖屏</span>
+          <span id="oriLabelText" class="text-[11px] text-neutral-200">竖屏</span>
         </button>
+
         <button id="btnTopTimer" type="button" class="flex flex-col items-center gap-1 active:scale-95 transition">
-          <div class="relative w-7 h-7 flex items-center justify-center">
+          <div class="relative w-6 h-6 flex items-center justify-center">
             <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l2.5 2.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
@@ -88,8 +92,8 @@
         </button>
 
         <button id="btnTopFlash" type="button" class="flex flex-col items-center gap-1 active:scale-95 transition">
-          <div class="relative w-7 h-7 flex items-center justify-center">
-            <svg id="flashSvgIcon" class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+          <div class="relative w-6 h-6 flex items-center justify-center">
+            <svg id="flashSvgIcon" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
             </svg>
             <span id="flashBadgeText" class="text-[10px] font-medium text-white ml-0.5">关</span>
@@ -98,7 +102,7 @@
         </button>
 
         <button id="btnTopFlip" type="button" class="flex flex-col items-center gap-1 active:scale-95 transition">
-          <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16v10H4V7zm4 5h.01M16 12h.01"/>
           </svg>
           <span class="text-[11px] text-neutral-200">翻转</span>
@@ -106,36 +110,25 @@
       </div>
     </header>
 
-    <!-- ==================== 2. CENTER 3:4 LIVE CAMERA VIEWFINDER ==================== -->
+    <!-- ==================== 2. CENTER LIVE CAMERA VIEWFINDER ==================== -->
     <div id="viewfinderContainer" class="relative w-full flex-1 bg-neutral-900 overflow-hidden cursor-crosshair">
-      <!-- Real Camera Video Stream -->
       <video id="cameraVideo" autoplay playsinline muted class="hidden w-full h-full object-cover"></video>
-      <!-- Simulated High-FPS Realistic Desk/Outdoor Viewfinder Canvas -->
       <canvas id="viewfinderCanvas" width="1080" height="1440" class="w-full h-full object-cover block"></canvas>
 
-      <!-- Live Filter Overlay -->
-      <div id="liveFilterOverlay" class="pointer-events-none absolute inset-0 transition-colors duration-200"></div>
+      <!-- WYSIWYG Live Watermark Overlay Canvas (Renders all 5 templates + QR code identically to photo output) -->
+      <canvas id="liveWatermarkCanvas" width="1080" height="1440" class="pointer-events-none absolute inset-0 w-full h-full object-cover z-20"></canvas>
 
-      <!-- Shutter White Flash Overlay -->
       <div id="shutterFlashOverlay" class="pointer-events-none absolute inset-0 bg-white opacity-0 z-30"></div>
 
-      <!-- Top-Left GPS Lock Status Pill -->
-      <button id="btnGpsPill" type="button" class="absolute top-3 left-3 z-20 px-3 py-1 rounded-full bg-black/55 backdrop-blur-md border border-white/15 flex items-center gap-1.5 text-[11px] font-mono-num text-white shadow">
+      <button id="btnGpsPill" type="button" class="absolute top-3 left-3 z-30 px-3 py-1 rounded-full bg-slate-950/75 backdrop-blur-md border border-sky-400/30 flex items-center gap-1.5 text-[11px] font-mono-num text-white shadow">
         <span id="gpsDot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
-        <span id="gpsPillText">GCJ-02 · ±2.4m</span>
+        <span id="gpsPillText">GCJ-02 · ±2.4m · 光学拍照</span>
       </button>
 
-      <!-- Async Convergence Banner -->
-      <div id="asyncBanner" class="hidden absolute top-12 left-1/2 -translate-x-1/2 z-20 bg-amber-400 text-black px-3.5 py-1 rounded-full text-xs font-bold shadow-lg">
-        底图已0ms定格 · 正在后台寻优高德坐标...
-      </div>
-
-      <!-- Countdown Big Number Overlay -->
-      <div id="countdownOverlay" class="hidden pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+      <div id="countdownOverlay" class="hidden pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
         <span id="countdownNumText" class="text-8xl font-bold text-white text-shadow-strong">3</span>
       </div>
 
-      <!-- TAP-TO-FOCUS SQUARE BOX + SUN EXPOSURE ICON (1:1 FIGURE 3) -->
       <div id="focusBoxWrapper" class="pointer-events-none absolute z-10 flex items-center gap-2 transition-all duration-150" style="left: 56%; top: 26%;">
         <div class="relative w-[78px] h-[78px] border-[1.8px] border-white">
           <span class="absolute top-0 left-1/2 -translate-x-1/2 w-[1.8px] h-2 bg-white"></span>
@@ -143,56 +136,18 @@
           <span class="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-[1.8px] bg-white"></span>
           <span class="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-[1.8px] bg-white"></span>
         </div>
-        <!-- Sun brightness icon right next to focus square -->
         <svg class="w-6 h-6 text-white drop-shadow" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="4"/>
           <path stroke-linecap="round" d="M12 3v2m0 14v2M3 12h2m14 0h2m-15.36-6.36l1.42 1.42m11.31 11.31l1.42 1.42M5.64 18.36l1.42-1.42m11.31-11.31l1.42-1.42"/>
         </svg>
       </div>
 
-      <!-- RIGHT-EDGE FLOATING CIRCULAR ZOOM BUTTON ("1.0X" - 1:1 FIGURE 3) -->
-      <button id="btnZoomCircle" type="button" class="absolute right-3.5 top-[52%] z-20 w-11 h-11 rounded-full bg-black/45 border-[1.5px] border-white flex items-center justify-center text-xs font-semibold text-white backdrop-blur-sm active:scale-95 transition">
+      <button id="btnZoomCircle" type="button" class="absolute right-3.5 top-[48%] z-30 w-11 h-11 rounded-full bg-black/45 border-[1.5px] border-white flex items-center justify-center text-xs font-semibold text-white backdrop-blur-sm active:scale-95 transition">
         1.0X
       </button>
-
-      <!-- LIVE WATERMARK OVERLAY AT BOTTOM OF VIEWFINDER (1:1 FIGURE 3 CENTERED BIG TIME + COORDS) -->
-      <div id="liveWatermarkArea" class="absolute inset-x-0 bottom-0 z-20 pt-10 pb-4 px-4 bg-gradient-to-t from-black/75 via-black/30 to-transparent cursor-pointer">
-        <!-- Style 0: Centered Big Time ("19:09" + "2026-10-19 星期一 📍小庄村" + Lat/Lon pill) -->
-        <div id="wmStyleCentered" class="flex flex-col items-center text-center">
-          <div id="wmBigTime" class="text-[56px] leading-none font-light tracking-tight text-white text-shadow-strong mb-1.5">19:09</div>
-          <div class="flex items-center justify-center gap-1 text-[15px] font-normal text-white text-shadow-strong">
-            <span id="wmDateWeekday">2026-10-19 星期一</span>
-            <span id="wmPinAndPoi" class="inline-flex items-center gap-0.5 ml-1">
-              <!-- Red Pin SVG -->
-              <svg class="w-4 h-4 text-red-500 shrink-0 drop-shadow" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2a7 7 0 00-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 00-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"/>
-              </svg>
-              <span id="wmShortPoiText">小庄村</span>
-            </span>
-          </div>
-          <!-- High-Precision Amap Coordinate Pill -->
-          <div id="wmCoordPill" class="mt-2 px-3 py-0.5 rounded-full bg-slate-950/65 border border-white/15 backdrop-blur-sm text-[11.5px] font-mono-num font-semibold text-sky-300 shadow">
-            39.908823°N, 116.397470°E [GCJ-02] ±2.4m
-          </div>
-          <div id="wmExtraNoteLine" class="hidden mt-1 text-xs text-amber-200 text-shadow-strong"></div>
-        </div>
-
-        <!-- Style 1: Left-Aligned Engineering Card -->
-        <div id="wmStyleCard" class="hidden max-w-[88%] rounded-xl p-3 bg-slate-950/75 border border-white/20 backdrop-blur-md text-xs space-y-1">
-          <div class="flex items-center gap-1.5 font-bold text-white border-b border-white/15 pb-1">
-            <span class="w-1.5 h-3.5 bg-sky-400 rounded-sm"></span>
-            <span>高德精准经纬水印</span>
-            <span id="wmCardSysBadge" class="text-[10px] font-mono-num px-1.5 rounded bg-sky-500/30 text-sky-200">GCJ-02</span>
-          </div>
-          <div id="wmCardCoordLine" class="font-mono-num text-sky-300 font-semibold"></div>
-          <div id="wmCardAddrLine" class="text-white"></div>
-          <div id="wmCardTimeLine" class="font-mono-num text-neutral-300"></div>
-          <div id="wmCardNoteLine" class="text-amber-200"></div>
-        </div>
-      </div>
     </div>
 
-    <!-- 5-Template Quick Switcher Bar (Swipe or 1-Tap) -->
+    <!-- 5-Template Quick Switcher Bar -->
     <div id="tplQuickBar" class="w-full bg-slate-950 border-t border-slate-900 px-2.5 py-1.5 flex items-center justify-between gap-1.5 z-20 text-[11px]">
       <button type="button" data-tpl="0" class="tpl-quick-pill flex-1 py-1 rounded-full font-bold bg-sky-600 text-white">大字时间</button>
       <button type="button" data-tpl="1" class="tpl-quick-pill flex-1 py-1 rounded-full text-slate-400 bg-slate-900">巡检卡片</button>
@@ -210,9 +165,8 @@
       <button type="button" data-filter="4" class="filter-chip px-3 py-1 rounded-full text-xs text-neutral-300 bg-neutral-800">黑白</button>
     </div>
 
-    <!-- ==================== 3. BOTTOM BLACK CONTROL BAR (1:1 FIGURE 3) ==================== -->
+    <!-- ==================== 3. BOTTOM BLACK CONTROL BAR ==================== -->
     <footer class="w-full h-[126px] bg-black px-6 flex items-center justify-between shrink-0 z-20">
-      <!-- 1. 相册 (Circular Thumbnail + Label) -->
       <button id="btnBottomGallery" type="button" class="flex flex-col items-center gap-1.5 active:scale-95 transition">
         <div class="relative w-11 h-11 rounded-full overflow-hidden border-[1.5px] border-white bg-neutral-800">
           <img id="bottomGalleryThumb" src="" alt="相册" class="w-full h-full object-cover" />
@@ -220,7 +174,6 @@
         <span class="text-xs text-white">相册</span>
       </button>
 
-      <!-- 2. 地点 (Paper-plane navigation arrow + Label) -->
       <button id="btnBottomLocation" type="button" class="flex flex-col items-center gap-1.5 active:scale-95 transition">
         <div class="w-11 h-11 flex items-center justify-center">
           <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
@@ -230,12 +183,10 @@
         <span class="text-xs text-white">地点</span>
       </button>
 
-      <!-- 3. Center Big White Ring Shutter Button -->
-      <button id="btnShutterMain" type="button" aria-label="拍照" class="w-[76px] h-[76px] rounded-full border-[4px] border-white p-1.5 flex items-center justify-center active:scale-90 transition-transform">
-        <span class="w-full h-full rounded-full bg-white/10 hover:bg-white/20 transition"></span>
+      <button id="btnShutterMain" type="button" aria-label="拍照" class="w-[76px] h-[76px] rounded-full border-[4px] border-sky-400 p-1.5 flex items-center justify-center active:scale-90 transition-transform">
+        <span class="w-full h-full rounded-full bg-white/15 hover:bg-white/25 transition"></span>
       </button>
 
-      <!-- 4. 滤镜 (Three interlocking rings + Label) -->
       <button id="btnBottomFilter" type="button" class="flex flex-col items-center gap-1.5 active:scale-95 transition">
         <div class="w-11 h-11 flex items-center justify-center">
           <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
@@ -247,7 +198,6 @@
         <span class="text-xs text-white">滤镜</span>
       </button>
 
-      <!-- 5. 水印 (Watermark frame icon + Label) -->
       <button id="btnBottomWatermark" type="button" class="flex flex-col items-center gap-1.5 active:scale-95 transition">
         <div class="w-11 h-11 flex items-center justify-center">
           <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
@@ -259,26 +209,23 @@
       </button>
     </footer>
 
-    <!-- ==================== OVERLAY SCREEN: IN-APP GALLERY & AMAP ZERO-OFFSET JUMP ==================== -->
+    <!-- ==================== OVERLAY SCREEN: IN-APP GALLERY ==================== -->
     <div id="screenGallery" class="hidden absolute inset-0 z-40 bg-slate-950 flex-col justify-between">
-      <!-- Top Bar -->
       <div class="bg-black px-4 py-3.5 flex items-center justify-between border-b border-slate-800">
         <button id="btnGalleryBack" type="button" class="text-sm font-semibold text-white flex items-center gap-1">
           <span>← 返回相机</span>
         </button>
-        <span id="galleryTitleText" class="text-sm font-bold text-white">已拍相册 (2)</span>
+        <span id="galleryTitleText" class="text-sm font-bold text-white">已拍相册 (1)</span>
         <label for="inputImportExifPhoto" class="cursor-pointer px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-xs font-semibold text-white">
           📥 导入相册照片
         </label>
         <input id="inputImportExifPhoto" type="file" accept="image/jpeg,image/png,image/webp" class="hidden" />
       </div>
 
-      <!-- Main Selected Photo Preview -->
       <div class="flex-1 bg-black flex items-center justify-center p-2 overflow-hidden">
         <img id="galleryMainImg" src="" alt="已拍照片大图" class="max-w-full max-h-full object-contain rounded-lg" />
       </div>
 
-      <!-- Coordinate Info & One-Click Amap Jump Panel -->
       <div class="bg-slate-900 border-t border-slate-800 p-3.5 space-y-2.5">
         <div class="flex items-center justify-between gap-2">
           <div class="min-w-0">
@@ -292,10 +239,10 @@
         </div>
 
         <div class="grid grid-cols-12 gap-2">
-          <a id="btnGalleryJumpAmapPin" href="https://uri.amap.com/marker" class="col-span-7 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white text-center shadow-lg flex items-center justify-center gap-1">
+          <a id="btnGalleryJumpAmapPin" href="https://uri.amap.com/marker" target="_blank" class="col-span-7 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white text-center shadow-lg flex items-center justify-center gap-1">
             <span>📍 一键跳高德地图 (丝毫不差)</span>
           </a>
-          <a id="btnGalleryJumpAmapNavi" href="https://uri.amap.com/navigation" class="col-span-5 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white text-center shadow-lg flex items-center justify-center gap-1">
+          <a id="btnGalleryJumpAmapNavi" href="https://uri.amap.com/navigation" target="_blank" class="col-span-5 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white text-center shadow-lg flex items-center justify-center gap-1">
             <span>🧭 导航去这里</span>
           </a>
         </div>
@@ -310,7 +257,6 @@
         </div>
       </div>
 
-      <!-- Bottom Thumbnail Strip -->
       <div id="galleryThumbStrip" class="bg-black px-3 py-2.5 flex items-center gap-2.5 overflow-x-auto border-t border-slate-900">
       </div>
     </div>
@@ -357,7 +303,7 @@
       </div>
     </div>
 
-    <!-- ==================== MODAL: 水印样式与字段定制 (也用于已拍照片无损改水印) ==================== -->
+    <!-- ==================== MODAL: 水印样式与字段定制 ==================== -->
     <div id="modalWatermark" class="hidden absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
       <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full p-4 space-y-3 max-h-[88vh] overflow-y-auto">
         <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
@@ -418,6 +364,10 @@
 
           <div class="grid grid-cols-2 gap-2 pt-1">
             <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800">
+              <input id="wmChkQr" type="checkbox" checked class="accent-blue-500" />
+              <span>显示扫码跳高德角标</span>
+            </label>
+            <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800">
               <input id="wmChkTime" type="checkbox" checked class="accent-blue-500" />
               <span>显示时间日期</span>
             </label>
@@ -433,6 +383,10 @@
               <input id="wmChkNote" type="checkbox" checked class="accent-blue-500" />
               <span>显示自定义备注</span>
             </label>
+            <label class="flex items-center gap-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800">
+              <input id="wmChkEnv" type="checkbox" class="accent-blue-500" />
+              <span>显示海拔与方位角</span>
+            </label>
           </div>
         </div>
 
@@ -444,20 +398,27 @@
       </div>
     </div>
 
-    <!-- ==================== MODAL: 顶部设置面板 ==================== -->
+    <!-- ==================== MODAL: 顶部设置面板 (含拍照模式/截屏模式切换) ==================== -->
     <div id="modalSettings" class="hidden absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3">
       <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full p-4 space-y-3 text-xs">
         <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
-          <h3 class="text-sm font-bold text-white">⚙ 相机与高德定位设置</h3>
+          <h3 class="text-sm font-bold text-white">⚙ 相机引擎与高德定位设置</h3>
           <button id="btnCloseSettingsModal" type="button" class="text-slate-400 hover:text-white text-sm">✕</button>
         </div>
         <div class="space-y-3">
+          <div>
+            <div class="text-sky-400 font-bold mb-1.5">拍摄引擎模式 (随时切换)</div>
+            <div class="grid grid-cols-2 gap-2">
+              <button id="btnSetModeOptical" type="button" class="py-2 rounded-lg bg-sky-600 text-white font-bold border border-sky-400">📷 光学拍照模式</button>
+              <button id="btnSetModeScreen" type="button" class="py-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">⚡ 极速截屏模式</button>
+            </div>
+          </div>
           <label class="flex items-center justify-between">
-            <span>启用手机真实光学摄像头</span>
+            <span>启用手机真实光学摄像头流</span>
             <button id="btnToggleHardwareCam" type="button" class="px-3 py-1 rounded-lg bg-sky-600 text-white font-semibold">开启摄像头</button>
           </label>
           <label class="flex items-center justify-between">
-            <span>秒拍0延迟 + 弱信号后台异步寻优</span>
+            <span>弱信号后台异步寻优 (1.1s锁星收敛)</span>
             <input id="setChkAsync" type="checkbox" checked class="w-4 h-4 accent-blue-500" />
           </label>
           <label class="flex items-center justify-between">
@@ -469,7 +430,6 @@
       </div>
     </div>
 
-    <!-- Toast Container -->
     <div id="toastBox" class="pointer-events-none absolute top-24 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-1.5"></div>
   </div>
 
@@ -492,10 +452,9 @@
       let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
       ret += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
       ret += (20.0 * Math.sin(x * PI) + 40.0 * Math.sin(x / 3.0 * PI)) * 2.0 / 3.0;
-      ret += (150.0 * sin(x / 12.0 * PI) + 300.0 * sin(x / 30.0 * PI)) * 2.0 / 3.0;
+      ret += (150.0 * Math.sin(x / 12.0 * PI) + 300.0 * Math.sin(x / 30.0 * PI)) * 2.0 / 3.0;
       return ret;
     }
-    function sin(v) { return Math.sin(v); }
 
     function wgs84ToGcj02(wgsLat, wgsLon) {
       const lat = Number(wgsLat), lon = Number(wgsLon);
@@ -525,11 +484,11 @@
 
     function toDMS(deg, isLat) {
       const dir = isLat ? (deg >= 0 ? 'N' : 'S') : (deg >= 0 ? 'E' : 'W');
-      const abs = Math.abs(Number(deg));
-      const d = Math.floor(abs);
-      const mFloat = (abs - d) * 60;
-      const m = Math.floor(mFloat);
-      const s = ((mFloat - m) * 60).toFixed(2);
+      const totalCentis = Math.round(Math.abs(Number(deg)) * 360000);
+      const d = Math.floor(totalCentis / 360000);
+      const rem = totalCentis % 360000;
+      const m = Math.floor(rem / 6000);
+      const s = ((rem % 6000) / 100).toFixed(2);
       return d + '°' + String(m).padStart(2, '0') + "'" + String(s).padStart(5, '0') + '"' + dir;
     }
 
@@ -548,9 +507,121 @@
       return { hm, dateWeek, fullTs };
     }
 
+    // Pure JS ISO/IEC 18004 QR Code Matrix Generator (Byte mode, ECC Level L)
+    const QR_SPECS = [
+      { ver: 1, size: 21, dataBytes: 19, eccBytes: 7, align: [] },
+      { ver: 2, size: 25, dataBytes: 34, eccBytes: 10, align: [6, 18] },
+      { ver: 3, size: 29, dataBytes: 55, eccBytes: 15, align: [6, 22] },
+      { ver: 4, size: 33, dataBytes: 80, eccBytes: 20, align: [6, 26] },
+      { ver: 5, size: 37, dataBytes: 108, eccBytes: 26, align: [6, 30] }
+    ];
+    function gfMul(x, y) {
+      let z = 0;
+      for (let i = 7; i >= 0; i--) {
+        z = (z << 1) ^ ((z >>> 7) * 0x11D);
+        z ^= ((y >>> i) & 1) * x;
+      }
+      return z;
+    }
+    function rsEncode(data, deg) {
+      const gen = new Array(deg).fill(0);
+      gen[deg - 1] = 1;
+      let root = 1;
+      for (let i = 0; i < deg; i++) {
+        for (let j = 0; j < deg; j++) {
+          gen[j] = gfMul(gen[j], root);
+          if (j + 1 < deg) gen[j] ^= gen[j + 1];
+        }
+        root = gfMul(root, 2);
+      }
+      const rem = new Array(deg).fill(0);
+      for (const b of data) {
+        const factor = b ^ rem[0];
+        rem.shift();
+        rem.push(0);
+        for (let j = 0; j < deg; j++) rem[j] ^= gfMul(gen[j], factor);
+      }
+      return rem;
+    }
+    function encodeQrMatrix(text) {
+      const utf8 = Array.from(new TextEncoder().encode(text));
+      const spec = QR_SPECS.find(s => utf8.length + 3 <= s.dataBytes) || QR_SPECS[QR_SPECS.length - 1];
+      const bytes = utf8.slice(0, spec.dataBytes - 3);
+      const bits = [];
+      const pushBits = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+      pushBits(4, 4);
+      pushBits(bytes.length, 8);
+      bytes.forEach(b => pushBits(b, 8));
+      const maxBits = spec.dataBytes * 8;
+      pushBits(0, Math.min(4, maxBits - bits.length));
+      while (bits.length % 8 !== 0) bits.push(0);
+      const pads = [0xEC, 0x11];
+      let pi = 0;
+      while (bits.length < maxBits) pushBits(pads[pi++ % 2], 8);
+      const dataCw = [];
+      for (let i = 0; i < spec.dataBytes; i++) {
+        let v = 0;
+        for (let b = 0; b < 8; b++) v = (v << 1) | bits[i * 8 + b];
+        dataCw.push(v);
+      }
+      const allCw = dataCw.concat(rsEncode(dataCw, spec.eccBytes));
+      const sz = spec.size;
+      const mat = Array.from({ length: sz }, () => new Array(sz).fill(false));
+      const fn = Array.from({ length: sz }, () => new Array(sz).fill(false));
+      const setFn = (x, y, d) => { if (x >= 0 && x < sz && y >= 0 && y < sz) { mat[y][x] = d; fn[y][x] = true; } };
+      const finder = (cx, cy) => {
+        for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+          const dist = Math.max(Math.abs(dx), Math.abs(dy));
+          setFn(cx + dx, cy + dy, dist !== 2 && dist !== 4);
+        }
+      };
+      finder(3, 3); finder(sz - 4, 3); finder(3, sz - 4);
+      for (let i = 0; i < sz; i++) {
+        if (!fn[6][i]) setFn(i, 6, i % 2 === 0);
+        if (!fn[i][6]) setFn(6, i, i % 2 === 0);
+      }
+      for (const ay of spec.align) for (const ax of spec.align) {
+        if ((ax === 6 && ay === 6) || (ax === 6 && ay === sz - 7) || (ax === sz - 7 && ay === 6)) continue;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+          setFn(ax + dx, ay + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+        }
+      }
+      for (let i = 0; i <= 8; i++) if (i !== 6) { fn[8][i] = true; fn[i][8] = true; }
+      for (let i = 0; i <= 7; i++) { fn[8][sz - 1 - i] = true; fn[sz - 1 - i][8] = true; }
+      setFn(8, sz - 8, true);
+
+      let bitIdx = 0, right = sz - 1, vert = 0;
+      while (right >= 1) {
+        if (right === 6) right = 5;
+        for (let c = 0; c < sz; c++) {
+          const y = (vert & 1) === 0 ? (sz - 1 - c) : c;
+          for (let j = 0; j < 2; j++) {
+            const x = right - j;
+            if (!fn[y][x]) {
+              const dark = bitIdx < allCw.length * 8 ? (((allCw[bitIdx >>> 3] >>> (7 - (bitIdx & 7))) & 1) !== 0) : false;
+              mat[y][x] = dark;
+              bitIdx++;
+            }
+          }
+        }
+        right -= 2; vert++;
+      }
+      for (let y = 0; y < sz; y++) for (let x = 0; x < sz; x++) if (!fn[y][x] && (x + y) % 2 === 0) mat[y][x] = !mat[y][x];
+      const fmt = 0x77C4;
+      const bit = i => ((fmt >>> i) & 1) !== 0;
+      for (let i = 0; i <= 5; i++) mat[8][i] = bit(i);
+      mat[8][7] = bit(6); mat[8][8] = bit(7); mat[7][8] = bit(8);
+      for (let i = 9; i <= 14; i++) mat[14 - i][8] = bit(i);
+      for (let i = 0; i <= 7; i++) mat[sz - 1 - i][8] = bit(i);
+      for (let i = 8; i <= 14; i++) mat[8][sz - 15 + i] = bit(i);
+      mat[sz - 8][8] = true;
+      return mat;
+    }
+
     const state = {
+      captureMode: 1, // 1: 光学拍照模式, 0: 极速截屏模式
       timerSec: 0,
-      flashMode: 0, // 0: 关, 1: 开, 2: 自动
+      flashMode: 0,
       isFront: false,
       zoom: 1.0,
       filterIdx: 0,
@@ -561,22 +632,34 @@
       wgsLat: 39.907419,
       wgsLon: 116.391228,
       accuracy: 2.4,
+      altitude: 48.5,
+      azimuthText: '东北 034°',
       shortPoi: '小庄村',
       fullAddr: '北京市朝阳区建国路小庄村',
-      styleTemplate: 0, // 0: Fig 3 Centered, 1: Left Card
+      styleTemplate: 0,
       coordSys: 'GCJ-02',
       coordFmt: 'DEC',
       note: '',
+      showQr: true,
       showTime: true,
       showLoc: true,
       showCoords: true,
       showNote: true,
+      showEnv: false,
       asyncOptimal: true,
       keepClean: false,
       photos: [],
       selectedPhotoId: null,
       editingTargetPhotoId: null
     };
+
+    const FILTER_CSS = [
+      'none',
+      'contrast(1.18) saturate(1.22)',
+      'sepia(0.25) saturate(1.3) brightness(1.04)',
+      'hue-rotate(12deg) saturate(1.1) contrast(1.06)',
+      'grayscale(1) contrast(1.12)'
+    ];
 
     function showToast(msg) {
       const box = document.getElementById('toastBox');
@@ -587,7 +670,6 @@
       setTimeout(() => el.remove(), 2200);
     }
 
-    // Draw realistic desk/outdoor camera scene in viewfinder canvas
     function drawViewfinderScene(ctx, w, h) {
       const g = ctx.createLinearGradient(0, 0, w, h);
       g.addColorStop(0, '#2b211c');
@@ -596,7 +678,6 @@
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
 
-      // Desk mat cyan surface (inspired by Fig 3 scene)
       ctx.fillStyle = '#248f9d';
       ctx.beginPath();
       ctx.moveTo(0, h * 0.34);
@@ -606,7 +687,6 @@
       ctx.closePath();
       ctx.fill();
 
-      // Mechanical keyboard perspective block
       ctx.save();
       ctx.translate(w * 0.52, h * 0.48);
       ctx.rotate(0.42);
@@ -621,45 +701,274 @@
       ctx.restore();
     }
 
+    // Unified 5-Template + QR Badge Canvas Renderer (shared by Live Viewfinder & Photo Export)
+    function drawWatermarkOnCanvas(ctx, w, h, cfg) {
+      const lat = cfg.coordSys === 'WGS-84' ? cfg.wgsLat : cfg.gcjLat;
+      const lon = cfg.coordSys === 'WGS-84' ? cfg.wgsLon : cfg.gcjLon;
+      const coordLine = formatCoords(lat, lon, cfg.coordFmt) + ' [' + cfg.coordSys + '] ±' + Number(cfg.accuracy).toFixed(1) + 'm';
+      const envLine = cfg.showEnv ? ('海拔 ' + cfg.altitude.toFixed(1) + 'm · 方位 ' + cfg.azimuthText) : '';
+
+      if (cfg.styleTemplate === 0) {
+        const grad = ctx.createLinearGradient(0, h - 380, 0, h);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.58)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, h - 380, w, 380);
+
+        const cx = w / 2;
+        let curY = h - 42;
+
+        if (cfg.showNote && cfg.note) {
+          ctx.font = '500 25px "Inter", sans-serif';
+          ctx.fillStyle = '#fde68a';
+          ctx.textAlign = 'center';
+          ctx.fillText('备注：' + cfg.note, cx, curY);
+          curY -= 38;
+        }
+        if (envLine) {
+          ctx.font = '600 22px "JetBrains Mono", monospace';
+          ctx.fillStyle = '#a7f3d0';
+          ctx.textAlign = 'center';
+          ctx.fillText(envLine, cx, curY);
+          curY -= 36;
+        }
+        if (cfg.showCoords) {
+          ctx.font = '600 25px "JetBrains Mono", monospace';
+          const tw = ctx.measureText(coordLine).width;
+          ctx.fillStyle = 'rgba(11, 19, 43, 0.72)';
+          ctx.beginPath();
+          ctx.roundRect(cx - tw / 2 - 22, curY - 30, tw + 44, 42, 21);
+          ctx.fill();
+          ctx.fillStyle = '#38bdf8';
+          ctx.textAlign = 'center';
+          ctx.fillText(coordLine, cx, curY);
+          curY -= 54;
+        }
+        if (cfg.showTime || cfg.showLoc) {
+          ctx.font = '400 35px "Inter", sans-serif';
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          const lineStr = (cfg.showTime ? cfg.dateWeek + ' ' : '') + (cfg.showLoc ? ('📍' + cfg.shortPoi) : '');
+          ctx.fillText(lineStr, cx, curY);
+          curY -= 58;
+        }
+        if (cfg.showTime) {
+          ctx.font = '300 120px "Inter", sans-serif';
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.fillText(cfg.hm, cx, curY);
+        }
+      } else if (cfg.styleTemplate === 1) {
+        // Style 1: 工程巡检卡片
+        const boxW = cfg.showQr ? 720 : 840;
+        const boxH = 240;
+        const boxLeft = 28, boxTop = h - boxH - 28;
+        ctx.fillStyle = 'rgba(11, 19, 43, 0.80)';
+        ctx.beginPath();
+        ctx.roundRect(boxLeft, boxTop, boxW, boxH, 18);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(boxLeft + 24, boxTop + 20, 7, 28);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '700 27px "Inter", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('现场点位核验 · ' + cfg.coordSys, boxLeft + 42, boxTop + 43);
+
+        ctx.font = '600 23px "JetBrains Mono", monospace';
+        let y = boxTop + 92;
+        if (cfg.showCoords) { ctx.fillStyle = '#38bdf8'; ctx.fillText('经纬：' + coordLine, boxLeft + 24, y); y += 38; }
+        if (cfg.showLoc) { ctx.fillStyle = '#ffffff'; ctx.fillText('地点：' + cfg.shortPoi + ' (' + cfg.fullAddr + ')', boxLeft + 24, y); y += 38; }
+        if (cfg.showTime) { ctx.fillStyle = '#cbd5e1'; ctx.fillText('时间：' + cfg.fullTs + ' ' + cfg.dateWeek.split(' ')[1], boxLeft + 24, y); y += 38; }
+        if (cfg.showNote && cfg.note) { ctx.fillStyle = '#fde68a'; ctx.fillText('备注：' + cfg.note, boxLeft + 24, y); }
+      } else if (cfg.styleTemplate === 2) {
+        // Style 2: 经纬网格测绘
+        const boxW = cfg.showQr ? 700 : 820;
+        const boxH = 190;
+        const boxLeft = 28, boxTop = h - boxH - 28;
+        ctx.fillStyle = 'rgba(9, 14, 26, 0.82)';
+        ctx.beginPath();
+        ctx.roundRect(boxLeft, boxTop, boxW, boxH, 16);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.22)';
+        ctx.beginPath();
+        ctx.roundRect(boxLeft, boxTop, boxW, 54, 16);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(boxLeft, boxTop, boxW, boxH);
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = '700 23px "JetBrains Mono", monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(cfg.showCoords ? coordLine : ('经纬网格测绘 · ' + cfg.coordSys), boxLeft + 18, boxTop + 36);
+
+        const midX = boxLeft + boxW * 0.48;
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.3)';
+        ctx.beginPath();
+        ctx.moveTo(boxLeft, boxTop + 54); ctx.lineTo(boxLeft + boxW, boxTop + 54);
+        ctx.moveTo(midX, boxTop + 54); ctx.lineTo(midX, boxTop + 140);
+        ctx.moveTo(boxLeft, boxTop + 140); ctx.lineTo(boxLeft + boxW, boxTop + 140);
+        ctx.stroke();
+
+        ctx.fillStyle = '#94a3b8'; ctx.font = '400 18px "Inter", sans-serif';
+        ctx.fillText('测绘点位', boxLeft + 18, boxTop + 82);
+        ctx.fillText('采样时间', midX + 18, boxTop + 82);
+
+        ctx.fillStyle = '#ffffff'; ctx.font = '700 24px "Inter", sans-serif';
+        ctx.fillText(cfg.shortPoi, boxLeft + 18, boxTop + 120);
+        ctx.font = '600 21px "JetBrains Mono", monospace';
+        ctx.fillText(cfg.fullTs, midX + 18, boxTop + 120);
+
+        ctx.fillStyle = '#fde68a'; ctx.font = '400 20px "Inter", sans-serif';
+        ctx.fillText((cfg.note || cfg.fullAddr || '高德 GCJ-02 零偏差对齐'), boxLeft + 18, boxTop + 172);
+      } else if (cfg.styleTemplate === 3) {
+        // Style 3: 极简胶片底栏
+        const barH = 108;
+        const barTop = h - barH;
+        ctx.fillStyle = 'rgba(8, 12, 20, 0.88)';
+        ctx.fillRect(0, barTop, w, barH);
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(0, barTop); ctx.lineTo(w, barTop); ctx.stroke();
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff'; ctx.font = '700 28px "Inter", sans-serif';
+        ctx.fillText('📍 ' + cfg.shortPoi, 26, barTop + 42);
+        ctx.fillStyle = '#94a3b8'; ctx.font = '400 21px "Inter", sans-serif';
+        ctx.fillText(cfg.note || cfg.fullAddr || cfg.dateWeek, 26, barTop + 80);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#38bdf8'; ctx.font = '700 22px "JetBrains Mono", monospace';
+        if (cfg.showCoords) ctx.fillText(coordLine, w - 26, barTop + 42);
+        ctx.fillStyle = '#e2e8f0'; ctx.font = '500 21px "JetBrains Mono", monospace';
+        if (cfg.showTime) ctx.fillText(cfg.fullTs + ' ' + cfg.dateWeek.split(' ')[1], w - 26, barTop + 80);
+      } else {
+        // Style 4: 外业标准台账
+        const boxW = cfg.showQr ? 700 : 820;
+        const rows = [];
+        if (cfg.showCoords) rows.push(['经纬坐标', coordLine]);
+        if (cfg.showLoc) rows.push(['点位地址', cfg.shortPoi + ' · ' + cfg.fullAddr]);
+        if (cfg.showTime) rows.push(['记录时间', cfg.fullTs + ' ' + cfg.dateWeek.split(' ')[1]]);
+        if (cfg.showNote && cfg.note) rows.push(['现场备注', cfg.note]);
+        const headerH = 44, rowH = 40;
+        const boxH = headerH + rows.length * rowH;
+        const boxLeft = 28, boxTop = h - boxH - 28;
+
+        ctx.fillStyle = 'rgba(11, 19, 43, 0.84)';
+        ctx.beginPath(); ctx.roundRect(boxLeft, boxTop, boxW, boxH, 14); ctx.fill();
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.25)';
+        ctx.beginPath(); ctx.roundRect(boxLeft, boxTop, boxW, headerH, 14); ctx.fill();
+        ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2;
+        ctx.strokeRect(boxLeft, boxTop, boxW, boxH);
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff'; ctx.font = '700 23px "Inter", sans-serif';
+        ctx.fillText('外业定点巡检台账 · ' + cfg.coordSys, boxLeft + 14, boxTop + 30);
+
+        const colSplit = boxLeft + 136;
+        ctx.beginPath();
+        ctx.moveTo(boxLeft, boxTop + headerH); ctx.lineTo(boxLeft + boxW, boxTop + headerH);
+        ctx.moveTo(colSplit, boxTop + headerH); ctx.lineTo(colSplit, boxTop + boxH);
+        ctx.stroke();
+
+        ctx.font = '600 21px "JetBrains Mono", monospace';
+        rows.forEach((r, idx) => {
+          const ty = boxTop + headerH + idx * rowH;
+          if (idx > 0) {
+            ctx.beginPath(); ctx.moveTo(boxLeft, ty); ctx.lineTo(boxLeft + boxW, ty); ctx.stroke();
+          }
+          ctx.fillStyle = '#38bdf8';
+          ctx.fillText(r[0], boxLeft + 14, ty + 28);
+          ctx.fillStyle = r[0] === '现场备注' ? '#fde68a' : '#ffffff';
+          ctx.fillText(r[1].slice(0, 32), colSplit + 12, ty + 28);
+        });
+      }
+
+      // Draw Embedded Amap Location QR Badge ("扫码跳高德")
+      if (cfg.showQr) {
+        const qrUrl = 'https://uri.amap.com/marker?position=' + cfg.gcjLon.toFixed(6) + ',' + cfg.gcjLat.toFixed(6) +
+          '&name=' + encodeURIComponent((cfg.shortPoi || '实拍点').slice(0, 8)) + '&coordinate=gaode&callnative=1';
+        const mat = encodeQrMatrix(qrUrl);
+        const modules = mat.length;
+        const qrBoxSize = 142, labelH = 26;
+        const totalH = qrBoxSize + labelH;
+        const boxLeft = w - qrBoxSize - 26;
+        const bottomOffset = cfg.styleTemplate === 3 ? 118 : 26;
+        const boxTop = h - totalH - bottomOffset;
+
+        ctx.fillStyle = 'rgba(11, 19, 43, 0.82)';
+        ctx.beginPath(); ctx.roundRect(boxLeft, boxTop, qrBoxSize, totalH, 14); ctx.fill();
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)'; ctx.lineWidth = 1.6; ctx.stroke();
+
+        const pad = 10;
+        const whiteSize = qrBoxSize - pad * 2;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.roundRect(boxLeft + pad, boxTop + pad, whiteSize, whiteSize, 6); ctx.fill();
+
+        const quiet = 5;
+        const drawSize = whiteSize - quiet * 2;
+        const cell = drawSize / modules;
+        const sx = boxLeft + pad + quiet;
+        const sy = boxTop + pad + quiet;
+        ctx.fillStyle = '#0b132b';
+        for (let r = 0; r < modules; r++) {
+          for (let c = 0; c < modules; c++) {
+            if (mat[r][c]) {
+              ctx.fillRect(sx + c * cell, sy + r * cell, cell + 0.35, cell + 0.35);
+            }
+          }
+        }
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = '700 15px "Inter", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('扫码跳高德', boxLeft + qrBoxSize / 2, boxTop + qrBoxSize + 18);
+      }
+    }
+
     function updateLiveOverlay() {
       const t = getNowTimeParts();
-      const lat = state.coordSys === 'WGS-84' ? state.wgsLat : state.gcjLat;
-      const lon = state.coordSys === 'WGS-84' ? state.wgsLon : state.gcjLon;
-      const coordStr = formatCoords(lat, lon, state.coordFmt) + ' [' + state.coordSys + '] ±' + state.accuracy.toFixed(1) + 'm';
+      const modeName = state.captureMode === 1 ? '光学拍照' : '0ms截屏';
+      document.getElementById('gpsPillText').textContent = state.coordSys + ' · ±' + state.accuracy.toFixed(1) + 'm · ' + modeName;
+      document.getElementById('captureModeLabel').textContent = modeName;
 
-      document.getElementById('gpsPillText').textContent = state.coordSys + ' · ±' + state.accuracy.toFixed(1) + 'm';
+      const vfCanvas = document.getElementById('viewfinderCanvas');
+      const video = document.getElementById('cameraVideo');
+      const filterCss = FILTER_CSS[state.filterIdx] || 'none';
+      vfCanvas.style.filter = filterCss;
+      video.style.filter = filterCss;
 
-      const centered = document.getElementById('wmStyleCentered');
-      const card = document.getElementById('wmStyleCard');
+      const wmCanvas = document.getElementById('liveWatermarkCanvas');
+      const ctx = wmCanvas.getContext('2d');
+      ctx.clearRect(0, 0, wmCanvas.width, wmCanvas.height);
 
-      if (state.styleTemplate === 0) {
-        centered.classList.remove('hidden');
-        card.classList.add('hidden');
-        document.getElementById('wmBigTime').textContent = t.hm;
-        document.getElementById('wmBigTime').style.display = state.showTime ? 'block' : 'none';
-        document.getElementById('wmDateWeekday').textContent = t.dateWeek;
-        document.getElementById('wmDateWeekday').style.display = state.showTime ? 'inline' : 'none';
-        document.getElementById('wmShortPoiText').textContent = state.shortPoi;
-        document.getElementById('wmPinAndPoi').style.display = state.showLoc ? 'inline-flex' : 'none';
-        const pill = document.getElementById('wmCoordPill');
-        pill.textContent = coordStr;
-        pill.style.display = state.showCoords ? 'inline-block' : 'none';
-        const noteEl = document.getElementById('wmExtraNoteLine');
-        if (state.showNote && state.note) {
-          noteEl.textContent = '备注：' + state.note;
-          noteEl.classList.remove('hidden');
-        } else {
-          noteEl.classList.add('hidden');
-        }
-      } else {
-        centered.classList.add('hidden');
-        card.classList.remove('hidden');
-        document.getElementById('wmCardSysBadge').textContent = state.coordSys;
-        document.getElementById('wmCardCoordLine').textContent = state.showCoords ? ('经纬：' + coordStr) : '';
-        document.getElementById('wmCardAddrLine').textContent = state.showLoc ? ('地点：' + state.shortPoi + ' (' + state.fullAddr + ')') : '';
-        document.getElementById('wmCardTimeLine').textContent = state.showTime ? ('时间：' + t.fullTs) : '';
-        document.getElementById('wmCardNoteLine').textContent = (state.showNote && state.note) ? ('备注：' + state.note) : '';
-      }
+      drawWatermarkOnCanvas(ctx, wmCanvas.width, wmCanvas.height, {
+        styleTemplate: state.styleTemplate,
+        coordSys: state.coordSys,
+        coordFmt: state.coordFmt,
+        gcjLat: state.gcjLat,
+        gcjLon: state.gcjLon,
+        wgsLat: state.wgsLat,
+        wgsLon: state.wgsLon,
+        accuracy: state.accuracy,
+        altitude: state.altitude,
+        azimuthText: state.azimuthText,
+        shortPoi: state.shortPoi,
+        fullAddr: state.fullAddr,
+        hm: t.hm,
+        dateWeek: t.dateWeek,
+        fullTs: t.fullTs,
+        note: state.note,
+        showQr: state.showQr,
+        showTime: state.showTime,
+        showLoc: state.showLoc,
+        showCoords: state.showCoords,
+        showNote: state.showNote,
+        showEnv: state.showEnv
+      });
     }
 
     function compositePhotoCanvas(cleanDataUrl, cfg, cb) {
@@ -669,80 +978,11 @@
         c.width = 1080;
         c.height = 1440;
         const ctx = c.getContext('2d');
+        ctx.filter = FILTER_CSS[cfg.filterIdx || 0] || 'none';
         ctx.drawImage(img, 0, 0, c.width, c.height);
-
-        const lat = cfg.coordSys === 'WGS-84' ? cfg.wgsLat : cfg.gcjLat;
-        const lon = cfg.coordSys === 'WGS-84' ? cfg.wgsLon : cfg.gcjLon;
-        const coordLine = formatCoords(lat, lon, cfg.coordFmt) + ' [' + cfg.coordSys + '] ±' + Number(cfg.accuracy).toFixed(1) + 'm';
-
-        if (cfg.styleTemplate === 0) {
-          // Bottom gradient scrim
-          const grad = ctx.createLinearGradient(0, c.height - 380, 0, c.height);
-          grad.addColorStop(0, 'rgba(0,0,0,0)');
-          grad.addColorStop(1, 'rgba(0,0,0,0.55)');
-          ctx.fillStyle = grad;
-          ctx.fillRect(0, c.height - 380, c.width, 380);
-
-          const cx = c.width / 2;
-          let curY = c.height - 48;
-
-          if (cfg.showNote && cfg.note) {
-            ctx.font = '500 26px "Inter", sans-serif';
-            ctx.fillStyle = '#fde68a';
-            ctx.textAlign = 'center';
-            ctx.fillText('备注：' + cfg.note, cx, curY);
-            curY -= 42;
-          }
-
-          if (cfg.showCoords) {
-            ctx.font = '600 26px "JetBrains Mono", monospace';
-            const tw = ctx.measureText(coordLine).width;
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
-            ctx.beginPath();
-            ctx.roundRect(cx - tw / 2 - 22, curY - 30, tw + 44, 42, 21);
-            ctx.fill();
-            ctx.fillStyle = '#7dd3fc';
-            ctx.textAlign = 'center';
-            ctx.fillText(coordLine, cx, curY);
-            curY -= 56;
-          }
-
-          if (cfg.showTime || cfg.showLoc) {
-            ctx.font = '400 36px "Inter", sans-serif';
-            ctx.fillStyle = '#ffffff';
-            ctx.textAlign = 'center';
-            const lineStr = (cfg.showTime ? cfg.dateWeek + ' ' : '') + (cfg.showLoc ? ('📍' + cfg.shortPoi) : '');
-            ctx.fillText(lineStr, cx, curY);
-            curY -= 58;
-          }
-
-          if (cfg.showTime) {
-            ctx.font = '300 128px "Inter", sans-serif';
-            ctx.fillStyle = '#ffffff';
-            ctx.textAlign = 'center';
-            ctx.fillText(cfg.hm, cx, curY);
-          }
-        } else {
-          // Style 1: Left Engineering Card
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
-          ctx.beginPath();
-          ctx.roundRect(32, c.height - 260, 820, 220, 20);
-          ctx.fill();
-          ctx.fillStyle = '#38bdf8';
-          ctx.fillRect(56, c.height - 234, 8, 30);
-          ctx.fillStyle = '#ffffff';
-          ctx.font = '700 28px "Inter", sans-serif';
-          ctx.textAlign = 'left';
-          ctx.fillText('高德精准经纬水印 · ' + cfg.coordSys, 76, c.height - 210);
-          ctx.font = '600 26px "JetBrains Mono", monospace';
-          ctx.fillStyle = '#7dd3fc';
-          ctx.fillText('经纬：' + coordLine, 56, c.height - 160);
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText('地点：' + cfg.shortPoi + ' (' + cfg.fullAddr + ')', 56, c.height - 116);
-          ctx.fillText('时间：' + cfg.fullTs, 56, c.height - 72);
-        }
-
-        cb(c.toDataURL('image/jpeg', 0.94));
+        ctx.filter = 'none';
+        drawWatermarkOnCanvas(ctx, c.width, c.height, cfg);
+        cb(c.toDataURL('image/jpeg', 0.95));
       };
       img.src = cleanDataUrl;
     }
@@ -764,13 +1004,14 @@
       } else {
         ctx.drawImage(vfCanvas, 0, 0, 1080, 1440);
       }
-      const cleanUrl = cleanCanvas.toDataURL('image/jpeg', 0.95);
+      const cleanUrl = cleanCanvas.toDataURL('image/jpeg', 0.96);
       const t = getNowTimeParts();
 
       const cfg = {
         styleTemplate: state.styleTemplate,
         coordSys: state.coordSys,
         coordFmt: state.coordFmt,
+        filterIdx: state.filterIdx,
         gcjLat: state.gcjLat,
         gcjLon: state.gcjLon,
         wgsLat: state.wgsLat,
@@ -778,16 +1019,20 @@
         origGcjLat: state.gcjLat,
         origGcjLon: state.gcjLon,
         accuracy: state.accuracy,
+        altitude: state.altitude,
+        azimuthText: state.azimuthText,
         shortPoi: state.shortPoi,
         fullAddr: state.fullAddr,
         hm: t.hm,
         dateWeek: t.dateWeek,
         fullTs: t.fullTs,
         note: state.note,
+        showQr: state.showQr,
         showTime: state.showTime,
         showLoc: state.showLoc,
         showCoords: state.showCoords,
-        showNote: state.showNote
+        showNote: state.showNote,
+        showEnv: state.showEnv
       };
 
       compositePhotoCanvas(cleanUrl, cfg, function(wmUrl) {
@@ -801,7 +1046,7 @@
         state.selectedPhotoId = entry.id;
         document.getElementById('bottomGalleryThumb').src = wmUrl;
         renderGalleryScreen();
-        showToast('已保存照片 (高德 GCJ-02 零偏差已对齐)');
+        showToast(state.captureMode === 1 ? '📷 光学拍照已完成 (高德GCJ-02零偏差已对齐)' : '⚡ 0ms极速截屏已完成');
       });
     }
 
@@ -821,9 +1066,9 @@
       const lon = selected.cfg.gcjLon.toFixed(6);
 
       document.getElementById('btnGalleryJumpAmapPin').href =
-        'androidamap://viewMap?sourceApplication=FastWatermarkCam&poiname=' + poiname + '&lat=' + lat + '&lon=' + lon + '&dev=0';
+        'https://uri.amap.com/marker?position=' + lon + ',' + lat + '&name=' + poiname + '&coordinate=gaode&callnative=1';
       document.getElementById('btnGalleryJumpAmapNavi').href =
-        'androidamap://route/plan/?sourceApplication=FastWatermarkCam&dlat=' + lat + '&dlon=' + lon + '&dname=' + poiname + '&dev=0&t=0';
+        'https://uri.amap.com/navigation?to=' + lon + ',' + lat + ',' + poiname + '&mode=car&coordinate=gaode&callnative=1';
 
       const strip = document.getElementById('galleryThumbStrip');
       strip.innerHTML = '';
@@ -847,7 +1092,6 @@
       updateLiveOverlay();
       setInterval(updateLiveOverlay, 1000);
 
-      // Seed 1 initial photo so thumbnail & gallery work immediately
       capturePhotoNow();
 
       const TPL_NAMES = ['经典大字时间', '工程巡检卡片', '经纬网格测绘', '极简胶片底栏', '外业标准台账'];
@@ -871,7 +1115,33 @@
         });
       });
 
-      // Horizontal swipe on viewfinder to switch 5 templates
+      function syncCaptureModeButtons() {
+        const optBtn = document.getElementById('btnSetModeOptical');
+        const scrBtn = document.getElementById('btnSetModeScreen');
+        if (state.captureMode === 1) {
+          optBtn.className = 'py-2 rounded-lg bg-sky-600 text-white font-bold border border-sky-400';
+          scrBtn.className = 'py-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700';
+        } else {
+          optBtn.className = 'py-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700';
+          scrBtn.className = 'py-2 rounded-lg bg-sky-600 text-white font-bold border border-sky-400';
+        }
+        updateLiveOverlay();
+      }
+      document.getElementById('btnTopCaptureMode').addEventListener('click', function() {
+        state.captureMode = state.captureMode === 1 ? 0 : 1;
+        syncCaptureModeButtons();
+        showToast(state.captureMode === 1 ? '已切换至：📷 光学拍照模式' : '已切换至：⚡ 极速截屏模式');
+      });
+      document.getElementById('btnSetModeOptical').addEventListener('click', function() {
+        state.captureMode = 1;
+        syncCaptureModeButtons();
+      });
+      document.getElementById('btnSetModeScreen').addEventListener('click', function() {
+        state.captureMode = 0;
+        syncCaptureModeButtons();
+      });
+
+      // Swipe on viewfinder to switch templates
       let touchStartX = null, touchStartY = null;
       const vfContainer = document.getElementById('viewfinderContainer');
       vfContainer.addEventListener('touchstart', function(e) {
@@ -890,10 +1160,13 @@
         }
       }, { passive: true });
 
-      // Viewfinder tap to move focus reticle
       document.getElementById('viewfinderContainer').addEventListener('click', function(e) {
-        if (e.target.closest('#liveWatermarkArea') || e.target.closest('#btnZoomCircle') || e.target.closest('#btnGpsPill')) return;
+        if (e.target.closest('#btnZoomCircle') || e.target.closest('#btnGpsPill')) return;
         const rect = this.getBoundingClientRect();
+        if (e.clientY - rect.top > rect.height * 0.72) {
+          openWmCustomizer(null);
+          return;
+        }
         const x = Math.max(40, Math.min(rect.width - 90, e.clientX - rect.left - 39));
         const y = Math.max(40, Math.min(rect.height - 90, e.clientY - rect.top - 39));
         const fb = document.getElementById('focusBoxWrapper');
@@ -901,7 +1174,6 @@
         fb.style.top = y + 'px';
       });
 
-      // Top Bar Controls
       document.getElementById('btnTopSettings').addEventListener('click', () => {
         document.getElementById('modalSettings').classList.remove('hidden');
       });
@@ -912,7 +1184,6 @@
         document.getElementById('modalSettings').classList.add('hidden');
       });
 
-      // Non-Popup Inline Menus for Timer & Flash + Auto/Manual Landscape Mode
       const inlineTimerBar = document.getElementById('inlineTimerBar');
       const inlineFlashBar = document.getElementById('inlineFlashBar');
       const topRightRow = document.getElementById('topRightIconsRow');
@@ -942,7 +1213,6 @@
           inlineTimerBar.classList.add('hidden');
           inlineTimerBar.classList.remove('flex');
           topRightRow.classList.remove('hidden');
-          showToast(state.timerSec > 0 ? ('已选择 ' + state.timerSec + ' 秒倒计时') : '已关闭倒计时');
         });
       });
 
@@ -966,52 +1236,7 @@
           inlineFlashBar.classList.add('hidden');
           inlineFlashBar.classList.remove('flex');
           topRightRow.classList.remove('hidden');
-          showToast('闪光灯已设为：' + labels[state.flashMode]);
         });
-      });
-
-      // 4-Way Optical Orientation Switching (0: 竖屏, 270: 左横屏, 90: 右横屏)
-      state.deviceOri = 0;
-      state.isLandscape = false;
-      function applyOrientationMode(landscape) {
-        if (typeof landscape === 'boolean') {
-          state.deviceOri = landscape ? 270 : 0;
-        } else {
-          state.deviceOri = state.deviceOri === 0 ? 270 : (state.deviceOri === 270 ? 90 : 0);
-        }
-        state.isLandscape = (state.deviceOri === 270 || state.deviceOri === 90);
-        const oriNames = { 0: '竖屏', 270: '左横屏', 90: '右横屏' };
-        document.getElementById('oriLabelText').textContent = oriNames[state.deviceOri] || '竖屏';
-
-        const wmArea = document.getElementById('liveWatermarkArea');
-        if (state.deviceOri === 270) {
-          // Left-Landscape: physical bottom is the LEFT edge of the portrait viewfinder!
-          wmArea.className = 'absolute left-0 top-1/2 z-20 p-3 cursor-pointer';
-          wmArea.style.transform = 'translate(-26%, -50%) rotate(90deg) scale(0.84)';
-          wmArea.style.transformOrigin = 'center center';
-        } else if (state.deviceOri === 90) {
-          // Right-Landscape: physical bottom is the RIGHT edge of the portrait viewfinder!
-          wmArea.className = 'absolute right-0 top-1/2 z-20 p-3 cursor-pointer';
-          wmArea.style.transform = 'translate(26%, -50%) rotate(-90deg) scale(0.84)';
-          wmArea.style.transformOrigin = 'center center';
-        } else {
-          wmArea.className = 'absolute inset-x-0 bottom-0 z-20 pt-10 pb-4 px-4 bg-gradient-to-t from-black/75 via-black/30 to-transparent cursor-pointer';
-          wmArea.style.transform = 'none';
-        }
-        updateLiveOverlay();
-      }
-
-      document.getElementById('btnTopOrientation').addEventListener('click', function() {
-        applyOrientationMode(!state.isLandscape);
-        showToast(state.isLandscape ? '已切换至横屏拍照与横屏水印模式' : '已切换至竖屏拍照模式');
-      });
-
-      window.addEventListener('resize', function() {
-        if (window.innerWidth > window.innerHeight * 1.15 && !state.isLandscape) {
-          applyOrientationMode(true);
-        } else if (window.innerHeight >= window.innerWidth && state.isLandscape) {
-          applyOrientationMode(false);
-        }
       });
 
       document.getElementById('btnTopFlip').addEventListener('click', function() {
@@ -1019,13 +1244,11 @@
         showToast(state.isFront ? '已切换至前置镜头' : '已切换至后置镜头');
       });
 
-      // Zoom button
       document.getElementById('btnZoomCircle').addEventListener('click', function() {
         state.zoom = state.zoom === 1.0 ? 1.5 : (state.zoom === 1.5 ? 2.0 : 1.0);
         this.textContent = state.zoom.toFixed(1) + 'X';
       });
 
-      // Shutter button
       document.getElementById('btnShutterMain').addEventListener('click', function() {
         if (state.timerSec > 0) {
           const ov = document.getElementById('countdownOverlay');
@@ -1048,7 +1271,6 @@
         }
       });
 
-      // Bottom Bar Controls
       document.getElementById('btnBottomGallery').addEventListener('click', function() {
         renderGalleryScreen();
         document.getElementById('screenGallery').classList.remove('hidden');
@@ -1107,7 +1329,6 @@
         }
       });
 
-      // Filter strip
       document.getElementById('btnBottomFilter').addEventListener('click', () => {
         document.getElementById('filterBarStrip').classList.toggle('hidden');
       });
@@ -1118,13 +1339,10 @@
             b.className = 'filter-chip px-3 py-1 rounded-full text-xs text-neutral-300 bg-neutral-800';
           });
           this.className = 'filter-chip px-3 py-1 rounded-full text-xs font-semibold bg-sky-600 text-white';
-          const ov = document.getElementById('liveFilterOverlay');
-          const classes = ['', 'bg-sky-500/10', 'bg-amber-500/15', 'bg-cyan-500/15', 'backdrop-grayscale'];
-          ov.className = 'pointer-events-none absolute inset-0 transition-all duration-200 ' + (classes[state.filterIdx] || '');
+          updateLiveOverlay();
         });
       });
 
-      // Open Watermark Customizer (for live viewfinder)
       function openWmCustomizer(targetPhoto) {
         state.editingTargetPhotoId = targetPhoto ? targetPhoto.id : null;
         document.getElementById('wmModalTitle').textContent = targetPhoto
@@ -1141,6 +1359,7 @@
           document.getElementById('wmEditLat').value = targetPhoto.cfg.gcjLat;
           document.getElementById('wmEditLon').value = targetPhoto.cfg.gcjLon;
           document.getElementById('wmInputNote').value = targetPhoto.cfg.note;
+          document.getElementById('wmChkQr').checked = targetPhoto.cfg.showQr !== false;
         } else {
           row.classList.add('hidden');
           row.classList.remove('grid');
@@ -1149,12 +1368,12 @@
           document.getElementById('wmInputPoi').value = state.shortPoi;
           document.getElementById('wmSelectDms').value = state.coordFmt;
           document.getElementById('wmInputNote').value = state.note;
+          document.getElementById('wmChkQr').checked = state.showQr;
         }
         document.getElementById('modalWatermark').classList.remove('hidden');
       }
 
       document.getElementById('btnBottomWatermark').addEventListener('click', () => openWmCustomizer(null));
-      document.getElementById('liveWatermarkArea').addEventListener('click', () => openWmCustomizer(null));
       document.getElementById('btnCloseWmModal').addEventListener('click', () => {
         document.getElementById('modalWatermark').classList.add('hidden');
       });
@@ -1170,10 +1389,12 @@
         const poi = document.getElementById('wmInputPoi').value || '实拍点位';
         const fmt = document.getElementById('wmSelectDms').value;
         const note = document.getElementById('wmInputNote').value;
+        const sQr = document.getElementById('wmChkQr').checked;
         const sTime = document.getElementById('wmChkTime').checked;
         const sLoc = document.getElementById('wmChkLoc').checked;
         const sCoords = document.getElementById('wmChkCoords').checked;
         const sNote = document.getElementById('wmChkNote').checked;
+        const sEnv = document.getElementById('wmChkEnv').checked;
 
         if (state.editingTargetPhotoId) {
           const target = state.photos.find(p => p.id === state.editingTargetPhotoId);
@@ -1190,17 +1411,19 @@
             target.cfg.wgsLat = wgs.lat;
             target.cfg.wgsLon = wgs.lon;
             target.cfg.note = note;
+            target.cfg.showQr = sQr;
             target.cfg.showTime = sTime;
             target.cfg.showLoc = sLoc;
             target.cfg.showCoords = sCoords;
             target.cfg.showNote = sNote;
+            target.cfg.showEnv = sEnv;
 
             compositePhotoCanvas(target.cleanUrl, target.cfg, function(newWmUrl) {
               target.wmUrl = newWmUrl;
               renderGalleryScreen();
               document.getElementById('bottomGalleryThumb').src = state.photos[0].wmUrl;
               document.getElementById('modalWatermark').classList.add('hidden');
-              showToast('已基于无水印底图无损重绘，高德跳转坐标已同步更新！');
+              showToast('已基于无水印底图无损重绘，高德定位码与跳转坐标已同步更新！');
             });
             return;
           }
@@ -1211,16 +1434,18 @@
         state.shortPoi = poi;
         state.coordFmt = fmt;
         state.note = note;
+        state.showQr = sQr;
         state.showTime = sTime;
         state.showLoc = sLoc;
         state.showCoords = sCoords;
         state.showNote = sNote;
+        state.showEnv = sEnv;
+        syncTplPills();
         updateLiveOverlay();
         document.getElementById('modalWatermark').classList.add('hidden');
         showToast('水印设置已实时生效');
       });
 
-      // Copy & Download in Gallery
       document.getElementById('btnGalleryCopyCoord').addEventListener('click', function() {
         const selected = state.photos.find(p => p.id === state.selectedPhotoId);
         if (!selected) return;
@@ -1243,7 +1468,6 @@
         showToast('已导出高清水印照片');
       });
 
-      // Import external photo in Gallery
       document.getElementById('inputImportExifPhoto').addEventListener('change', function(e) {
         const f = e.target.files && e.target.files[0];
         if (!f) return;
@@ -1255,6 +1479,7 @@
             styleTemplate: state.styleTemplate,
             coordSys: state.coordSys,
             coordFmt: state.coordFmt,
+            filterIdx: state.filterIdx,
             gcjLat: state.gcjLat,
             gcjLon: state.gcjLon,
             wgsLat: state.wgsLat,
@@ -1262,16 +1487,20 @@
             origGcjLat: state.gcjLat,
             origGcjLon: state.gcjLon,
             accuracy: 2.8,
+            altitude: state.altitude,
+            azimuthText: state.azimuthText,
             shortPoi: state.shortPoi,
             fullAddr: state.fullAddr,
             hm: t.hm,
             dateWeek: t.dateWeek,
             fullTs: t.fullTs,
-            note: '相册导入照片 · 已自动对齐高德GCJ-02',
+            note: '相册导入照片 · 已对齐高德GCJ-02',
+            showQr: state.showQr,
             showTime: true,
             showLoc: true,
             showCoords: true,
-            showNote: true
+            showNote: true,
+            showEnv: state.showEnv
           };
           compositePhotoCanvas(cleanUrl, cfg, function(wmUrl) {
             const entry = {
@@ -1290,12 +1519,11 @@
         this.value = '';
       });
 
-      // Toggle hardware camera in settings
       document.getElementById('btnToggleHardwareCam').addEventListener('click', function() {
         const video = document.getElementById('cameraVideo');
         const canvas = document.getElementById('viewfinderCanvas');
         if (!state.usingRealCam && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+          navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false })
             .then(stream => {
               state.stream = stream;
               video.srcObject = stream;

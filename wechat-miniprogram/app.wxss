@@ -1,0 +1,12 @@
+page {
+  background-color: #000000;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.mono {
+  font-family: "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+}

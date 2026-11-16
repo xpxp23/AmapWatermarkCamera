@@ -1,0 +1,226 @@
+<view class="page-root">
+  <!-- 1. 顶部专业相机工具栏 -->
+  <view class="top-bar" style="padding-top: {{statusBarHeight}}px;">
+    <view class="top-btn" bindtap="openSettingsModal">
+      <text class="top-icon">⚙</text>
+      <text class="top-label">设置</text>
+    </view>
+
+    <view class="top-right-group">
+      <view class="top-btn" bindtap="toggleCaptureMode">
+        <text class="top-icon accent">{{captureMode === 'photo' ? '📷' : '⚡'}}</text>
+        <text class="top-label accent">{{captureMode === 'photo' ? '光学拍照' : '极速截屏'}}</text>
+      </view>
+
+      <view class="top-btn" bindtap="scanFriendPhotoQr">
+        <text class="top-icon emerald">🔍</text>
+        <text class="top-label emerald">识图跳高德</text>
+      </view>
+
+      <view class="top-btn" bindtap="cycleFlashMode">
+        <text class="top-icon">{{flashLabel}}</text>
+        <text class="top-label">闪光灯</text>
+      </view>
+
+      <view class="top-btn" bindtap="flipCamera">
+        <text class="top-icon">🔄</text>
+        <text class="top-label">{{devicePosition === 'back' ? '后置' : '前置'}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 2. 中央实时取景器 + 100% 所见即所得水印层 -->
+  <view class="viewfinder-wrap">
+    <camera
+      class="camera-view"
+      device-position="{{devicePosition}}"
+      flash="{{flashMode}}"
+      resolution="high"
+      frame-size="medium"
+      binderror="onCameraError"
+    >
+      <!-- 顶部高德 GCJ-02 实时状态胶囊 -->
+      <cover-view class="gps-pill" bindtap="choosePoiOnMap">
+        <cover-view class="gps-dot"></cover-view>
+        <cover-view class="gps-pill-text">{{coordSys}} · ±{{accuracy}}m · {{captureMode === 'photo' ? '光学高清' : '0ms截屏'}}</cover-view>
+      </cover-view>
+
+      <!-- 好友分享位置直达横幅 (当从分享卡片或长按水印码进入小程序时自动弹出) -->
+      <cover-view wx:if="{{sharedBannerVisible}}" class="shared-jump-banner">
+        <cover-view class="shared-banner-title">📍 收到好友水印位置：{{sharedPoint.shortPoi}}</cover-view>
+        <cover-view class="shared-banner-coord">高德 GCJ-02: {{sharedPoint.gcjLat}}°N, {{sharedPoint.gcjLon}}°E</cover-view>
+        <cover-view class="shared-banner-actions">
+          <cover-view class="shared-btn-nav" bindtap="openSharedLocationInMap">🧭 立即唤起高德地图导航</cover-view>
+          <cover-view class="shared-btn-close" bindtap="closeSharedBanner">关闭</cover-view>
+        </cover-view>
+      </cover-view>
+
+      <!-- 实时水印预览区 (点击直接定制水印) -->
+      <cover-view class="live-wm-container" bindtap="openWatermarkModal">
+        <!-- 模板 0: 经典大字时间 -->
+        <cover-view wx:if="{{styleTemplate === 0}}" class="wm-tpl-0">
+          <cover-view wx:if="{{showTime}}" class="wm-big-time">{{timeHm}}</cover-view>
+          <cover-view class="wm-sub-line">
+            <cover-view wx:if="{{showTime}}" class="wm-date-text">{{dateWeek}}</cover-view>
+            <cover-view wx:if="{{showLoc}}" class="wm-poi-text">📍{{shortPoi}}</cover-view>
+          </cover-view>
+          <cover-view wx:if="{{showCoords}}" class="wm-coord-pill">{{liveCoordStr}}</cover-view>
+          <cover-view wx:if="{{showNote && note}}" class="wm-note-text">备注：{{note}}</cover-view>
+        </cover-view>
+
+        <!-- 模板 1~4: 结构化工程巡检/测绘/台账卡片 -->
+        <cover-view wx:else class="wm-tpl-card">
+          <cover-view class="wm-card-header">{{customTitle}} · {{coordSys}}</cover-view>
+          <cover-view wx:if="{{showCoords}}" class="wm-card-row sky">经纬：{{liveCoordStr}}</cover-view>
+          <cover-view wx:if="{{showLoc}}" class="wm-card-row">地点：{{shortPoi}} ({{fullAddr}})</cover-view>
+          <cover-view wx:if="{{showTime}}" class="wm-card-row">时间：{{fullTs}} {{dateWeek}}</cover-view>
+          <cover-view wx:if="{{showNote && note}}" class="wm-card-row amber">备注：{{note}}</cover-view>
+        </cover-view>
+
+        <!-- 右侧内嵌「扫码跳高德」角标提示 -->
+        <cover-view wx:if="{{showQr}}" class="wm-qr-preview-badge">
+          <cover-view class="wm-qr-box">▣</cover-view>
+          <cover-view class="wm-qr-txt">扫码跳高德</cover-view>
+        </cover-view>
+      </cover-view>
+    </camera>
+  </view>
+
+  <!-- 5款专业模板一键快切栏 -->
+  <view class="tpl-bar">
+    <view
+      wx:for="{{tplNames}}"
+      wx:key="index"
+      class="tpl-pill {{styleTemplate === index ? 'active' : ''}}"
+      data-idx="{{index}}"
+      bindtap="selectTemplate"
+    >
+      {{item}}
+    </view>
+  </view>
+
+  <!-- 3. 底部主控栏 (相册 | 地点校准 | 快门 | 识图跳高德 | 水印设置) -->
+  <view class="bottom-bar">
+    <view class="bot-btn" bindtap="openGalleryModal">
+      <image wx:if="{{latestPhotoPath}}" src="{{latestPhotoPath}}" class="thumb-circle" mode="aspectFill" />
+      <view wx:else class="thumb-placeholder">🖼</view>
+      <text class="bot-label">相册({{photos.length}})</text>
+    </view>
+
+    <view class="bot-btn" bindtap="choosePoiOnMap">
+      <view class="bot-icon">📍</view>
+      <text class="bot-label">选点校准</text>
+    </view>
+
+    <view class="shutter-outer {{captureMode === 'photo' ? 'optical' : ''}}" bindtap="handleShutterTap">
+      <view class="shutter-inner"></view>
+    </view>
+
+    <view class="bot-btn" bindtap="openCurrentInWeChatMap">
+      <view class="bot-icon">🧭</view>
+      <text class="bot-label">跳高德</text>
+    </view>
+
+    <view class="bot-btn" bindtap="openWatermarkModal">
+      <view class="bot-icon">🎨</view>
+      <text class="bot-label">水印设置</text>
+    </view>
+  </view>
+
+  <!-- 离屏高清合成 Canvas 2D (1080x1440) -->
+  <canvas type="2d" id="compositeCanvas" style="width: 1080px; height: 1440px; position: fixed; left: -9999px; top: -9999px;"></canvas>
+
+  <!-- ==================== 弹窗 1：相册预览 + 转发好友跳高德闭环 ==================== -->
+  <view wx:if="{{showGallery}}" class="modal-mask">
+    <view class="gallery-sheet">
+      <view class="sheet-header">
+        <text class="sheet-back" bindtap="closeGalleryModal">← 返回相机</text>
+        <text class="sheet-title">已拍水印相册 ({{photos.length}})</text>
+        <text class="sheet-action" bindtap="scanFriendPhotoQr">📥 导图识位置</text>
+      </view>
+
+      <view class="gallery-preview-box">
+        <image wx:if="{{currentPhoto}}" src="{{currentPhoto.wmPath}}" mode="aspectFit" class="gallery-main-img" bindtap="previewFullImage" />
+      </view>
+
+      <view wx:if="{{currentPhoto}}" class="gallery-info-panel">
+        <view class="info-row">
+          <view>
+            <view class="info-poi">📍 {{currentPhoto.cfg.shortPoi}}</view>
+            <view class="info-gcj mono">高德 GCJ-02: {{currentPhoto.cfg.gcjLat}}°N, {{currentPhoto.cfg.gcjLon}}°E</view>
+            <view class="info-wgs mono">原始 WGS-84: {{currentPhoto.cfg.wgsLat}}°N, {{currentPhoto.cfg.wgsLon}}°E</view>
+          </view>
+          <button size="mini" class="copy-btn" bindtap="copyCurrentCoord">复制坐标</button>
+        </view>
+
+        <view class="action-grid">
+          <button class="btn-primary-nav" bindtap="navigateSelectedPhoto">📍 唤起高德地图导航 (零偏差)</button>
+          <button class="btn-share-friend" open-type="share">📤 转发给好友 (好友点开直跳同位置)</button>
+        </view>
+
+        <view class="sub-action-grid">
+          <button size="mini" class="btn-sub" bindtap="sendRawImageToFriend">🖼 发送水印原图 (长按图中码可跳高德)</button>
+          <button size="mini" class="btn-sub" bindtap="saveCurrentToAlbum">⬇ 存入手机相册</button>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- ==================== 弹窗 2：设置面板 (切换截屏模式与光学拍照模式) ==================== -->
+  <view wx:if="{{showSettings}}" class="modal-mask" bindtap="closeSettingsModal">
+    <view class="dialog-card" catchtap="noop">
+      <view class="dialog-title">⚙ 拍摄模式与高德定位设置</view>
+      <view class="setting-section-label">核心拍摄引擎切换</view>
+      <view class="mode-switch-row">
+        <view class="mode-option {{captureMode === 'photo' ? 'selected' : ''}}" data-mode="photo" bindtap="setCaptureMode">
+          📷 光学拍照模式 (真摄像头ISP)
+        </view>
+        <view class="mode-option {{captureMode === 'frame' ? 'selected' : ''}}" data-mode="frame" bindtap="setCaptureMode">
+          ⚡ 极速截屏模式 (0ms帧定格)
+        </view>
+      </view>
+      <view class="mode-desc">
+        {{captureMode === 'photo' ? '当前：调用微信原生 CameraContext.takePhoto 硬件拍照，画质最清晰，支持硬件闪光灯。' : '当前：调用 onCameraFrame 实时截取取景帧合成，0ms零快门延迟。'}}
+      </view>
+
+      <view class="switch-row">
+        <text>水印内嵌「扫码跳高德」定位码</text>
+        <switch checked="{{showQr}}" bindchange="onToggleQr" color="#0284c7" />
+      </view>
+      <view class="switch-row">
+        <text>默认采用高德 GCJ-02 坐标系</text>
+        <switch checked="{{coordSys === 'GCJ-02'}}" bindchange="onToggleCoordSys" color="#0284c7" />
+      </view>
+      <view class="switch-row">
+        <text>拍照后自动保存至系统相册</text>
+        <switch checked="{{autoSaveAlbum}}" bindchange="onToggleAutoSave" color="#0284c7" />
+      </view>
+
+      <button class="btn-confirm" bindtap="closeSettingsModal">完成</button>
+    </view>
+  </view>
+
+  <!-- ==================== 弹窗 3：水印样式与字段定制 ==================== -->
+  <view wx:if="{{showWmModal}}" class="modal-mask" bindtap="closeWatermarkModal">
+    <view class="dialog-card" catchtap="noop">
+      <view class="dialog-title">🎨 水印字段与高德坐标定制</view>
+      <view class="input-group">
+        <text class="input-label">卡片标题</text>
+        <input class="text-input" value="{{customTitle}}" bindinput="onInputTitle" placeholder="现场点位核验" />
+      </view>
+      <view class="input-group">
+        <text class="input-label">地点简称 (📍后文字)</text>
+        <input class="text-input" value="{{shortPoi}}" bindinput="onInputPoi" placeholder="输入点位名称" />
+      </view>
+      <view class="input-group">
+        <text class="input-label">现场巡检备注</text>
+        <input class="text-input" value="{{note}}" bindinput="onInputNote" placeholder="输入现场备注..." />
+      </view>
+      <view class="switch-row">
+        <text>经纬度格式：度分秒 (DMS)</text>
+        <switch checked="{{useDms}}" bindchange="onToggleDms" color="#0284c7" />
+      </view>
+      <button class="btn-confirm" bindtap="closeWatermarkModal">保存并实时生效</button>
+    </view>
+  </view>
+</view>

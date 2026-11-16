@@ -1,0 +1,30 @@
+{
+  "pages": [
+    "pages/index/index"
+  ],
+  "window": {
+    "backgroundTextStyle": "dark",
+    "navigationStyle": "custom",
+    "navigationBarBackgroundColor": "#000000",
+    "navigationBarTitleText": "极速高德水印相机",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#000000"
+  },
+  "requiredPrivateInfos": [
+    "getLocation",
+    "chooseLocation"
+  ],
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于实时获取高德 GCJ-02 火星坐标，生成零偏差经纬水印并支持一键导航"
+    },
+    "scope.writePhotosAlbum": {
+      "desc": "用于将合成的高清水印照片保存至手机系统相册"
+    },
+    "scope.camera": {
+      "desc": "用于拍摄实景水印照片与扫描识别水印定位码"
+    }
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}
