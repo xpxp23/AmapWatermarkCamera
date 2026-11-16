@@ -1,7 +1,8 @@
 {
   "description": "极速经纬水印相机 v6.0.0 · 高德GCJ-02零偏差微信小程序版",
   "packOptions": {
-    "ignore": []
+    "ignore": [],
+    "include": []
   },
   "setting": {
     "urlCheck": false,
@@ -9,11 +10,28 @@
     "enhance": true,
     "postcss": true,
     "minified": true,
-    "useCompilerPlugins": false
+    "useCompilerPlugins": false,
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "condition": false,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
   },
   "compileType": "miniprogram",
   "libVersion": "3.3.0",
-  "appid": "touristappid",
+  "appid": "wx806d83c92c3db27d",
   "projectname": "AmapWatermarkCamera-MiniProgram",
-  "condition": {}
+  "condition": {},
+  "simulatorPluginLibVersion": {},
+  "editorSetting": {}
 }

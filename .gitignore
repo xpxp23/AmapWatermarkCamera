@@ -10,3 +10,7 @@ captures
 .cxx
 *.apk
 *.aab
+project.private.config.json
+*.private.config.json
+project.config.json
+
