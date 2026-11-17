@@ -182,6 +182,11 @@ Page({
     if (!this.clockTimer) {
       this.clockTimer = setInterval(() => this.refreshClock(), 1000);
     }
+    if (!this.locRefreshTimer) {
+      this.startContinuousLocationTracking();
+    }
+    // 返回前台时自动刷新最新高精度位置
+    this.startHighAccuracyLocation(false);
   },
 
   onHide() {
@@ -189,12 +194,16 @@ Page({
       clearInterval(this.clockTimer);
       this.clockTimer = null;
     }
+    if (this.locRefreshTimer) {
+      clearInterval(this.locRefreshTimer);
+      this.locRefreshTimer = null;
+    }
   },
 
   onUnload() {
     if (this.clockTimer) clearInterval(this.clockTimer);
+    if (this.locRefreshTimer) clearInterval(this.locRefreshTimer);
     try { wx.stopCompass(); } catch (e) {}
-    try { wx.stopLocationUpdate(); } catch (e) {}
   },
 
   /**
@@ -338,21 +347,16 @@ Page({
   },
 
   /**
-   * 启动实时位置移动跟随监听（当用户未处于手动选点状态时，边走边拍自动刷新真实 GPS）
+   * 启动前台温和定时定位刷新（无需 startLocationUpdate 权限，每 15 秒静默刷新一次最新真实 GPS）
    */
   startContinuousLocationTracking() {
-    try {
-      if (wx.startLocationUpdate && wx.onLocationChange) {
-        wx.startLocationUpdate({
-          success: () => {
-            wx.onLocationChange(loc => {
-              if (!loc || !loc.latitude || !loc.longitude) return;
-              this.recordHardwareGpsFix(loc.latitude, loc.longitude, loc.accuracy, loc.altitude, false);
-            });
-          }
-        });
+    if (this.locRefreshTimer) clearInterval(this.locRefreshTimer);
+    this.locRefreshTimer = setInterval(() => {
+      // 仅在非手动选点模式下自动刷新真实坐标
+      if (!this.data.isManualCoord) {
+        this.startHighAccuracyLocation(false);
       }
-    } catch (e) {}
+    }, 15000);
   },
 
   /**
@@ -457,12 +461,30 @@ Page({
         this.recordHardwareGpsFix(res.latitude, res.longitude, res.accuracy, res.altitude, Boolean(forceOverwriteManual));
       },
       fail: () => {
-        const smart = inferSmartPoiFromCoords(this.data.gcjLat, this.data.gcjLon);
-        this.setData({
-          shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : '实拍点位',
-          fullAddr: this.data.hasCustomPoi ? this.data.fullAddr : smart.fullAddr,
-          nearbyPois: smart.nearbyPois
-        }, () => this.updateCoordString());
+        // 当高精度单次定位失败或被省电策略拦截时，无缝尝试使用已开通的模糊定位兜底
+        if (wx.getFuzzyLocation) {
+          wx.getFuzzyLocation({
+            type: 'gcj02',
+            success: fRes => {
+              this.recordHardwareGpsFix(fRes.latitude, fRes.longitude, 100.0, this.data.altitude, Boolean(forceOverwriteManual));
+            },
+            fail: () => {
+              const smart = inferSmartPoiFromCoords(this.data.gcjLat, this.data.gcjLon);
+              this.setData({
+                shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : '实拍点位',
+                fullAddr: this.data.hasCustomPoi ? this.data.fullAddr : smart.fullAddr,
+                nearbyPois: smart.nearbyPois
+              }, () => this.updateCoordString());
+            }
+          });
+        } else {
+          const smart = inferSmartPoiFromCoords(this.data.gcjLat, this.data.gcjLon);
+          this.setData({
+            shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : '实拍点位',
+            fullAddr: this.data.hasCustomPoi ? this.data.fullAddr : smart.fullAddr,
+            nearbyPois: smart.nearbyPois
+          }, () => this.updateCoordString());
+        }
       }
     });
   },
@@ -561,35 +583,52 @@ Page({
   },
 
   /**
-   * 模式 A：🏷 地图选名模式（仅从地图搜索/点选附近建筑名称填入地点简称，100% 保持真实 GPS 经纬度不变！）
+   * 模式 A：🏷 地名选名模式（优先使用官方 wx.choosePoi 列表或地图选名，100% 保持真实 GPS 经纬度不变！）
    * 即使在防篡改验真模式下也可安全使用，彻底消除与“地图选点”的混淆
    */
   choosePoiNameOnlyOnMap() {
-    wx.chooseLocation({
-      latitude: this.data.gcjLat,
-      longitude: this.data.gcjLon,
-      success: res => {
-        const pickedName = (res.name || res.address || '').trim();
-        if (!pickedName) return;
-        const nextCands = [pickedName, ...this.data.nearbyPois]
-          .filter(Boolean)
-          .filter((v, i, a) => a.indexOf(v) === i)
-          .slice(0, 6);
-        this.setData({
-          hasCustomPoi: true,
-          shortPoi: pickedName,
-          fullAddr: res.address || this.data.fullAddr,
-          nearbyPois: nextCands
-        }, () => {
-          this.updateCoordString();
-          wx.showToast({
-            title: '🏷 已借用地图名称(GPS坐标未变)',
-            icon: 'none'
-          });
+    const applyPoiName = (name, address) => {
+      const pickedName = (name || address || '').trim();
+      if (!pickedName) return;
+      const nextCands = [pickedName, ...this.data.nearbyPois]
+        .filter(Boolean)
+        .filter((v, i, a) => a.indexOf(v) === i)
+        .slice(0, 6);
+      this.setData({
+        hasCustomPoi: true,
+        shortPoi: pickedName,
+        fullAddr: address || this.data.fullAddr,
+        nearbyPois: nextCands
+      }, () => {
+        this.updateCoordString();
+        wx.showToast({
+          title: '🏷 已选用地名(GPS坐标未变)',
+          icon: 'none'
         });
-      },
-      fail: err => this.handleChooseLocationFail(err)
-    });
+      });
+    };
+
+    if (wx.choosePoi) {
+      wx.choosePoi({
+        success: res => applyPoiName(res.name, res.address),
+        fail: () => {
+          // 降级使用 wx.chooseLocation
+          wx.chooseLocation({
+            latitude: this.data.gcjLat,
+            longitude: this.data.gcjLon,
+            success: res => applyPoiName(res.name, res.address),
+            fail: err => this.handleChooseLocationFail(err)
+          });
+        }
+      });
+    } else {
+      wx.chooseLocation({
+        latitude: this.data.gcjLat,
+        longitude: this.data.gcjLon,
+        success: res => applyPoiName(res.name, res.address),
+        fail: err => this.handleChooseLocationFail(err)
+      });
+    }
   },
 
   /**

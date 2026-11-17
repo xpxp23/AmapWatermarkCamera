@@ -12,9 +12,10 @@
   },
   "requiredPrivateInfos": [
     "getLocation",
-    "onLocationChange",
-    "startLocationUpdate",
-    "chooseLocation"
+    "chooseLocation",
+    "choosePoi",
+    "getFuzzyLocation",
+    "chooseAddress"
   ],
   "permission": {
     "scope.userLocation": {
