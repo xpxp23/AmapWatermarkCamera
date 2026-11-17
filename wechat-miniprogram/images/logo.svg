@@ -1,0 +1,241 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="50%" stop-color="#090E1A" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <!-- Center Radial Cosmic Glow -->
+    <radialGradient id="centerGlow" cx="50%" cy="46%" r="50%">
+      <stop offset="0%" stop-color="#0284C7" stop-opacity="0.32" />
+      <stop offset="45%" stop-color="#0369A1" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Bezel Metallic Rim -->
+    <linearGradient id="bezelGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#334155" />
+      <stop offset="30%" stop-color="#1E293B" />
+      <stop offset="70%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#1E293B" />
+    </linearGradient>
+
+    <!-- Lens Glass Depth -->
+    <radialGradient id="lensGlass" cx="38%" cy="34%" r="65%">
+      <stop offset="0%" stop-color="#1E3A8A" stop-opacity="0.9" />
+      <stop offset="35%" stop-color="#0C1D4A" stop-opacity="0.95" />
+      <stop offset="70%" stop-color="#04091A" />
+      <stop offset="100%" stop-color="#02050E" />
+    </radialGradient>
+
+    <!-- Neon Cyan Gradient -->
+    <linearGradient id="cyanNeon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+
+    <!-- Warm Amber / Gold Gradient -->
+    <linearGradient id="amberNeon" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#FCD34D" />
+    </linearGradient>
+
+    <!-- Floating Location Pin Gradient -->
+    <linearGradient id="pinGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="40%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#2563EB" />
+    </linearGradient>
+
+    <!-- Specular Highlight for Lens -->
+    <linearGradient id="specularHighlight" x1="0%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.5" />
+      <stop offset="40%" stop-color="#38BDF8" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Glow Filter -->
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+    <filter id="pinShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0284C7" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <!-- Base App Icon Squircle (Standard iOS/WeChat radius 224px) -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bgGrad)" />
+
+  <!-- Ambient Lens Glow -->
+  <circle cx="512" cy="480" r="420" fill="url(#centerGlow)" />
+
+  <!-- Outer Coordinate Dial & Degree Ticks -->
+  <circle cx="512" cy="480" r="410" stroke="#334155" stroke-width="1.5" fill="none" opacity="0.4" />
+  <g>
+    <line x1="910.0" y1="512.0" x2="922.0" y2="512.0" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="916.5" y1="547.4" x2="920.4" y2="547.7" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="908.9" y1="582.0" x2="915.8" y2="583.2" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="904.2" y1="617.1" x2="908.0" y2="618.1" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="890.7" y1="649.8" x2="897.3" y2="652.2" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="880.0" y1="683.6" x2="883.6" y2="685.3" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="856.7" y1="711.0" x2="867.1" y2="717.0" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="844.6" y1="744.9" x2="847.9" y2="747.2" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="820.7" y1="771.0" x2="826.1" y2="775.5" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="799.1" y1="799.1" x2="801.9" y2="801.9" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="771.0" y1="820.7" x2="775.5" y2="826.1" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="744.9" y1="844.6" x2="747.2" y2="847.9" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="711.0" y1="856.7" x2="717.0" y2="867.1" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="683.6" y1="880.0" x2="685.3" y2="883.6" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="649.8" y1="890.7" x2="652.2" y2="897.3" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="617.1" y1="904.2" x2="618.1" y2="908.0" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="582.0" y1="908.9" x2="583.2" y2="915.8" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="547.4" y1="916.5" x2="547.7" y2="920.4" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="512.0" y1="910.0" x2="512.0" y2="922.0" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="476.6" y1="916.5" x2="476.3" y2="920.4" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="442.0" y1="908.9" x2="440.8" y2="915.8" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="406.9" y1="904.2" x2="405.9" y2="908.0" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="374.2" y1="890.7" x2="371.8" y2="897.3" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="340.4" y1="880.0" x2="338.7" y2="883.6" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="313.0" y1="856.7" x2="307.0" y2="867.1" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="279.1" y1="844.6" x2="276.8" y2="847.9" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="253.0" y1="820.7" x2="248.5" y2="826.1" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="224.9" y1="799.1" x2="222.1" y2="801.9" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="203.3" y1="771.0" x2="197.9" y2="775.5" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="179.4" y1="744.9" x2="176.1" y2="747.2" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="167.3" y1="711.0" x2="156.9" y2="717.0" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="144.0" y1="683.6" x2="140.4" y2="685.3" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="133.3" y1="649.8" x2="126.7" y2="652.2" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="119.8" y1="617.1" x2="116.0" y2="618.1" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="115.1" y1="582.0" x2="108.2" y2="583.2" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="107.5" y1="547.4" x2="103.6" y2="547.7" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="114.0" y1="512.0" x2="102.0" y2="512.0" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="107.5" y1="476.6" x2="103.6" y2="476.3" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="115.1" y1="442.0" x2="108.2" y2="440.8" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="119.8" y1="406.9" x2="116.0" y2="405.9" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="133.3" y1="374.2" x2="126.7" y2="371.8" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="144.0" y1="340.4" x2="140.4" y2="338.7" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="167.3" y1="313.0" x2="156.9" y2="307.0" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="179.4" y1="279.1" x2="176.1" y2="276.8" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="203.3" y1="253.0" x2="197.9" y2="248.5" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="224.9" y1="224.9" x2="222.1" y2="222.1" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="253.0" y1="203.3" x2="248.5" y2="197.9" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="279.1" y1="179.4" x2="276.8" y2="176.1" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="313.0" y1="167.3" x2="307.0" y2="156.9" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="340.4" y1="144.0" x2="338.7" y2="140.4" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="374.2" y1="133.3" x2="371.8" y2="126.7" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="406.9" y1="119.8" x2="405.9" y2="116.0" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="442.0" y1="115.1" x2="440.8" y2="108.2" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="476.6" y1="107.5" x2="476.3" y2="103.6" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="512.0" y1="114.0" x2="512.0" y2="102.0" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="547.4" y1="107.5" x2="547.7" y2="103.6" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="582.0" y1="115.1" x2="583.2" y2="108.2" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="617.1" y1="119.8" x2="618.1" y2="116.0" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="649.8" y1="133.3" x2="652.2" y2="126.7" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="683.6" y1="144.0" x2="685.3" y2="140.4" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="711.0" y1="167.3" x2="717.0" y2="156.9" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="744.9" y1="179.4" x2="747.2" y2="176.1" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="771.0" y1="203.3" x2="775.5" y2="197.9" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="799.1" y1="224.9" x2="801.9" y2="222.1" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="820.7" y1="253.0" x2="826.1" y2="248.5" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="844.6" y1="279.1" x2="847.9" y2="276.8" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="856.7" y1="313.0" x2="867.1" y2="307.0" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <line x1="880.0" y1="340.4" x2="883.6" y2="338.7" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="890.7" y1="374.2" x2="897.3" y2="371.8" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="904.2" y1="406.9" x2="908.0" y2="405.9" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+    <line x1="908.9" y1="442.0" x2="915.8" y2="440.8" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="916.5" y1="476.6" x2="920.4" y2="476.3" stroke="#94A3B8" stroke-width="1.0" stroke-linecap="round" opacity="0.25"/>
+  </g>
+
+  <!-- Cardinal Coordinates Labels -->
+  <text x="512" y="96" fill="#38BDF8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" text-anchor="middle" letter-spacing="2" opacity="0.9">N 0°</text>
+  <text x="512" y="888" fill="#94A3B8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="700" text-anchor="middle" letter-spacing="2" opacity="0.6">S 180°</text>
+  <text x="120" y="488" fill="#94A3B8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="700" text-anchor="middle" letter-spacing="2" opacity="0.6">W 270°</text>
+  <text x="904" y="488" fill="#94A3B8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="700" text-anchor="middle" letter-spacing="2" opacity="0.6">E 90°</text>
+
+  <!-- 3D Longitude & Latitude Orbital Ellipses (经纬网弧线) -->
+  <g filter="url(#neonGlow)">
+    <!-- Primary Equator / Latitude Ellipse -->
+    <ellipse cx="512" cy="480" rx="340" ry="115" transform="rotate(-18 512 480)" fill="none" stroke="url(#cyanNeon)" stroke-width="3" stroke-dasharray="14 10" opacity="0.75" />
+    <!-- Secondary Meridian / Longitude Ellipse -->
+    <ellipse cx="512" cy="480" rx="140" ry="340" transform="rotate(-18 512 480)" fill="none" stroke="url(#cyanNeon)" stroke-width="2.5" opacity="0.6" />
+    <!-- Golden Accent Latitude Orbit -->
+    <ellipse cx="512" cy="480" rx="320" ry="200" transform="rotate(35 512 480)" fill="none" stroke="url(#amberNeon)" stroke-width="2" stroke-dasharray="8 8" opacity="0.45" />
+  </g>
+
+  <!-- Main Camera Lens Body with Drop Shadow -->
+  <g filter="url(#softShadow)">
+    <!-- Outer Titanium Bezel -->
+    <circle cx="512" cy="480" r="280" fill="url(#bezelGrad)" stroke="#475569" stroke-width="2" />
+    <circle cx="512" cy="480" r="268" fill="#0B132B" stroke="#1E293B" stroke-width="4" />
+    <circle cx="512" cy="480" r="256" fill="#030712" stroke="#38BDF8" stroke-width="1.5" stroke-opacity="0.6" />
+
+    <!-- Optical Camera Lens Glass Depth -->
+    <circle cx="512" cy="480" r="248" fill="url(#lensGlass)" />
+
+    <!-- Aperture Blades Geometry (6 geometric iris lines) -->
+    <g opacity="0.35">
+      <path d="M 512 250 L 590 350 L 512 430 Z" fill="#1E293B" stroke="#38BDF8" stroke-width="1" />
+      <path d="M 710 390 L 660 510 L 560 480 Z" fill="#1E293B" stroke="#38BDF8" stroke-width="1" />
+      <path d="M 680 610 L 550 640 L 520 540 Z" fill="#1E293B" stroke="#38BDF8" stroke-width="1" />
+      <path d="M 512 710 L 434 610 L 512 530 Z" fill="#1E293B" stroke="#38BDF8" stroke-width="1" />
+      <path d="M 314 570 L 364 450 L 464 480 Z" fill="#1E293B" stroke="#38BDF8" stroke-width="1" />
+      <path d="M 344 350 L 474 320 L 504 420 Z" fill="#1E293B" stroke="#38BDF8" stroke-width="1" />
+    </g>
+
+    <!-- Inner Core Optical Pupil -->
+    <circle cx="512" cy="480" r="145" fill="#020817" stroke="#0EA5E9" stroke-width="2.5" />
+    <circle cx="512" cy="480" r="138" fill="#050C1F" />
+
+    <!-- Lens Specular Glare / Curved Glass Highlight -->
+    <path d="M 310 360 C 350 290, 440 250, 550 250 C 650 250, 700 280, 720 320 C 630 280, 520 275, 410 310 C 350 330, 320 350, 310 360 Z" fill="url(#specularHighlight)" />
+  </g>
+
+  <!-- Surveyor Crosshair Precision Reticles -->
+  <g stroke="#38BDF8" stroke-width="2" stroke-linecap="round" opacity="0.85">
+    <!-- Top Reticle -->
+    <line x1="512" y1="310" x2="512" y2="345" />
+    <!-- Bottom Reticle -->
+    <line x1="512" y1="615" x2="512" y2="650" />
+    <!-- Left Reticle -->
+    <line x1="342" y1="480" x2="377" y2="480" />
+    <!-- Right Reticle -->
+    <line x1="647" y1="480" x2="682" y2="480" />
+    <!-- Inner Crosshair Center Dots -->
+    <circle cx="512" cy="480" r="4" fill="#38BDF8" />
+  </g>
+
+  <!-- Luminous Location Pin (Floating In Focal Point) -->
+  <g filter="url(#pinShadow)">
+    <!-- Stylized Modern Glassmorphic Pin -->
+    <path d="M 512 370
+             C 470 370, 436 404, 436 446
+             C 436 492, 492 562, 512 584
+             C 532 562, 588 492, 588 446
+             C 588 404, 554 370, 512 370 Z"
+          fill="url(#pinGrad)"
+          stroke="#BAE6FD"
+          stroke-width="3.5" />
+
+    <!-- Pin Inner Core (Camera Sensor Aperture) -->
+    <circle cx="512" cy="444" r="30" fill="#04091A" stroke="#FFFFFF" stroke-width="3" />
+    <circle cx="512" cy="444" r="16" fill="#38BDF8" />
+    <!-- Tiny Glint on Pin -->
+    <circle cx="496" cy="420" r="7" fill="#FFFFFF" opacity="0.8" />
+  </g>
+
+  <!-- Golden Floating Coordinate Watermark Badge (Bottom Center) -->
+  <g filter="url(#softShadow)">
+    <rect x="362" y="736" width="300" height="48" rx="24" fill="#0F172ACC" stroke="#38BDF888" stroke-width="1.5" />
+    <!-- Camera Glyph -->
+    <circle cx="396" cy="760" r="7" fill="none" stroke="#38BDF8" stroke-width="2" />
+    <circle cx="396" cy="760" r="3" fill="#38BDF8" />
+    <!-- Lat/Lon Coordinate Monospace Text -->
+    <text x="418" y="766" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, 'SF Mono', Consolas, monospace" font-size="16" font-weight="700" letter-spacing="1.5">GCJ-02 · 零偏差</text>
+  </g>
+</svg>
