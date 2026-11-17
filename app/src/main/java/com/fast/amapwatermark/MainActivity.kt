@@ -262,6 +262,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     var showQrCode by remember { mutableStateOf(prefs.getBoolean("showQrCode", true)) }
     var showAddress by remember { mutableStateOf(prefs.getBoolean("showAddress", false)) }
     var showNote by remember { mutableStateOf(prefs.getBoolean("showNote", true)) }
+    var showMiniMap by remember { mutableStateOf(prefs.getBoolean("showMiniMap", true)) }
+    var miniMapPosition by remember { mutableStateOf(prefs.getInt("miniMapPosition", 0)) }
+    var antiTamperMode by remember { mutableStateOf(prefs.getBoolean("antiTamperMode", false)) }
     var bottomRight by remember { mutableStateOf(prefs.getBoolean("bottomRight", false)) }
     var filterIndex by remember { mutableStateOf(0) }
 
@@ -291,8 +294,8 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         captureMode, styleTemplate, customTitle, coordSystem, useDms, customNote,
         fontScale, accentColorIndex, bgAlpha, showTime, showLocation,
         showCoords, showCoordTag, showAccuracy, showAltitude, showAzimuth,
-        showQrCode, showAddress, showNote, bottomRight, asyncOptimal,
-        accuracyThreshold, keepCleanOriginal, showGridLines
+        showQrCode, showAddress, showNote, showMiniMap, miniMapPosition, antiTamperMode,
+        bottomRight, asyncOptimal, accuracyThreshold, keepCleanOriginal, showGridLines
     ) {
         delay(250L)
         prefs.edit()
@@ -315,6 +318,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             .putBoolean("showQrCode", showQrCode)
             .putBoolean("showAddress", showAddress)
             .putBoolean("showNote", showNote)
+            .putBoolean("showMiniMap", showMiniMap)
+            .putInt("miniMapPosition", miniMapPosition)
+            .putBoolean("antiTamperMode", antiTamperMode)
             .putBoolean("bottomRight", bottomRight)
             .putBoolean("asyncOptimal", asyncOptimal)
             .putInt("accuracyThreshold", accuracyThreshold)
@@ -549,7 +555,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 }
 
                 val captureOrientation = deviceOrientation
-                val (hm, dateWeek, fullTs) = WatermarkConfig.currentTimeStrings()
+                val (hm, dateWeek, fullTs) = WatermarkConfig.currentTimeStrings(locationManager.getTrustedDate())
                 val useHardwareCapture = (captureMode == 1 && imageCaptureRef != null && hasCameraPermission)
 
                 val needFrontScreenFlash = ((flashMode == 1 || flashMode == 2) && isFrontCamera)
@@ -639,6 +645,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     origGcjLon = finalLoc.gcjLon,
                     accuracyMeters = finalLoc.accuracyMeters,
                     altitudeMeters = finalLoc.altitudeMeters,
+                    azimuthDeg = finalLoc.azimuthDeg,
                     azimuthText = finalLoc.azimuthText,
                     shortPoi = finalLoc.shortPoi,
                     address = finalLoc.fullAddress,
@@ -656,6 +663,11 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     showQrCode = showQrCode,
                     showAddress = showAddress,
                     showNote = showNote,
+                    showMiniMap = showMiniMap,
+                    miniMapPosition = miniMapPosition,
+                    antiTamperMode = antiTamperMode,
+                    ntpSynced = finalLoc.ntpSynced,
+                    antiTamperHash = if (antiTamperMode) QrCodeGenerator.computeAntiTamperHash(finalLoc.gcjLat, finalLoc.gcjLon, fullTs, finalLoc.shortPoi) else "",
                     bottomRight = bottomRight,
                     filterIndex = filterIndex,
                     bgAlpha = bgAlpha,
@@ -1063,6 +1075,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     showQrCode = showQrCode,
                     showAddress = showAddress,
                     showNote = showNote,
+                    showMiniMap = showMiniMap,
+                    miniMapPosition = miniMapPosition,
+                    antiTamperMode = antiTamperMode,
                     bottomRight = bottomRight,
                     bgAlpha = bgAlpha,
                     fontScale = fontScale,
@@ -1094,7 +1109,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         180 -> "倒置"
                         else -> "竖屏"
                     }
-                    val engineTag = if (captureMode == 1) "光学高清" else "0ms截屏"
+                    val engineTag = if (antiTamperMode) (if (loc.ntpSynced) "🛡NTP真时防伪" else "🛡防伪锁定") else if (captureMode == 1) "光学高清" else "0ms截屏"
                     Text(
                         text = if (loc.hasRealFix) "$coordSystem · ±${String.format(Locale.US, "%.1fm", loc.accuracyMeters)} · $engineTag · $modeTag" else "GPS锁定中 · $engineTag",
                         color = Color.White,
@@ -1482,10 +1497,18 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         }
                     }
 
+                    if (antiTamperMode) {
+                        Text(
+                            "🛡 当前处于「外业防篡改验真模式」，真实授时 (${loc.ntpSource}) 与实测坐标已硬件锁定禁止手改。",
+                            color = Color(0xFF34D399),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                     OutlinedTextField(
                         value = poiInput,
                         onValueChange = { poiInput = it },
-                        label = { Text("地点简称 (例如：小庄村 / 1号施工点)") },
+                        label = { Text("地点简称 (点击下方周边点位一秒填入)") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1495,10 +1518,11 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        QUICK_POI_TAGS.forEach { tag ->
+                        val combinedTags = (loc.nearbyPois + QUICK_POI_TAGS).distinct()
+                        combinedTags.forEach { tag ->
                             SuggestionChip(
                                 onClick = { poiInput = tag },
-                                label = { Text(tag, fontSize = 11.sp) }
+                                label = { Text("📍 $tag", fontSize = 11.sp) }
                             )
                         }
                     }
@@ -1512,6 +1536,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         OutlinedTextField(
                             value = manualLatInput,
                             onValueChange = { manualLatInput = it },
+                            enabled = !antiTamperMode,
                             label = { Text("高德纬度 GCJ-02") },
                             singleLine = true,
                             modifier = Modifier.weight(1f)
@@ -1519,6 +1544,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         OutlinedTextField(
                             value = manualLonInput,
                             onValueChange = { manualLonInput = it },
+                            enabled = !antiTamperMode,
                             label = { Text("高德经度 GCJ-02") },
                             singleLine = true,
                             modifier = Modifier.weight(1f)
@@ -1552,12 +1578,14 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             confirmButton = {
                 Button(onClick = {
                     locationManager.setCustomLocationText(poiInput, addrInput)
-                    val newLat = manualLatInput.toDoubleOrNull()
-                    val newLon = manualLonInput.toDoubleOrNull()
-                    if (newLat != null && newLon != null &&
-                        (newLat != loc.gcjLat || newLon != loc.gcjLon)
-                    ) {
-                        locationManager.updateManualCoordinates(newLat, newLon)
+                    if (!antiTamperMode) {
+                        val newLat = manualLatInput.toDoubleOrNull()
+                        val newLon = manualLonInput.toDoubleOrNull()
+                        if (newLat != null && newLon != null &&
+                            (newLat != loc.gcjLat || newLon != loc.gcjLon)
+                        ) {
+                            locationManager.updateManualCoordinates(newLat, newLon)
+                        }
                     }
                     showLocationSheet = false
                 }) {
@@ -1694,6 +1722,19 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                             }
 
                             Text("显示要素开关 (双列矩阵，点击即切)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                CompactToggleChip("🗺 高德缩略图(160px)", showMiniMap, Modifier.weight(1f)) { showMiniMap = !showMiniMap }
+                                CompactToggleChip("🛡 防篡改SHA256验真", antiTamperMode, Modifier.weight(1f)) {
+                                    antiTamperMode = !antiTamperMode
+                                    if (antiTamperMode) locationManager.syncTrustedNetworkTime()
+                                }
+                            }
+                            if (showMiniMap && styleTemplate in listOf(1, 2)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    CompactToggleChip("缩略图: 卡片左侧内嵌", miniMapPosition == 0, Modifier.weight(1f)) { miniMapPosition = 0 }
+                                    CompactToggleChip("缩略图: 左上角独立悬浮", miniMapPosition == 1, Modifier.weight(1f)) { miniMapPosition = 1 }
+                                }
+                            }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                 CompactToggleChip("✓ 扫码跳高德角标", showQrCode, Modifier.weight(1f)) { showQrCode = !showQrCode }
                                 CompactToggleChip("✓ 地点名称(📍)", showLocation, Modifier.weight(1f)) { showLocation = !showLocation }
@@ -1875,6 +1916,13 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         fontSize = 11.sp
                     )
 
+                    WatermarkToggleRow("🗺 160×160 高德矢量缩略地图 (Mini-Map画中画)", showMiniMap) {
+                        showMiniMap = it
+                    }
+                    WatermarkToggleRow("🛡 外业防篡改验真模式 (NTP真时锁定 + SHA-256签名)", antiTamperMode) {
+                        antiTamperMode = it
+                        if (it) locationManager.syncTrustedNetworkTime()
+                    }
                     WatermarkToggleRow("水印内嵌高德定位二维码 (微信发图长按可识)", showQrCode) {
                         showQrCode = it
                     }
@@ -1936,6 +1984,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         var editShowQr by remember(target) { mutableStateOf(target.config.showQrCode) }
         var editShowAddr by remember(target) { mutableStateOf(target.config.showAddress) }
         var editShowNote by remember(target) { mutableStateOf(target.config.showNote) }
+        var editShowMiniMap by remember(target) { mutableStateOf(target.config.showMiniMap) }
+        var editMiniMapPos by remember(target) { mutableStateOf(target.config.miniMapPosition) }
+        var editAntiTamper by remember(target) { mutableStateOf(target.config.antiTamperMode) }
         var editBottomRight by remember(target) { mutableStateOf(target.config.bottomRight) }
 
         AlertDialog(
@@ -2046,6 +2097,13 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         CompactToggleChip("✓ 经纬", editShowCoords, Modifier.weight(1f)) { editShowCoords = !editShowCoords }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        CompactToggleChip("🗺 高德小图", editShowMiniMap, Modifier.weight(1f)) { editShowMiniMap = !editShowMiniMap }
+                        CompactToggleChip(if (editMiniMapPos == 0) "小图:卡片内" else "小图:左上角", editShowMiniMap, Modifier.weight(1f)) {
+                            editMiniMapPos = if (editMiniMapPos == 0) 1 else 0
+                        }
+                        CompactToggleChip("🛡 防伪验真", editAntiTamper, Modifier.weight(1f)) { editAntiTamper = !editAntiTamper }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         CompactToggleChip("✓ 定位码", editShowQr, Modifier.weight(1f)) { editShowQr = !editShowQr }
                         CompactToggleChip("✓ 地址", editShowAddr, Modifier.weight(1f)) { editShowAddr = !editShowAddr }
                         CompactToggleChip("✓ 备注", editShowNote, Modifier.weight(1f)) { editShowNote = !editShowNote }
@@ -2085,6 +2143,10 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         showQrCode = editShowQr,
                         showAddress = editShowAddr,
                         showNote = editShowNote,
+                        showMiniMap = editShowMiniMap,
+                        miniMapPosition = editMiniMapPos,
+                        antiTamperMode = editAntiTamper,
+                        antiTamperHash = if (editAntiTamper) QrCodeGenerator.computeAntiTamperHash(newGcjLat, newGcjLon, syncedFullTs, editPoi) else "",
                         bottomRight = editBottomRight
                     )
                     scope.launch {
@@ -2207,17 +2269,20 @@ fun WysiwygLiveWatermarkCanvas(
     showQrCode: Boolean,
     showAddress: Boolean,
     showNote: Boolean,
+    showMiniMap: Boolean,
+    miniMapPosition: Int,
+    antiTamperMode: Boolean,
     bottomRight: Boolean,
     bgAlpha: Int,
     fontScale: Float,
     accentColorIndex: Int
 ) {
-    var timeTick by remember { mutableStateOf(WatermarkConfig.currentTimeStrings()) }
-    LaunchedEffect(styleTemplate, showTime) {
-        if (!showTime) return@LaunchedEffect
+    var timeTick by remember { mutableStateOf(WatermarkConfig.currentTimeStrings(java.util.Date(loc.trustedCurrentTimeMillis()))) }
+    LaunchedEffect(styleTemplate, showTime, antiTamperMode, loc.ntpOffsetMs) {
+        if (!showTime && !antiTamperMode) return@LaunchedEffect
         while (true) {
-            val next = WatermarkConfig.currentTimeStrings()
-            if (styleTemplate != 0 || next.first != timeTick.first || next.second != timeTick.second) {
+            val next = WatermarkConfig.currentTimeStrings(java.util.Date(loc.trustedCurrentTimeMillis()))
+            if (styleTemplate != 0 || antiTamperMode || next.first != timeTick.first || next.second != timeTick.second) {
                 timeTick = next
             }
             delay(1000L)
@@ -2230,7 +2295,8 @@ fun WysiwygLiveWatermarkCanvas(
         loc, customNote, liveHm, liveDateWeek, liveFullTs,
         showTime, showLocation, showCoords, showCoordTag,
         showAccuracy, showAltitude, showAzimuth, showQrCode,
-        showAddress, showNote, bottomRight, bgAlpha, fontScale, accentColorIndex
+        showAddress, showNote, showMiniMap, miniMapPosition, antiTamperMode,
+        bottomRight, bgAlpha, fontScale, accentColorIndex
     ) {
         WatermarkConfig(
             styleTemplate = styleTemplate,
@@ -2245,6 +2311,7 @@ fun WysiwygLiveWatermarkCanvas(
             origGcjLon = loc.gcjLon,
             accuracyMeters = loc.accuracyMeters,
             altitudeMeters = loc.altitudeMeters,
+            azimuthDeg = loc.azimuthDeg,
             azimuthText = loc.azimuthText,
             shortPoi = loc.shortPoi,
             address = loc.fullAddress,
@@ -2262,6 +2329,11 @@ fun WysiwygLiveWatermarkCanvas(
             showQrCode = showQrCode,
             showAddress = showAddress,
             showNote = showNote,
+            showMiniMap = showMiniMap,
+            miniMapPosition = miniMapPosition,
+            antiTamperMode = antiTamperMode,
+            ntpSynced = loc.ntpSynced,
+            antiTamperHash = if (antiTamperMode) QrCodeGenerator.computeAntiTamperHash(loc.gcjLat, loc.gcjLon, liveFullTs, loc.shortPoi) else "",
             bottomRight = bottomRight,
             bgAlpha = bgAlpha,
             fontScale = fontScale,
@@ -2459,12 +2531,24 @@ fun GalleryAndSystemPhotosScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 12.sp
                         )
-                        Text(
-                            text = "原始 WGS-84: ${String.format(Locale.US, "%.6f°N, %.6f°E", cfg.wgsLat, cfg.wgsLon)}",
-                            color = Color(0xFF94A3B8),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp
-                        )
+                        if (cfg.antiTamperMode && cfg.antiTamperHash.isNotBlank()) {
+                            val verified = cfg.isSignatureValid()
+                            Text(
+                                text = if (verified) "🛡 防伪验真通过 · SHA256:${cfg.antiTamperHash} (${if (cfg.ntpSynced) "NTP真时" else "已锁"})"
+                                       else "⚠️ 防伪签名异常 · 坐标或时间可能被改动",
+                                color = if (verified) Color(0xFF34D399) else Color(0xFFFBBF24),
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        } else {
+                            Text(
+                                text = "原始 WGS-84: ${String.format(Locale.US, "%.6f°N, %.6f°E", cfg.wgsLat, cfg.wgsLon)}",
+                                color = Color(0xFF94A3B8),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
 
                     OutlinedButton(

@@ -11,8 +11,8 @@ android {
         applicationId = "com.fast.amapwatermark"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "6.0.0"
+        versionCode = 7
+        versionName = "7.0.0"
     }
 
     buildTypes {
@@ -57,6 +57,6 @@ dependencies {
     // Explicit ListenableFuture support for ProcessCameraProvider
     implementation("com.google.guava:guava:32.1.3-android")
 
-    // ExifInterface for dual-track WGS84 + GCJ02 EXIF reading & writing
+    // ExifInterface for dual-track WGS84 + GCJ02 EXIF reading & writing + SHA-256 Anti-Tamper signature
     implementation("androidx.exifinterface:exifinterface:1.3.7")
 }
