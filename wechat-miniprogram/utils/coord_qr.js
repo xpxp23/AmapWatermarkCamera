@@ -1,6 +1,6 @@
 /**
- * 极速经纬水印相机 v7.1.0 · 微信小程序三坐标系（默认 WGS-84 / 国标 CGCS2000 / 高德 GCJ-02）双向解耦引擎、
- * ISO/IEC 18004 V1-V9 全容量离线二维码引擎与 FIPS 180-4 SHA-256 外业防篡改验真引擎
+ * 极速经纬水印相机 v8.0.0 · 微信小程序三坐标系（默认 WGS-84 / 国标 CGCS2000 / 高德 GCJ-02）双向解耦引擎、
+ * ISO/IEC 18004 V1-V9 全容量离线二维码引擎、160×160 高德矢量缩略图引擎与 FIPS 180-4 SHA-256 外业防篡改验真引擎
  */
 
 const PI = Math.PI;
@@ -63,10 +63,19 @@ function gcj02ToWgs84(gcjLat, gcjLon) {
   };
 }
 
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const r = 6371000.0;
+  const dLat = ((lat2 - lat1) * PI) / 180.0;
+  const dLon = ((lon2 - lon1) * PI) / 180.0;
+  const a =
+    Math.pow(Math.sin(dLat / 2.0), 2) +
+    Math.cos((lat1 * PI) / 180.0) * Math.cos((lat2 * PI) / 180.0) * Math.pow(Math.sin(dLon / 2.0), 2);
+  return r * 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+}
+
 /**
  * 根据水印目标坐标系 (WGS-84 / CGCS2000 / GCJ-02) 返回用于水印显示的经纬度
- * 注意：CGCS2000 与 WGS-84 在米级/分米级外业导航定位精度下同属地心大地坐标系（无 GCJ-02 加密偏移），
- * 而所有高德跳转、二维码与微信地图导航始终固定使用底层的 GCJ-02 坐标，确保 100% 零偏差！
+ * 所有高德跳转、二维码与微信地图导航始终固定使用底层的 GCJ-02 坐标，确保 100% 零偏差
  */
 function resolveDisplayCoordinates(coordSys, gcjLat, gcjLon, wgsLat, wgsLon) {
   if (coordSys === 'GCJ-02') {
@@ -76,9 +85,10 @@ function resolveDisplayCoordinates(coordSys, gcjLat, gcjLon, wgsLat, wgsLon) {
       tag: 'GCJ-02'
     };
   }
-  const cleanWgs = (wgsLat !== undefined && wgsLon !== undefined)
-    ? { lat: Number(Number(wgsLat).toFixed(6)), lon: Number(Number(wgsLon).toFixed(6)) }
-    : gcj02ToWgs84(gcjLat, gcjLon);
+  const cleanWgs =
+    wgsLat !== undefined && wgsLon !== undefined
+      ? { lat: Number(Number(wgsLat).toFixed(6)), lon: Number(Number(wgsLon).toFixed(6)) }
+      : gcj02ToWgs84(gcjLat, gcjLon);
   return {
     lat: cleanWgs.lat,
     lon: cleanWgs.lon,
@@ -117,7 +127,7 @@ function formatAzimuthText(deg) {
   else if (d <= 190) dir = '正南';
   else if (d < 260) dir = '西南';
   else if (d <= 280) dir = '正西';
-  const pad3 = d < 10 ? '00' + d : (d < 100 ? '0' + d : '' + d);
+  const pad3 = d < 10 ? '00' + d : d < 100 ? '0' + d : '' + d;
   return `${dir} ${pad3}°`;
 }
 
@@ -146,7 +156,6 @@ function stringToUtf8Bytes(str) {
 
 /**
  * 纯离线 FIPS 180-4 SHA-256 哈希算法实现
- * 用于生成外业防伪签名摘要 (Anti-Tamper Signature)
  */
 const SHA256_K = [
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -167,7 +176,7 @@ function sha256Hex(message) {
   const bytes = stringToUtf8Bytes(String(message));
   const bitLen = bytes.length * 8;
   bytes.push(0x80);
-  while ((bytes.length % 64) !== 56) bytes.push(0);
+  while (bytes.length % 64 !== 56) bytes.push(0);
   const hi = Math.floor(bitLen / 0x100000000);
   const lo = bitLen >>> 0;
   for (let i = 3; i >= 0; i--) bytes.push((hi >>> (i * 8)) & 0xff);
@@ -190,7 +199,7 @@ function sha256Hex(message) {
     let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
     for (let i = 0; i < 64; i++) {
       const S1 = (rotr(6, e) ^ rotr(11, e) ^ rotr(25, e)) >>> 0;
-      const ch = ((e & f) ^ ((~e) & g)) >>> 0;
+      const ch = ((e & f) ^ (~e & g)) >>> 0;
       const temp1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
       const S0 = (rotr(2, a) ^ rotr(13, a) ^ rotr(22, a)) >>> 0;
       const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
@@ -210,25 +219,32 @@ function sha256Hex(message) {
 
 /**
  * 计算外业防篡改签名摘要 (16位大写 SHA-256 截断验真码)
- * 绑定：真实 GCJ-02 6位经纬度 + 秒级时间戳 + 地点简称
+ * 绑定：真实 GCJ-02 6位经纬度 + 秒级时间戳 + 地点简称 + 可选现场备注摘要
  */
-function computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi) {
+function computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note) {
   const latStr = Number(gcjLat || 0).toFixed(6);
   const lonStr = Number(gcjLon || 0).toFixed(6);
   const tsClean = String(timestamp || '').trim();
   const poiClean = String(shortPoi || '实拍点位').trim().slice(0, 10);
-  const raw = `${latStr}|${lonStr}|${tsClean}|${poiClean}|${ANTI_TAMPER_SALT}`;
+  const noteClean = String(note || '').trim().slice(0, 12);
+  const raw = noteClean
+    ? `${latStr}|${lonStr}|${tsClean}|${poiClean}|${noteClean}|${ANTI_TAMPER_SALT}`
+    : `${latStr}|${lonStr}|${tsClean}|${poiClean}|${ANTI_TAMPER_SALT}`;
   return sha256Hex(raw).slice(0, 16);
 }
 
-function verifyAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, signature) {
-  if (!signature || signature.length < 8) return false;
-  const expected = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi);
-  return expected.startsWith(String(signature).toUpperCase().trim());
+function verifyAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, signature, note) {
+  const cleanSig = String(signature || '').toUpperCase().trim();
+  if (!cleanSig || cleanSig.length < 10) return false;
+  const expectedWithNote = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note);
+  if (expectedWithNote.startsWith(cleanSig)) return true;
+  // 向下兼容未附带 note 字段的 v7.x 防伪二维码
+  const expectedLegacy = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, '');
+  return expectedLegacy.startsWith(cleanSig);
 }
 
 /**
- * ISO/IEC 18004 QR Code Matrix Engine (Version 1 ~ Version 9, Level L)
+ * ISO/IEC 18004 QR Code Matrix Engine (Version 1 ~ Version 9, Level L) + LRU 缓存防重复计算
  */
 const QR_SPECS = [
   { ver: 1, size: 21, dataBytes: 19, eccBytes: 7, numBlocks: 1, align: [] },
@@ -243,10 +259,13 @@ const QR_SPECS = [
 ];
 
 const QR_VER_INFO = {
-  7: 0x07C94,
-  8: 0x085BC,
-  9: 0x09A99
+  7: 0x07c94,
+  8: 0x085bc,
+  9: 0x09a99
 };
+
+const _qrMatrixCache = {};
+const _qrCacheKeys = [];
 
 function gfMul(x, y) {
   let z = 0;
@@ -288,7 +307,10 @@ function safeUtf8Slice(utf8Bytes, maxLen) {
 }
 
 function encodeQrMatrix(text) {
-  const utf8 = stringToUtf8Bytes(text);
+  const key = String(text || '');
+  if (_qrMatrixCache[key]) return _qrMatrixCache[key];
+
+  const utf8 = stringToUtf8Bytes(key);
   const spec = QR_SPECS.find(s => utf8.length + 3 <= s.dataBytes) || QR_SPECS[QR_SPECS.length - 1];
   const bytes = safeUtf8Slice(utf8, spec.dataBytes - 3);
   const bits = [];
@@ -425,12 +447,18 @@ function encodeQrMatrix(text) {
   for (let i = 0; i <= 7; i++) mat[sz - 1 - i][8] = bit(i);
   for (let i = 8; i <= 14; i++) mat[8][sz - 15 + i] = bit(i);
   mat[sz - 8][8] = true;
+
+  if (_qrCacheKeys.length >= 36) {
+    const oldest = _qrCacheKeys.shift();
+    delete _qrMatrixCache[oldest];
+  }
+  _qrCacheKeys.push(key);
+  _qrMatrixCache[key] = mat;
   return mat;
 }
 
 /**
- * 构建高德零偏差跳转 URL（无论水印显示的是 WGS-84、CGCS2000 还是 GCJ-02，
- * 二维码和高德跳转永远固定使用底层的 GCJ-02 坐标，确保高德地图定位丝毫不差！）
+ * 构建高德零偏差跳转 URL（恒定使用 GCJ-02 坐标）
  */
 function buildAmapJumpUrl(gcjLat, gcjLon, shortPoi, antiTamperOpts) {
   const latStr = Number(gcjLat).toFixed(6);
@@ -440,9 +468,13 @@ function buildAmapJumpUrl(gcjLat, gcjLon, shortPoi, antiTamperOpts) {
   let url = `https://uri.amap.com/marker?position=${lonStr},${latStr}&name=${cleanPoi}&coordinate=gaode&callnative=1`;
   if (antiTamperOpts && antiTamperOpts.enabled) {
     const ts = String(antiTamperOpts.timestamp || '').trim();
-    const sig = antiTamperOpts.signature || computeAntiTamperHash(gcjLat, gcjLon, ts, rawPoi);
+    const noteClean = String(antiTamperOpts.note || '').trim().slice(0, 12);
+    const sig = antiTamperOpts.signature || computeAntiTamperHash(gcjLat, gcjLon, ts, rawPoi, noteClean);
     const ntp = antiTamperOpts.ntpSynced ? 1 : 0;
     url += `&ts=${encodeURIComponent(ts)}&sig=${sig.slice(0, 12)}&ntp=${ntp}`;
+    if (noteClean) {
+      url += `&note=${encodeURIComponent(noteClean)}`;
+    }
   }
   return url;
 }
@@ -462,28 +494,36 @@ function parseLocationPayload(rawInput) {
     const reg = new RegExp('[?&]' + key + '=([^&#]+)', 'i');
     const m = s.match(reg);
     if (!m) return '';
-    try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
+    try {
+      return decodeURIComponent(m[1]);
+    } catch (e) {
+      return m[1];
+    }
   };
 
   // 1. Check position=lon,lat
-  const posMatch = origStr.match(/position=([0-9.+-]+),([0-9.+-]+)/i) || decodedStr.match(/position=([0-9.+-]+),([0-9.+-]+)/i);
+  const posMatch =
+    origStr.match(/position=([0-9.+-]+),([0-9.+-]+)/i) ||
+    decodedStr.match(/position=([0-9.+-]+),([0-9.+-]+)/i);
   if (posMatch) {
     const lon = parseFloat(posMatch[1]);
     const lat = parseFloat(posMatch[2]);
     const poi = extractParam(origStr, 'name') || extractParam(decodedStr, 'name') || '实拍点位';
     const ts = extractParam(origStr, 'ts') || extractParam(decodedStr, 'ts');
     const sig = extractParam(origStr, 'sig') || extractParam(decodedStr, 'sig');
+    const note = extractParam(origStr, 'note') || extractParam(decodedStr, 'note') || '';
     const ntp = (extractParam(origStr, 'ntp') || extractParam(decodedStr, 'ntp')) === '1';
     if (!isNaN(lat) && !isNaN(lon)) {
       const gcjLat = Number(lat.toFixed(6));
       const gcjLon = Number(lon.toFixed(6));
-      const verified = sig ? verifyAntiTamperHash(gcjLat, gcjLon, ts, poi, sig) : false;
+      const verified = sig ? verifyAntiTamperHash(gcjLat, gcjLon, ts, poi, sig, note) : false;
       return {
         gcjLat,
         gcjLon,
         shortPoi: poi,
         timestamp: ts,
         signature: sig,
+        note,
         ntpSynced: ntp,
         hasAntiTamper: Boolean(sig),
         verified
@@ -500,16 +540,20 @@ function parseLocationPayload(rawInput) {
     const poi = extractParam(origStr, 'poi') || extractParam(decodedStr, 'poi') || '实拍点位';
     const ts = extractParam(origStr, 'ts') || extractParam(decodedStr, 'ts');
     const sig = extractParam(origStr, 'sig') || extractParam(decodedStr, 'sig');
+    const note = extractParam(origStr, 'note') || extractParam(decodedStr, 'note') || '';
+    const ntp = (extractParam(origStr, 'ntp') || extractParam(decodedStr, 'ntp')) === '1';
     if (!isNaN(lat) && !isNaN(lon)) {
       const gcjLat = Number(lat.toFixed(6));
       const gcjLon = Number(lon.toFixed(6));
-      const verified = sig ? verifyAntiTamperHash(gcjLat, gcjLon, ts, poi, sig) : false;
+      const verified = sig ? verifyAntiTamperHash(gcjLat, gcjLon, ts, poi, sig, note) : false;
       return {
         gcjLat,
         gcjLon,
         shortPoi: poi,
         timestamp: ts,
         signature: sig,
+        note,
+        ntpSynced: ntp,
         hasAntiTamper: Boolean(sig),
         verified
       };
@@ -535,9 +579,6 @@ function parseLocationPayload(rawInput) {
   return null;
 }
 
-/**
- * 简洁干净的默认点位与周边候选词生成（彻底去除啰嗦的括号坐标后缀，默认统一为“实拍点位”）
- */
 const CITY_ANCHORS = [
   { name: '北京中心区', city: '北京市朝阳区', lat: 39.908823, lon: 116.397470 },
   { name: '上海陆家嘴', city: '上海市浦东新区', lat: 31.239702, lon: 121.499763 },
@@ -566,11 +607,11 @@ function inferSmartPoiFromCoords(gcjLat, gcjLon) {
   }
   if (nearest && minDegSq < 0.25) {
     return {
-      shortPoi: '实拍点位',
-      fullAddr: nearest.city,
+      shortPoi: nearest.name,
+      fullAddr: `${nearest.city} · 实测定位网格`,
       nearbyPois: [
-        '实拍点位',
         nearest.name,
+        '实拍点位',
         '1号巡检点',
         '施工现场',
         '隐蔽工程核验点',
@@ -595,6 +636,7 @@ function inferSmartPoiFromCoords(gcjLat, gcjLon) {
 module.exports = {
   wgs84ToGcj02,
   gcj02ToWgs84,
+  distanceMeters,
   resolveDisplayCoordinates,
   formatCoords,
   formatAzimuthText,

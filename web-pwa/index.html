@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>极速经纬水印相机 v7.0.0 · 高德Mini-Map画中画 & SHA-256防篡改旗舰版</title>
+  <title>极速经纬水印相机 v8.0.0 · 高德Mini-Map画中画 & SHA-256防篡改旗舰版</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1491,12 +1491,15 @@
       document.getElementById('galleryMainImg').src = selected.wmUrl;
       document.getElementById('galleryPoiTitle').textContent = '📍 ' + selected.cfg.shortPoi + (selected.cfg.note ? (' · ' + selected.cfg.note) : '');
       document.getElementById('galleryGcjText').textContent = '高德 GCJ-02: ' + selected.cfg.gcjLat.toFixed(6) + '°N, ' + selected.cfg.gcjLon.toFixed(6) + '°E';
+      const editBtn = document.getElementById('btnGalleryEditWm');
       if (selected.cfg.antiTamperMode) {
-        document.getElementById('galleryWgsText').textContent = '🛡 防篡改签名: SHA256:' + (selected.cfg.antiTamperHash || '').slice(0, 16) + ' (验真通过)';
+        document.getElementById('galleryWgsText').textContent = '🛡 防篡改签名: SHA256:' + (selected.cfg.antiTamperHash || '').slice(0, 16) + ' (已锁定禁改)';
         document.getElementById('galleryWgsText').className = 'text-[11px] font-mono-num text-emerald-400 truncate';
+        if (editBtn) editBtn.textContent = '🔒 防伪原片已锁 (禁止修改)';
       } else {
         document.getElementById('galleryWgsText').textContent = '原始 WGS-84: ' + selected.cfg.wgsLat.toFixed(6) + '°N, ' + selected.cfg.wgsLon.toFixed(6) + '°E';
         document.getElementById('galleryWgsText').className = 'text-[11px] font-mono-num text-slate-400 truncate';
+        if (editBtn) editBtn.textContent = '✎ 全要素修改水印 (无损重绘)';
       }
 
       const poiname = encodeURIComponent(selected.cfg.shortPoi || '实拍点位');
@@ -1933,7 +1936,12 @@
 
       document.getElementById('btnGalleryEditWm').addEventListener('click', function() {
         const selected = state.photos.find(p => p.id === state.selectedPhotoId);
-        if (selected) openWmCustomizer(selected);
+        if (!selected) return;
+        if (selected.cfg && selected.cfg.antiTamperMode) {
+          showToast('🛡 防篡改验真原片已由密码学签名锁定，禁止后期修改！');
+          return;
+        }
+        openWmCustomizer(selected);
       });
 
       document.getElementById('btnGalleryDelete').addEventListener('click', function() {

@@ -1,35 +1,34 @@
 package com.fast.amapwatermark.util
 
 import android.util.LruCache
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Locale
 
 /**
  * Pure Kotlin, zero-dependency ISO/IEC 18004 QR Code Matrix Generator (Byte mode, ECC Level L, V1..V9)
- * + FIPS 180-4 SHA-256 Anti-Tamper Cryptographic Signature & Verification Engine.
- *
- * v7.0.0 Key Fixes & Enhancements:
- * 1. Fixed Format Information bit ordering (0x77C4 placed MSB bit 14 -> LSB bit 0 per ISO/IEC 18004)
- *    so WeChat, Amap, System Camera, and ZXing/OpenCV decode 100% reliably.
- * 2. Expanded capacity up to Version 9 (up to 229 UTF-8 bytes) with 18-bit Version Info blocks for V7..V9
- *    and UTF-8 multi-byte boundary protection so Chinese POI names and anti-tamper hashes never truncate mid-character.
- * 3. Built-in SHA-256 Anti-Tamper Hash computation and verification for engineering/insurance audit trails.
+ * + FIPS 180-4 SHA-256 Anti-Tamper Cryptographic Signature & Verification Engine (v8.0.0).
  */
 object QrCodeGenerator {
 
     private const val ANTI_TAMPER_SALT = "AMAP_WM_V7_TRUST_ANCHOR_2026"
-    private val matrixCache = LruCache<String, Array<BooleanArray>>(48)
+    private val matrixCache = LruCache<String, Array<BooleanArray>>(64)
 
     data class VerifiedLocationPayload(
         val gcjLat: Double,
         val gcjLon: Double,
+        val wgsLat: Double,
+        val wgsLon: Double,
         val shortPoi: String,
         val timestamp: String = "",
+        val note: String = "",
         val signature: String = "",
+        val expectedSignature: String = "",
         val ntpSynced: Boolean = false,
         val hasAntiTamper: Boolean = false,
-        val verified: Boolean = false
+        val verified: Boolean = false,
+        val sourceLabel: String = "二维码/元数据核验"
     )
 
     private data class VersionSpec(
@@ -53,7 +52,6 @@ object QrCodeGenerator {
         VersionSpec(9, 53, 232, 30, 2, intArrayOf(6, 26, 46))
     )
 
-    // 18-bit Version Information strings for QR Versions 7..9 (ISO/IEC 18004 Annex D)
     private val VERSION_INFO_BITS = mapOf(
         7 to 0x07C94,
         8 to 0x085BC,
@@ -61,19 +59,25 @@ object QrCodeGenerator {
     )
 
     /**
-     * Compute 16-char uppercase SHA-256 Anti-Tamper digest binding GCJ-02 coordinates, timestamp, and POI.
+     * Compute 16-char uppercase SHA-256 Anti-Tamper digest binding GCJ-02 coordinates, timestamp, POI, and optional note.
      */
     fun computeAntiTamperHash(
         gcjLat: Double,
         gcjLon: Double,
         timestamp: String,
-        shortPoi: String
+        shortPoi: String,
+        note: String = ""
     ): String {
         val latStr = String.format(Locale.US, "%.6f", gcjLat)
         val lonStr = String.format(Locale.US, "%.6f", gcjLon)
         val tsClean = timestamp.trim()
         val poiClean = shortPoi.trim().take(10).ifBlank { "实拍点位" }
-        val payload = "$latStr|$lonStr|$tsClean|$poiClean|$ANTI_TAMPER_SALT"
+        val noteClean = note.trim().take(12)
+        val payload = if (noteClean.isNotEmpty()) {
+            "$latStr|$lonStr|$tsClean|$poiClean|$noteClean|$ANTI_TAMPER_SALT"
+        } else {
+            "$latStr|$lonStr|$tsClean|$poiClean|$ANTI_TAMPER_SALT"
+        }
         return try {
             val md = MessageDigest.getInstance("SHA-256")
             val digest = md.digest(payload.toByteArray(Charsets.UTF_8))
@@ -92,12 +96,15 @@ object QrCodeGenerator {
         gcjLon: Double,
         timestamp: String,
         shortPoi: String,
-        signature: String
+        signature: String,
+        note: String = ""
     ): Boolean {
         val cleanSig = signature.trim().uppercase(Locale.US)
-        if (cleanSig.length < 8) return false
-        val expected = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi)
-        return expected.startsWith(cleanSig)
+        if (cleanSig.length < 10) return false
+        val expectedWithNote = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note)
+        if (expectedWithNote.startsWith(cleanSig)) return true
+        val expectedLegacy = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, "")
+        return expectedLegacy.startsWith(cleanSig)
     }
 
     fun buildAmapJumpUrl(
@@ -107,7 +114,8 @@ object QrCodeGenerator {
         antiTamperEnabled: Boolean = false,
         timestamp: String = "",
         antiTamperHash: String = "",
-        ntpSynced: Boolean = false
+        ntpSynced: Boolean = false,
+        note: String = ""
     ): String {
         val latStr = String.format(Locale.US, "%.6f", gcjLat)
         val lonStr = String.format(Locale.US, "%.6f", gcjLon)
@@ -121,8 +129,9 @@ object QrCodeGenerator {
         if (!antiTamperEnabled) return base
 
         val tsClean = timestamp.trim()
+        val noteClean = note.trim().take(12)
         val sig = antiTamperHash.ifBlank {
-            computeAntiTamperHash(gcjLat, gcjLon, tsClean, cleanPoi)
+            computeAntiTamperHash(gcjLat, gcjLon, tsClean, cleanPoi, noteClean)
         }.take(12)
         val encodedTs = try {
             URLEncoder.encode(tsClean, "UTF-8")
@@ -130,7 +139,86 @@ object QrCodeGenerator {
             ""
         }
         val ntpFlag = if (ntpSynced) 1 else 0
-        return "$base&ts=$encodedTs&sig=$sig&ntp=$ntpFlag"
+        val noteParam = if (noteClean.isNotEmpty()) {
+            val encNote = try { URLEncoder.encode(noteClean, "UTF-8") } catch (_: Exception) { "" }
+            if (encNote.isNotEmpty()) "&note=$encNote" else ""
+        } else ""
+        return "$base&ts=$encodedTs&sig=$sig&ntp=$ntpFlag$noteParam"
+    }
+
+    /**
+     * Parse and cryptographically verify QR URLs, EXIF strings, or shared coordinate text (v8.0.0)
+     */
+    fun parseAndVerifyPayload(rawInput: String, sourceLabel: String = "二维码/链接核验"): VerifiedLocationPayload? {
+        val origStr = rawInput.trim()
+        if (origStr.isEmpty()) return null
+        val decodedStr = try {
+            URLDecoder.decode(origStr, "UTF-8")
+        } catch (_: Exception) {
+            origStr
+        }
+
+        fun extractParam(s: String, key: String): String {
+            val reg = Regex("[?&]$key=([^&#]+)", RegexOption.IGNORE_CASE)
+            val m = reg.find(s) ?: return ""
+            return try {
+                URLDecoder.decode(m.groupValues[1], "UTF-8")
+            } catch (_: Exception) {
+                m.groupValues[1]
+            }
+        }
+
+        val posRegex = Regex("position=([0-9.+-]+),([0-9.+-]+)", RegexOption.IGNORE_CASE)
+        val posMatch = posRegex.find(origStr) ?: posRegex.find(decodedStr)
+        if (posMatch != null) {
+            val lon = posMatch.groupValues[1].toDoubleOrNull()
+            val lat = posMatch.groupValues[2].toDoubleOrNull()
+            if (lat != null && lon != null) {
+                val poi = extractParam(origStr, "name").ifBlank { extractParam(decodedStr, "name") }.ifBlank { "实拍点位" }
+                val ts = extractParam(origStr, "ts").ifBlank { extractParam(decodedStr, "ts") }
+                val sig = extractParam(origStr, "sig").ifBlank { extractParam(decodedStr, "sig") }.uppercase(Locale.US)
+                val note = extractParam(origStr, "note").ifBlank { extractParam(decodedStr, "note") }
+                val ntp = (extractParam(origStr, "ntp").ifBlank { extractParam(decodedStr, "ntp") }) == "1"
+                val wgs = CoordinateConverter.gcj02ToWgs84(lat, lon)
+                val expected = if (ts.isNotBlank()) computeAntiTamperHash(lat, lon, ts, poi, note).take(12) else ""
+                val verified = if (sig.isNotBlank()) verifyAntiTamperHash(lat, lon, ts, poi, sig, note) else false
+                return VerifiedLocationPayload(
+                    gcjLat = lat,
+                    gcjLon = lon,
+                    wgsLat = wgs.lat,
+                    wgsLon = wgs.lon,
+                    shortPoi = poi,
+                    timestamp = ts,
+                    note = note,
+                    signature = sig,
+                    expectedSignature = expected,
+                    ntpSynced = ntp,
+                    hasAntiTamper = sig.isNotBlank(),
+                    verified = verified,
+                    sourceLabel = sourceLabel
+                )
+            }
+        }
+
+        val numRegex = Regex("([0-9]{1,3}\\.[0-9]{3,8})")
+        val nums = numRegex.findAll(decodedStr).mapNotNull { it.value.toDoubleOrNull() }.toList()
+        if (nums.size >= 2) {
+            val a = nums[0]
+            val b = nums[1]
+            val isALon = a > 65.0 && b < 60.0
+            val gcjLon = if (isALon) a else b
+            val gcjLat = if (isALon) b else a
+            val wgs = CoordinateConverter.gcj02ToWgs84(gcjLat, gcjLon)
+            return VerifiedLocationPayload(
+                gcjLat = gcjLat,
+                gcjLon = gcjLon,
+                wgsLat = wgs.lat,
+                wgsLon = wgs.lon,
+                shortPoi = "解析坐标点位",
+                sourceLabel = sourceLabel
+            )
+        }
+        return null
     }
 
     private fun safeUtf8Slice(rawBytes: ByteArray, maxBytes: Int): ByteArray {
@@ -168,7 +256,6 @@ object QrCodeGenerator {
                 bits.add((value ushr i) and 1)
             }
         }
-        // Byte mode indicator (0100) + 8-bit character count (for V1..9)
         appendBits(0b0100, 4)
         appendBits(bytes.size, 8)
         for (b in bytes) {
@@ -302,7 +389,6 @@ object QrCodeGenerator {
             }
         }
 
-        // Reserve format info areas
         for (i in 0..8) {
             if (i != 6) {
                 isFunc[8][i] = true
@@ -313,10 +399,8 @@ object QrCodeGenerator {
             isFunc[8][sz - 1 - i] = true
             isFunc[sz - 1 - i][8] = true
         }
-        // Dark module
         setFuncModule(8, sz - 8, true)
 
-        // Draw 18-bit Version Information blocks for Versions 7..9
         if (spec.version >= 7) {
             val vbits = VERSION_INFO_BITS[spec.version] ?: 0
             for (i in 0 until 6) {
@@ -371,8 +455,6 @@ object QrCodeGenerator {
                 }
             }
         }
-        // Precomputed 15-bit format info for ECC Level L (01) + Mask 0 (000) = 0x77C4
-        // Placed MSB (bit 14) down to LSB (bit 0) per ISO/IEC 18004 Figure 25
         val formatBits = 0x77C4
         fun bit(i: Int): Boolean = ((formatBits ushr (14 - i)) and 1) != 0
 

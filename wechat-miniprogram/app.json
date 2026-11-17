@@ -2,11 +2,12 @@
   "pages": [
     "pages/index/index"
   ],
+  "lazyCodeLoading": "requiredComponents",
   "window": {
     "backgroundTextStyle": "dark",
     "navigationStyle": "custom",
     "navigationBarBackgroundColor": "#000000",
-    "navigationBarTitleText": "极速高德水印相机 v7.1",
+    "navigationBarTitleText": "极速高德水印相机 v8.0",
     "navigationBarTextStyle": "white",
     "backgroundColor": "#000000"
   },

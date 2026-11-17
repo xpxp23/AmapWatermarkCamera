@@ -31,7 +31,7 @@ import kotlin.math.sin
 data class WatermarkConfig(
     var styleTemplate: Int = 0,
     var customTitle: String = "现场点位核验",
-    var coordSystem: String = "GCJ-02", // "GCJ-02" or "WGS-84"
+    var coordSystem: String = "WGS-84", // "WGS-84", "CGCS2000", or "GCJ-02"
     var useDms: Boolean = false,
     var gcjLat: Double = 39.908823,
     var gcjLon: Double = 116.397470,
@@ -73,14 +73,14 @@ data class WatermarkConfig(
 ) {
     fun ensureAntiTamperSignature(): String {
         if (antiTamperHash.isNotBlank() && antiTamperHash.length >= 12) return antiTamperHash
-        val computed = QrCodeGenerator.computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi)
+        val computed = QrCodeGenerator.computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note)
         antiTamperHash = computed
         return computed
     }
 
     fun isSignatureValid(): Boolean {
         if (!antiTamperMode || antiTamperHash.isBlank()) return false
-        return QrCodeGenerator.verifyAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, antiTamperHash)
+        return QrCodeGenerator.verifyAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, antiTamperHash, note)
     }
 
     fun toJson(): String {
@@ -135,7 +135,7 @@ data class WatermarkConfig(
             return WatermarkConfig(
                 styleTemplate = o.optInt("styleTemplate", 0),
                 customTitle = o.optString("customTitle", "现场点位核验"),
-                coordSystem = o.optString("coordSystem", "GCJ-02"),
+                coordSystem = o.optString("coordSystem", "WGS-84"),
                 useDms = o.optBoolean("useDms", false),
                 gcjLat = o.optDouble("gcjLat", 39.908823),
                 gcjLon = o.optDouble("gcjLon", 116.397470),
@@ -182,6 +182,20 @@ data class WatermarkConfig(
             val datePart = SimpleDateFormat("yyyy-MM-dd EEEE", Locale.CHINA).format(date)
             val fullTs = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(date)
             return Triple(hm, datePart, fullTs)
+        }
+
+        fun customTimeStrings(datePartStr: String, hmStr: String, secStr: String): Triple<String, String, String> {
+            val cleanDate = datePartStr.trim().ifBlank { "2026-11-17" }
+            val cleanHm = hmStr.trim().ifBlank { "09:20" }
+            val secInt = (secStr.trim().toIntOrNull() ?: 0).coerceIn(0, 59)
+            val cleanSec = String.format(Locale.US, "%02d", secInt)
+            val fullCandidate = "$cleanDate $cleanHm:$cleanSec"
+            return try {
+                val parsed = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).parse(fullCandidate)
+                if (parsed != null) currentTimeStrings(parsed) else Triple(cleanHm, "$cleanDate 星期二", fullCandidate)
+            } catch (_: Exception) {
+                Triple(cleanHm, "$cleanDate 星期二", fullCandidate)
+            }
         }
 
         fun parseExifDateStrings(rawExifDate: String?): Triple<String, String, String> {
@@ -444,7 +458,7 @@ object WatermarkRenderer {
         return out
     }
 
-    fun drawWatermarkOverlay(canvas: Canvas, width: Int, height: Int, cfg: WatermarkConfig) {
+    fun drawWatermarkOverlay(canvas: Canvas, width: Int, height: Int, cfg: WatermarkConfig, isLivePreview: Boolean = false) {
         val isLandscape = width > height
         val orientFactor = if (isLandscape) 0.86f else 1.0f
         val baseScale = (min(width, height) / 1080f) * orientFactor * cfg.fontScale.coerceIn(0.78f, 1.25f)
@@ -471,7 +485,7 @@ object WatermarkRenderer {
         }
 
         if (cfg.showQrCode) {
-            drawAmapQrBadge(canvas, width, height, baseScale, isLandscape, cfg)
+            drawAmapQrBadge(canvas, width, height, baseScale, isLandscape, cfg, isLivePreview)
         }
     }
 
@@ -627,17 +641,24 @@ object WatermarkRenderer {
         height: Int,
         scale: Float,
         isLandscape: Boolean,
-        cfg: WatermarkConfig
+        cfg: WatermarkConfig,
+        isLivePreview: Boolean = false
     ) {
         val pool = paintPool.get()!!
+        val effectiveTs = if (isLivePreview && cfg.antiTamperMode) {
+            "${cfg.dateWeek.substringBefore(" ")} ${cfg.timeHm}:00"
+        } else {
+            cfg.timestamp
+        }
         val url = QrCodeGenerator.buildAmapJumpUrl(
             gcjLat = cfg.gcjLat,
             gcjLon = cfg.gcjLon,
             shortPoi = cfg.shortPoi,
             antiTamperEnabled = cfg.antiTamperMode,
-            timestamp = cfg.timestamp,
-            antiTamperHash = cfg.antiTamperHash,
-            ntpSynced = cfg.ntpSynced
+            timestamp = effectiveTs,
+            antiTamperHash = if (isLivePreview) "" else cfg.antiTamperHash,
+            ntpSynced = cfg.ntpSynced,
+            note = cfg.note
         )
         val matrix = QrCodeGenerator.encodeUrlToMatrix(url)
         val modules = matrix.size
@@ -699,8 +720,9 @@ object WatermarkRenderer {
     }
 
     private fun buildCoordString(cfg: WatermarkConfig): String {
-        val shownLat = if (cfg.coordSystem == "WGS-84") cfg.wgsLat else cfg.gcjLat
-        val shownLon = if (cfg.coordSystem == "WGS-84") cfg.wgsLon else cfg.gcjLon
+        val isGcj = (cfg.coordSystem == "GCJ-02")
+        val shownLat = if (isGcj) cfg.gcjLat else cfg.wgsLat
+        val shownLon = if (isGcj) cfg.gcjLon else cfg.wgsLon
         val coordStr = CoordinateConverter.formatCoordinate(shownLat, shownLon, cfg.useDms)
         val sysTag = if (cfg.showCoordTag) " [${cfg.coordSystem}]" else ""
         val accTag = if (cfg.showAccuracy) String.format(Locale.US, " ±%.1fm", cfg.accuracyMeters) else ""
@@ -1209,7 +1231,7 @@ object WatermarkRenderer {
     }
 
     /**
-     * Style 3: 极简胶片底栏
+     * Style 3: 极简胶片底栏 (v8.0.0 全宽上下双层通栏布局：第一层左点位+右完整时间星期，第二层全宽经纬度+右侧防伪/备注角标，彻底根治DMS截断与日期重复)
      */
     private fun drawStyle3MinimalistFilmBar(
         canvas: Canvas,
@@ -1220,7 +1242,7 @@ object WatermarkRenderer {
         cfg: WatermarkConfig
     ) {
         val pool = paintPool.get()!!
-        val barH = (if (isLandscape) 94f else 108f) * scale
+        val barH = (if (isLandscape) 100f else 114f) * scale
         val barTop = height - barH
         pool.fillPaint.shader = null
         pool.fillPaint.color = Color.argb(cfg.bgAlpha.coerceIn(115, 245), 8, 12, 20)
@@ -1228,17 +1250,15 @@ object WatermarkRenderer {
 
         val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
         pool.strokePaint.color = accentColor
-        pool.strokePaint.strokeWidth = 2.5f * scale
+        pool.strokePaint.strokeWidth = 2.8f * scale
         canvas.drawLine(0f, barTop, width.toFloat(), barTop, pool.strokePaint)
 
         val padX = 26f * scale
-        val maxLeftW = width * 0.44f
-        val maxRightW = width * 0.50f
-
+        // Row 1: Left POI name (50% width), Right non-duplicated full timestamp + weekday (46% width)
         pool.textPaint.apply {
             clearShadowLayer()
             color = Color.WHITE
-            textSize = 27f * scale
+            textSize = 26.5f * scale
             typeface = TYPEFACE_DEFAULT_BOLD
             textAlign = Paint.Align.LEFT
         }
@@ -1247,47 +1267,54 @@ object WatermarkRenderer {
         } else {
             cfg.customTitle.ifBlank { "极速高德水印" }
         }
-        canvas.drawText(ellipsizeToWidth(leftPrimary, pool.textPaint, maxLeftW), padX, barTop + 40f * scale, pool.textPaint)
+        canvas.drawText(ellipsizeToWidth(leftPrimary, pool.textPaint, width * 0.50f), padX, barTop + 42f * scale, pool.textPaint)
 
+        if (cfg.showTime) {
+            pool.monoPaint.apply {
+                clearShadowLayer()
+                color = Color.rgb(226, 232, 240)
+                textSize = 20.5f * scale
+                textAlign = Paint.Align.RIGHT
+                typeface = TYPEFACE_MONO_BOLD
+            }
+            val weekPart = cfg.dateWeek.substringAfter(" ", "")
+            val timeLine = "${cfg.timestamp} $weekPart".trim()
+            canvas.drawText(ellipsizeToWidth(timeLine, pool.monoPaint, width * 0.46f), width - padX, barTop + 42f * scale, pool.monoPaint)
+        }
+
+        // Row 2: Left full-width Coordinates (up to 64% or 95% width so DMS never truncates!), Right badge
         val envLine = buildEnvTelemetryLine(cfg)
         val antiLine = buildAntiTamperLine(cfg)
-        pool.textPaint.apply {
-            color = if (antiLine.isNotEmpty()) Color.rgb(52, 211, 153) else Color.rgb(148, 163, 184)
-            textSize = 20.5f * scale
-            typeface = Typeface.DEFAULT
-        }
-        val subLeftRaw = when {
+        val rightBadgeRaw = when {
             antiLine.isNotEmpty() -> antiLine
-            cfg.showNote && cfg.note.isNotBlank() -> cfg.note
-            envLine.isNotEmpty() -> envLine
+            cfg.showNote && cfg.note.isNotBlank() -> "备注：${cfg.note}"
             cfg.showAddress && cfg.address.isNotBlank() -> cfg.address
-            cfg.showTime -> cfg.dateWeek
-            else -> cfg.customTitle
+            envLine.isNotEmpty() -> envLine
+            else -> ""
         }
-        canvas.drawText(ellipsizeToWidth(subLeftRaw, pool.textPaint, maxLeftW), padX, barTop + 76f * scale, pool.textPaint)
+        val maxCoordW = if (rightBadgeRaw.isNotEmpty()) (width * 0.64f) else (width - padX * 2f)
 
         if (cfg.showCoords) {
             pool.monoPaint.apply {
                 clearShadowLayer()
                 color = accentColor
-                textSize = 22.5f * scale
-                textAlign = Paint.Align.RIGHT
+                textSize = (if (cfg.useDms) 20.5f else 22.5f) * scale
+                textAlign = Paint.Align.LEFT
                 typeface = TYPEFACE_MONO_BOLD
             }
-            val coordClipped = ellipsizeToWidth(buildCoordString(cfg), pool.monoPaint, maxRightW)
-            canvas.drawText(coordClipped, width - padX, barTop + 40f * scale, pool.monoPaint)
+            val coordClipped = ellipsizeToWidth(buildCoordString(cfg), pool.monoPaint, maxCoordW)
+            canvas.drawText(coordClipped, padX, barTop + 86f * scale, pool.monoPaint)
         }
 
-        if (cfg.showTime) {
-            pool.monoPaint.apply {
-                color = Color.rgb(226, 232, 240)
-                textSize = 20.5f * scale
+        if (rightBadgeRaw.isNotEmpty()) {
+            pool.textPaint.apply {
+                clearShadowLayer()
+                color = if (antiLine.isNotEmpty()) Color.rgb(52, 211, 153) else Color.rgb(253, 230, 138)
+                textSize = 19.5f * scale
+                typeface = Typeface.DEFAULT
                 textAlign = Paint.Align.RIGHT
-                typeface = TYPEFACE_MONO_NORMAL
             }
-            val timeLine = "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ")}"
-            val yPos = if (cfg.showCoords) (barTop + 76f * scale) else (barTop + 56f * scale)
-            canvas.drawText(ellipsizeToWidth(timeLine, pool.monoPaint, maxRightW), width - padX, yPos, pool.monoPaint)
+            canvas.drawText(ellipsizeToWidth(rightBadgeRaw, pool.textPaint, width * 0.34f), width - padX, barTop + 86f * scale, pool.textPaint)
         }
     }
 

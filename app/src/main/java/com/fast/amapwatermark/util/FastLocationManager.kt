@@ -31,7 +31,6 @@ import java.net.DatagramSocket
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.URL
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
@@ -43,14 +42,19 @@ data class LocationSnapshot(
     val wgsLon: Double = 116.391228,
     val gcjLat: Double = 39.908823,
     val gcjLon: Double = 116.397470,
+    val rawWgsLat: Double = 39.907419,
+    val rawWgsLon: Double = 116.391228,
+    val rawGcjLat: Double = 39.908823,
+    val rawGcjLon: Double = 116.397470,
+    val isManualCoord: Boolean = false,
     val accuracyMeters: Float = 9.9f,
     val altitudeMeters: Double = 46.0,
     val hasAltitude: Boolean = false,
     val azimuthDeg: Int = 0,
     val azimuthText: String = "正北 000°",
-    val shortPoi: String = "定位中...",
+    val shortPoi: String = "实拍点位",
     val fullAddress: String = "正在获取高德 GCJ-02 实时坐标与街道点位...",
-    val nearbyPois: List<String> = listOf("1号巡检点", "主干道施工段", "隐蔽工程核验点", "测绘控制点A"),
+    val nearbyPois: List<String> = listOf("实拍点位", "1号巡检点", "主干道施工段", "隐蔽工程核验点", "测绘控制点A"),
     val hasRealFix: Boolean = false,
     val providerName: String = "INIT",
     val ntpSynced: Boolean = false,
@@ -72,6 +76,7 @@ class FastLocationManager(private val context: Context) {
 
     private var customPoiOverride: String? = null
     private var customAddressOverride: String? = null
+    private var manualCoordLocked: Boolean = false
     private var lastAutoPoi: String? = null
     private var lastAutoAddress: String? = null
     private var lastGeocodedLat: Double = 0.0
@@ -81,6 +86,7 @@ class FastLocationManager(private val context: Context) {
     private var lastGpsWgsLat: Double = 0.0
     private var lastGpsWgsLon: Double = 0.0
     private var lastAzimuthUpdateMs: Long = 0L
+    private var lastStartUpdatesElapsedMs: Long = 0L
     private var geocodeJob: Job? = null
     private var ntpSyncJob: Job? = null
     private var ntpElapsedBaseMs: Long = 0L
@@ -88,8 +94,8 @@ class FastLocationManager(private val context: Context) {
 
     private data class CityAnchor(val name: String, val city: String, val lat: Double, val lon: Double)
     private val cityAnchors = listOf(
-        CityAnchor("北京中心区", "北京市朝阳/东城区", 39.908823, 116.397470),
-        CityAnchor("上海陆家嘴片区", "上海市浦东新区", 31.239702, 121.499763),
+        CityAnchor("北京中心区", "北京市朝阳区", 39.908823, 116.397470),
+        CityAnchor("上海陆家嘴", "上海市浦东新区", 31.239702, 121.499763),
         CityAnchor("广州珠江新城", "广东省广州市天河区", 23.119293, 113.321206),
         CityAnchor("深圳南山科技园", "广东省深圳市南山区", 22.540503, 113.953412),
         CityAnchor("杭州西湖滨江", "浙江省杭州市西湖区", 30.259244, 120.219375),
@@ -97,7 +103,7 @@ class FastLocationManager(private val context: Context) {
         CityAnchor("武汉光谷片区", "湖北省武汉市洪山区", 30.505600, 114.408600),
         CityAnchor("南京河西新城", "江苏省南京市建邺区", 32.003600, 118.732500),
         CityAnchor("西安高新片区", "陕西省西安市雁塔区", 34.218600, 108.889100),
-        CityAnchor("重庆江北嘴片区", "重庆市江北区", 29.571000, 106.574000)
+        CityAnchor("重庆江北嘴", "重庆市江北区", 29.571000, 106.574000)
     )
 
     private val listener = object : LocationListener {
@@ -136,7 +142,7 @@ class FastLocationManager(private val context: Context) {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
-    private fun formatAzimuthText(deg: Int): String {
+    fun formatAzimuthText(deg: Int): String {
         val d = ((deg % 360) + 360) % 360
         val dir = when (d) {
             in 0..10, in 350..359 -> "正北"
@@ -151,10 +157,6 @@ class FastLocationManager(private val context: Context) {
         return String.format(Locale.CHINA, "%s %03d°", dir, d)
     }
 
-    /**
-     * Synchronize trusted network time via Aliyun/NTSC NTP UDP (port 123) + HTTPS Date header fallback.
-     * Anchors to SystemClock.elapsedRealtime() so manually changing system settings clock cannot spoof watermark time!
-     */
     fun syncTrustedNetworkTime() {
         if (ntpSyncJob?.isActive == true) return
         ntpSyncJob = scope.launch {
@@ -194,7 +196,7 @@ class FastLocationManager(private val context: Context) {
                 socket.soTimeout = 1800
                 val addr = InetAddress.getByName(host)
                 val buf = ByteArray(48)
-                buf[0] = 0x1B // LI = 0, VN = 3, Mode = 3 (Client)
+                buf[0] = 0x1B
                 val req = DatagramPacket(buf, buf.size, addr, 123)
                 val t1 = System.currentTimeMillis()
                 socket.send(req)
@@ -242,7 +244,12 @@ class FastLocationManager(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun startHighFrequencyUpdates() {
+    fun startHighFrequencyUpdates(forceRestart: Boolean = false) {
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (!forceRestart && nowElapsed - lastStartUpdatesElapsedMs < 1200L) {
+            return
+        }
+        lastStartUpdatesElapsedMs = nowElapsed
         syncTrustedNetworkTime()
         try {
             locationManager.removeUpdates(listener)
@@ -264,7 +271,7 @@ class FastLocationManager(private val context: Context) {
                         }
                         locationManager.requestLocationUpdates(
                             provider,
-                            800L,
+                            1000L,
                             0f,
                             listener,
                             Looper.getMainLooper()
@@ -275,8 +282,7 @@ class FastLocationManager(private val context: Context) {
 
             if (bestLastKnown != null) {
                 handleNewLocation(bestLastKnown)
-            } else {
-                // Even before hardware fix arrives, run reverse geocode on initial coordinates so UI is never stuck
+            } else if (!manualCoordLocked) {
                 val cur = _locationState.value
                 triggerReverseGeocode(cur.wgsLat, cur.wgsLon, cur.gcjLat, cur.gcjLon, force = true)
             }
@@ -322,7 +328,11 @@ class FastLocationManager(private val context: Context) {
         }
     }
 
+    /**
+     * 更新手动选点坐标并锁定 isManualCoord = true，防止 0.8s 后被硬件 GPS 回调覆盖
+     */
     fun updateManualCoordinates(newGcjLat: Double, newGcjLon: Double) {
+        manualCoordLocked = true
         val wgs = CoordinateConverter.gcj02ToWgs84(newGcjLat, newGcjLon)
         val curr = _locationState.value
         lastFixElapsedRealtimeMs = SystemClock.elapsedRealtime()
@@ -332,12 +342,33 @@ class FastLocationManager(private val context: Context) {
             wgsLon = wgs.lon,
             gcjLat = newGcjLat,
             gcjLon = newGcjLon,
+            isManualCoord = true,
             shortPoi = customPoiOverride ?: smart.first,
             fullAddress = customAddressOverride ?: smart.second,
             nearbyPois = smart.third,
             hasRealFix = true
         )
         triggerReverseGeocode(wgs.lat, wgs.lon, newGcjLat, newGcjLon, force = true)
+    }
+
+    /**
+     * 恢复手机真实硬件 GPS 坐标（解除手动坐标锁，用于用户点击恢复真实GPS或开启防篡改模式时强制回滚）
+     */
+    fun restoreRealGpsCoordinates() {
+        manualCoordLocked = false
+        val curr = _locationState.value
+        val smart = inferSmartPoiFromCoords(curr.rawGcjLat, curr.rawGcjLon)
+        _locationState.value = curr.copy(
+            isManualCoord = false,
+            gcjLat = curr.rawGcjLat,
+            gcjLon = curr.rawGcjLon,
+            wgsLat = curr.rawWgsLat,
+            wgsLon = curr.rawWgsLon,
+            shortPoi = customPoiOverride ?: lastAutoPoi ?: smart.first,
+            fullAddress = customAddressOverride ?: lastAutoAddress ?: smart.second,
+            nearbyPois = smart.third
+        )
+        triggerReverseGeocode(curr.rawWgsLat, curr.rawWgsLon, curr.rawGcjLat, curr.rawGcjLon, force = true)
     }
 
     suspend fun awaitOptimalLocation(thresholdMeters: Float = 10f, maxWaitMs: Long = 1100L): LocationSnapshot {
@@ -366,7 +397,6 @@ class FastLocationManager(private val context: Context) {
         val ageSinceLastFixMs = nowElapsed - lastFixElapsedRealtimeMs
         val isGps = (loc.provider == LocationManager.GPS_PROVIDER)
 
-        // If hardware GPS fix contains valid UTC time and NTP has not synced yet, use GPS satellite atomic clock!
         if (isGps && !curr.ntpSynced && loc.time > 1700000000000L) {
             val satOffset = loc.time - System.currentTimeMillis()
             ntpElapsedBaseMs = nowElapsed
@@ -439,6 +469,21 @@ class FastLocationManager(private val context: Context) {
         val alt = if (loc.hasAltitude() && loc.altitude != 0.0) loc.altitude else curr.altitudeMeters
         val hasAlt = (loc.hasAltitude() && loc.altitude != 0.0) || curr.hasAltitude
 
+        // 若当前处于手动坐标锁定模式，仅在后台更新 rawGcjLat / rawWgsLat 硬件锚点，绝不覆盖用户手动坐标！
+        if (manualCoordLocked) {
+            _locationState.value = _locationState.value.copy(
+                rawWgsLat = wgsLat,
+                rawWgsLon = wgsLon,
+                rawGcjLat = gcjLat,
+                rawGcjLon = gcjLon,
+                altitudeMeters = alt,
+                hasAltitude = hasAlt,
+                hasRealFix = true,
+                providerName = loc.provider ?: "GPS"
+            )
+            return
+        }
+
         val smartFallback = inferSmartPoiFromCoords(gcjLat, gcjLon)
         val fallbackPoi = lastAutoPoi ?: smartFallback.first
         val fallbackAddr = lastAutoAddress ?: smartFallback.second
@@ -448,6 +493,11 @@ class FastLocationManager(private val context: Context) {
             wgsLon = wgsLon,
             gcjLat = gcjLat,
             gcjLon = gcjLon,
+            rawWgsLat = wgsLat,
+            rawWgsLon = wgsLon,
+            rawGcjLat = gcjLat,
+            rawGcjLon = gcjLon,
+            isManualCoord = false,
             accuracyMeters = acc,
             altitudeMeters = alt,
             hasAltitude = hasAlt,
@@ -471,23 +521,23 @@ class FastLocationManager(private val context: Context) {
                 nearest = c
             }
         }
-        val gridTag = String.format(Locale.US, "%.3f°N·%.3f°E", abs(gcjLat), abs(gcjLon))
         if (nearest != null && minDegSq < 0.25) {
-            val poi = "${nearest.name}实拍点"
-            val addr = "${nearest.city} · 高德GCJ-02精准网格 ($gridTag)"
+            val poi = nearest.name
+            val addr = "${nearest.city} · 实测定位网格"
             val candidates = listOf(
-                "${nearest.name}1号点",
-                "${nearest.city}巡检点",
-                String.format(Locale.US, "核验点(%.4f°N)", gcjLat),
+                nearest.name,
+                "实拍点位",
+                "1号巡检点",
                 "主干道施工段",
+                "隐蔽工程核验点",
                 "外业测绘基准桩"
             )
             return Triple(poi, addr, candidates)
         }
-        val poi = String.format(Locale.US, "实拍点(%.4f°N)", gcjLat)
+        val poi = "实拍点位"
         val addr = String.format(Locale.US, "高德GCJ-02坐标 %.6f°N, %.6f°E", gcjLat, gcjLon)
         val candidates = listOf(
-            poi,
+            "实拍点位",
             "1号巡检点位",
             "隐蔽工程验收点",
             "测绘控制桩A",
@@ -510,9 +560,8 @@ class FastLocationManager(private val context: Context) {
 
         geocodeJob?.cancel()
         geocodeJob = scope.launch {
-            val resolved = withTimeoutOrNull(3200L) {
+            val resolved = withTimeoutOrNull(2600L) {
                 withContext(Dispatchers.IO) {
-                    // Tier 1: System Geocoder
                     val sysResult = try {
                         if (Geocoder.isPresent()) {
                             val geocoder = Geocoder(context, Locale.CHINA)
@@ -529,7 +578,6 @@ class FastLocationManager(private val context: Context) {
                     }
                     if (sysResult != null) return@withContext sysResult
 
-                    // Tier 2: Web Reverse Geocoding HTTP fallback (for Chinese ROMs without GMS Geocoder)
                     queryWebReverseGeocode(wgsLat, wgsLon, gcjLat, gcjLon)
                 }
             }
@@ -562,9 +610,9 @@ class FastLocationManager(private val context: Context) {
             )
             val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 2000
-                readTimeout = 2000
-                setRequestProperty("User-Agent", "AmapWatermarkCamera/7.0")
+                connectTimeout = 1800
+                readTimeout = 1800
+                setRequestProperty("User-Agent", "AmapWatermarkCamera/8.0")
             }
             if (conn.responseCode == 200) {
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
@@ -579,7 +627,7 @@ class FastLocationManager(private val context: Context) {
                     name.isNotBlank() && name.length <= 14 -> name
                     road.isNotBlank() -> road
                     suburb.isNotBlank() -> suburb
-                    else -> String.format(Locale.US, "实拍点(%.4f°N)", gcjLat)
+                    else -> "实拍点位"
                 }
                 val fullAddr = buildString {
                     if (city.isNotBlank()) append(city)
@@ -588,12 +636,12 @@ class FastLocationManager(private val context: Context) {
                     if (name.isNotBlank() && name != road) append(name)
                 }.ifBlank { json.optString("display_name", "").take(36) }
                 val candidates = listOfNotNull(
+                    "实拍点位",
                     name.takeIf { it.isNotBlank() },
                     road.takeIf { it.isNotBlank() },
                     suburb.takeIf { it.isNotBlank() },
-                    "${poi}1号点",
                     "现场巡检核验点"
-                ).distinct().take(5)
+                ).distinct().take(6)
                 Triple(poi, fullAddr, candidates)
             } else {
                 conn.disconnect()
@@ -620,7 +668,7 @@ class FastLocationManager(private val context: Context) {
             thorough.isNotEmpty() -> thorough
             subLoc.isNotEmpty() -> subLoc
             locality.isNotEmpty() -> locality
-            else -> String.format(Locale.US, "%.4f°N,%.4f°E", gcjLat, gcjLon)
+            else -> "实拍点位"
         }
 
         val fullLine = addr.getAddressLine(0)?.trim().orEmpty().ifEmpty {
@@ -635,13 +683,12 @@ class FastLocationManager(private val context: Context) {
             "高德GCJ-02: ${String.format(Locale.US, "%.6f, %.6f", gcjLat, gcjLon)}"
         }
 
-        val candidates = mutableListOf<String>()
+        val candidates = mutableListOf("实拍点位")
         for (a in addrList) {
             a.featureName?.trim()?.takeIf { it.isNotBlank() && !it.all(Char::isDigit) }?.let { candidates.add(it) }
             a.thoroughfare?.trim()?.takeIf { it.isNotBlank() }?.let { candidates.add(it) }
             a.subLocality?.trim()?.takeIf { it.isNotBlank() }?.let { candidates.add("${it}巡检点") }
         }
-        candidates.add("${shortPoi}1号点")
         candidates.add("现场隐蔽验收点")
 
         return Triple(shortPoi, fullLine, candidates.distinct().take(6))

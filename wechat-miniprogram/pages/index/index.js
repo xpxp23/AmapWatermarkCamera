@@ -11,8 +11,14 @@ const {
   inferSmartPoiFromCoords
 } = require('../../utils/coord_qr.js');
 
-const STORAGE_KEY_CFG = 'amap_wm_wx_cfg_v7_1';
-const STORAGE_KEY_PHOTOS = 'amap_wm_wx_photos_v7_1';
+const {
+  buildVerificationReport,
+  decodePhotoQrByCanvasAndVK,
+  exportCroppedQrTempFile
+} = require('../../utils/photo_verifier.js');
+
+const STORAGE_KEY_CFG = 'amap_wm_wx_cfg_v8_0';
+const STORAGE_KEY_PHOTOS = 'amap_wm_wx_photos_v8_0';
 
 const ACCENT_PALETTE = [
   { name: '天际蓝', hex: '#38bdf8' },
@@ -25,6 +31,15 @@ const BG_ALPHA_PRESETS = [
   'rgba(11, 19, 43, 0.56)',
   'rgba(11, 19, 43, 0.84)',
   'rgba(11, 19, 43, 0.94)'
+];
+
+const FILTER_NAMES = ['原图', '鲜明', '暖阳', '清冷', '黑白'];
+const FILTER_CSS_LIST = [
+  'none',
+  'contrast(1.16) saturate(1.22)',
+  'sepia(0.22) saturate(1.18) brightness(1.04)',
+  'hue-rotate(12deg) saturate(0.92) brightness(1.03)',
+  'grayscale(1)'
 ];
 
 function getTimeStrings(offsetMs) {
@@ -79,10 +94,24 @@ function drawRoundedRect(ctx, x, y, w, h, r) {
 Page({
   data: {
     statusBarHeight: 44,
-    captureMode: 'photo', // 'photo': 光学拍照模式, 'frame': 极速截屏模式
+    menuBtnTop: 48,
+    menuBtnHeight: 32,
+    menuBtnRightSpace: 104,
+    cameraReady: false,
+    captureMode: 'photo', // 'photo': 光学拍照模式, 'frame': 极速抓拍模式
     devicePosition: 'back',
     flashMode: 'off',
     flashLabel: '⚡关',
+    timerSeconds: 0,
+    countdownRemaining: 0,
+    shutterFlashVisible: false,
+    zoomRatio: 1.0,
+    zoomRatioStr: '1.0X',
+    showGridLines: false,
+    showFilterStrip: false,
+    filterNames: FILTER_NAMES,
+    filterIndex: 0,
+    filterCss: 'none',
     styleTemplate: 0,
     tplNames: ['大字时间', '巡检卡片', '网格测绘', '胶片底栏', '标准台账'],
     quickTitleTags: ['现场点位核验', '工程巡检记录', '隐蔽工程验收', '外业测绘定桩', '安全隐患排查'],
@@ -94,19 +123,16 @@ Page({
     bgAlphaMode: 1, // 0: 通透, 1: 标准, 2: 深邃
     cardBgRgba: 'rgba(11, 19, 43, 0.84)',
     customTitle: '现场点位核验',
-    // 默认采用 WGS-84 坐标系，支持手动切换 WGS-84 / CGCS2000 / GCJ-02（不影响高德零偏差跳转）
     coordSys: 'WGS-84',
     useDms: false,
     hasRealFix: false,
     hasCustomPoi: false,
     isManualCoord: false,
-    // 硬件真实 GPS 原始锚点（永远不被手动地图选点覆盖，开启防伪验真时用于强制回滚）
     rawGcjLat: 39.908823,
     rawGcjLon: 116.397470,
     rawWgsLat: 39.907419,
     rawWgsLon: 116.391228,
     rawAccuracy: '2.4',
-    // 当前生效坐标（高德跳转恒定使用 gcjLat/gcjLon，水印显示根据 coordSys 决断）
     gcjLat: 39.908823,
     gcjLon: 116.397470,
     wgsLat: 39.907419,
@@ -115,7 +141,6 @@ Page({
     altitude: '46.5',
     azimuthDeg: 0,
     azimuthText: '正北 000°',
-    // 默认简洁为“实拍点位”，绝不附带啰嗦的 () 括号内容
     shortPoi: '实拍点位',
     fullAddr: '',
     nearbyPois: ['实拍点位', '1号巡检点', '施工现场', '隐蔽工程验收点', '测绘控制点A', '外业打卡现场'],
@@ -131,6 +156,9 @@ Page({
     liveAntiTamperShort: '000000000000',
     swipeBannerText: '',
     showQr: true,
+    showMiniMap: true,
+    miniMapPosition: 0,
+    bottomRight: false,
     antiTamperMode: false,
     ntpSynced: false,
     ntpOffsetMs: 0,
@@ -147,45 +175,106 @@ Page({
     latestPhotoPath: '',
     currentPhoto: null,
     editingPhotoId: null,
+    editDatePart: '2026-11-17',
+    editTimeHm: '09:20',
+    editTimeSec: '00',
+    editGcjLat: '39.908823',
+    editGcjLon: '116.397470',
+    editAltitude: '46.5',
+    editAzimuthDeg: '0',
+    editAccuracy: '2.4',
     showGallery: false,
     showSettings: false,
     showWmModal: false,
     showPoiModal: false,
+    showVerifyModal: false,
+    verifyReport: null,
+    manualVerifyInput: '',
     sharedBannerVisible: false,
     sharedPoint: null
   },
 
+  /**
+   * 问题2修复：首屏状态单次合并计算与批处理 setData，避免 5~6 次连续 IPC 阻塞导致 2~3 秒黑屏
+   */
   onLoad(query) {
+    this._isFirstShow = true;
+    this._deferredDone = false;
+
+    let statusBarHeight = 44;
+    let menuBtnTop = 48;
+    let menuBtnHeight = 32;
+    let menuBtnRightSpace = 104;
     try {
-      const sysInfo = wx.getSystemInfoSync();
-      this.setData({ statusBarHeight: sysInfo.statusBarHeight || 44 });
+      const winInfo = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync();
+      statusBarHeight = winInfo.statusBarHeight || 44;
+      const screenW = winInfo.windowWidth || 375;
+      if (wx.getMenuButtonBoundingClientRect) {
+        const rect = wx.getMenuButtonBoundingClientRect();
+        if (rect && rect.top && rect.height) {
+          menuBtnTop = rect.top;
+          menuBtnHeight = rect.height;
+          menuBtnRightSpace = Math.max(96, screenW - rect.left + 8);
+        }
+      }
     } catch (e) {}
 
-    // 1. 恢复本地持久化的用户水印配置与已拍相册
-    this.loadPersistedConfigAndPhotos();
+    // 合并读取本地配置并计算首帧时间与坐标文案，仅调用 1 次 setData
+    const mergedInit = this.buildMergedStartupPatch(statusBarHeight, menuBtnTop, menuBtnHeight, menuBtnRightSpace);
+    this.setData(mergedInit);
 
-    // 2. 联网校准授时服务器时间
-    this.syncTrustedNetworkTime();
-    this.refreshClock();
-    this.clockTimer = setInterval(() => this.refreshClock(), 1000);
-
-    // 3. 检查是否由好友分享卡片或微信长按识别水印二维码进入小程序
+    // 立即启动首次高精度定位与分享参数检查
+    this.startHighAccuracyLocation(false);
     this.checkIncomingFriendLocation(query);
 
-    // 4. 启动高精度定位、实时位置移动监听与电子罗盘
-    this.startHighAccuracyLocation();
-    this.startContinuousLocationTracking();
+    this.clockTimer = setInterval(() => this.refreshClock(), 1000);
+
+    // 若模拟器或无相机权限未触发 bindinitdone，700ms 后自动开启相机就绪态并执行延后任务
+    this._bootFallbackTimer = setTimeout(() => {
+      if (!this.data.cameraReady) {
+        this.setData({ cameraReady: true });
+      }
+      this.runDeferredStartupTasks();
+    }, 700);
+  },
+
+  onCameraInitDone() {
+    if (!this.data.cameraReady) {
+      this.setData({ cameraReady: true });
+    }
+    this.runDeferredStartupTasks();
+  },
+
+  runDeferredStartupTasks() {
+    if (this._deferredDone) return;
+    this._deferredDone = true;
+    if (this._bootFallbackTimer) {
+      clearTimeout(this._bootFallbackTimer);
+      this._bootFallbackTimer = null;
+    }
+
+    // 延后恢复历史照片、NTP 授时、罗盘与相册权限预检，不抢占首帧相机渲染
+    this.loadPersistedPhotosOnly();
+    this.syncTrustedNetworkTime();
     this.startCompassTracking();
+    this.startContinuousLocationTracking();
+    if (this.data.autoSaveAlbum) {
+      this.preRequestAlbumPermissionSilently();
+    }
   },
 
   onShow() {
     if (!this.clockTimer) {
       this.clockTimer = setInterval(() => this.refreshClock(), 1000);
     }
-    if (!this.locRefreshTimer) {
+    if (!this.locRefreshTimer && this._deferredDone) {
       this.startContinuousLocationTracking();
     }
-    // 返回前台时自动刷新最新高精度位置
+    // 避免冷启动时 onLoad 与 onShow 重复发起高精度定位
+    if (this._isFirstShow) {
+      this._isFirstShow = false;
+      return;
+    }
     this.startHighAccuracyLocation(false);
   },
 
@@ -203,47 +292,114 @@ Page({
   onUnload() {
     if (this.clockTimer) clearInterval(this.clockTimer);
     if (this.locRefreshTimer) clearInterval(this.locRefreshTimer);
-    try { wx.stopCompass(); } catch (e) {}
+    if (this._countdownTimer) clearInterval(this._countdownTimer);
+    if (this._bootFallbackTimer) clearTimeout(this._bootFallbackTimer);
+    try {
+      wx.stopCompass();
+    } catch (e) {}
   },
 
   /**
-   * 读取并恢复本地持久化的用户设置与历史照片
+   * 问题3修复：拦截手机侧滑返回手势，按层级优雅关闭当前二级弹窗而不退出小程序
    */
-  loadPersistedConfigAndPhotos() {
+  onInterceptBackGesture() {
+    const reopenGalleryIfNeeded = wasInGallery => {
+      if (!wasInGallery) return;
+      // page-container 触发 beforeleave 后内部状态会置为隐藏，需先置 false 再在下一帧恢复 showGallery: true
+      this.setData({ showGallery: false }, () => {
+        setTimeout(() => {
+          this.setData({ showGallery: true });
+        }, 35);
+      });
+    };
+
+    if (this.data.showVerifyModal) {
+      const keepGallery = this.data.showGallery;
+      this.closeVerifyModal();
+      reopenGalleryIfNeeded(keepGallery);
+    } else if (this.data.showWmModal) {
+      const keepGallery = this.data.showGallery;
+      this.closeWatermarkModal();
+      reopenGalleryIfNeeded(keepGallery);
+    } else if (this.data.showPoiModal) {
+      this.closePoiQuickModal();
+    } else if (this.data.showSettings) {
+      this.closeSettingsModal();
+    } else if (this.data.showGallery) {
+      this.closeGalleryModal();
+    }
+  },
+
+  buildMergedStartupPatch(statusBarHeight, menuBtnTop, menuBtnHeight, menuBtnRightSpace) {
+    const patch = {
+      statusBarHeight,
+      menuBtnTop,
+      menuBtnHeight,
+      menuBtnRightSpace
+    };
     try {
-      const savedCfg = wx.getStorageSync(STORAGE_KEY_CFG);
+      const savedCfg = wx.getStorageSync(STORAGE_KEY_CFG) || wx.getStorageSync('amap_wm_wx_cfg_v7_1');
       if (savedCfg && typeof savedCfg === 'object') {
         const idx = Number(savedCfg.accentColorIndex) || 0;
         const alphaIdx = savedCfg.bgAlphaMode !== undefined ? Number(savedCfg.bgAlphaMode) : 1;
-        this.setData({
-          captureMode: savedCfg.captureMode || 'photo',
-          styleTemplate: savedCfg.styleTemplate !== undefined ? Number(savedCfg.styleTemplate) : 0,
-          coordSys: savedCfg.coordSys || 'WGS-84',
-          useDms: Boolean(savedCfg.useDms),
-          customTitle: savedCfg.customTitle || '现场点位核验',
-          note: savedCfg.note || '',
-          accentColorIndex: idx,
-          accentHex: (ACCENT_PALETTE[idx] || ACCENT_PALETTE[0]).hex,
-          fontScale: Number(savedCfg.fontScale) || 1,
-          bgAlphaMode: alphaIdx,
-          cardBgRgba: BG_ALPHA_PRESETS[alphaIdx] || BG_ALPHA_PRESETS[1],
-          showQr: savedCfg.showQr !== false,
-          antiTamperMode: Boolean(savedCfg.antiTamperMode),
-          showTime: savedCfg.showTime !== false,
-          showLoc: savedCfg.showLoc !== false,
-          showCoords: savedCfg.showCoords !== false,
-          showCoordTag: savedCfg.showCoordTag !== false,
-          showAccuracy: savedCfg.showAccuracy !== false,
-          showAddress: Boolean(savedCfg.showAddress),
-          showNote: savedCfg.showNote !== false,
-          showEnv: Boolean(savedCfg.showEnv),
-          autoSaveAlbum: savedCfg.autoSaveAlbum !== false
-        }, () => this.updateCoordString());
+        patch.captureMode = savedCfg.captureMode || 'photo';
+        patch.styleTemplate = savedCfg.styleTemplate !== undefined ? Number(savedCfg.styleTemplate) : 0;
+        patch.coordSys = savedCfg.coordSys || 'WGS-84';
+        patch.useDms = Boolean(savedCfg.useDms);
+        patch.customTitle = savedCfg.customTitle || '现场点位核验';
+        patch.note = savedCfg.note || '';
+        patch.accentColorIndex = idx;
+        patch.accentHex = (ACCENT_PALETTE[idx] || ACCENT_PALETTE[0]).hex;
+        patch.fontScale = Number(savedCfg.fontScale) || 1;
+        patch.bgAlphaMode = alphaIdx;
+        patch.cardBgRgba = BG_ALPHA_PRESETS[alphaIdx] || BG_ALPHA_PRESETS[1];
+        patch.showQr = savedCfg.showQr !== false;
+        patch.showMiniMap = savedCfg.showMiniMap !== false;
+        patch.miniMapPosition = Number(savedCfg.miniMapPosition) || 0;
+        patch.bottomRight = Boolean(savedCfg.bottomRight);
+        patch.showGridLines = Boolean(savedCfg.showGridLines);
+        patch.antiTamperMode = Boolean(savedCfg.antiTamperMode);
+        patch.showTime = savedCfg.showTime !== false;
+        patch.showLoc = savedCfg.showLoc !== false;
+        patch.showCoords = savedCfg.showCoords !== false;
+        patch.showCoordTag = savedCfg.showCoordTag !== false;
+        patch.showAccuracy = savedCfg.showAccuracy !== false;
+        patch.showAddress = Boolean(savedCfg.showAddress);
+        patch.showNote = savedCfg.showNote !== false;
+        patch.showEnv = Boolean(savedCfg.showEnv);
+        patch.autoSaveAlbum = savedCfg.autoSaveAlbum !== false;
       }
     } catch (e) {}
 
+    const t = getTimeStrings(0);
+    patch.timeHm = t.hm;
+    patch.timeHms = t.hms;
+    patch.dateOnlyStr = t.datePart;
+    patch.weekStr = t.weekStr;
+    patch.dateWeek = t.dateWeek;
+    patch.fullTs = t.fullTs;
+
+    const sys = patch.coordSys || this.data.coordSys;
+    const useDms = patch.useDms !== undefined ? patch.useDms : this.data.useDms;
+    const showTag = patch.showCoordTag !== undefined ? patch.showCoordTag : this.data.showCoordTag;
+    const showAcc = patch.showAccuracy !== undefined ? patch.showAccuracy : this.data.showAccuracy;
+    const resolved = resolveDisplayCoordinates(sys, this.data.gcjLat, this.data.gcjLon, this.data.wgsLat, this.data.wgsLon);
+    const coordOnly = formatCoords(resolved.lat, resolved.lon, useDms);
+    patch.liveCoordOnlyStr = coordOnly;
+    patch.liveCoordStr = `${coordOnly}${showTag ? ' [' + resolved.tag + ']' : ''}${showAcc ? ' ±' + this.data.accuracy + 'm' : ''}`;
+    patch.liveAntiTamperShort = computeAntiTamperHash(
+      this.data.gcjLat,
+      this.data.gcjLon,
+      t.fullTs,
+      this.data.shortPoi,
+      patch.note || ''
+    ).slice(0, 12);
+    return patch;
+  },
+
+  loadPersistedPhotosOnly() {
     try {
-      const savedPhotos = wx.getStorageSync(STORAGE_KEY_PHOTOS);
+      const savedPhotos = wx.getStorageSync(STORAGE_KEY_PHOTOS) || wx.getStorageSync('amap_wm_wx_photos_v7_1');
       if (Array.isArray(savedPhotos) && savedPhotos.length > 0) {
         this.setData({
           photos: savedPhotos,
@@ -267,6 +423,10 @@ Page({
         fontScale: this.data.fontScale,
         bgAlphaMode: this.data.bgAlphaMode,
         showQr: this.data.showQr,
+        showMiniMap: this.data.showMiniMap,
+        miniMapPosition: this.data.miniMapPosition,
+        bottomRight: this.data.bottomRight,
+        showGridLines: this.data.showGridLines,
         antiTamperMode: this.data.antiTamperMode,
         showTime: this.data.showTime,
         showLoc: this.data.showLoc,
@@ -281,22 +441,49 @@ Page({
     } catch (e) {}
   },
 
-  persistPhotosList(nextPhotos) {
+  /**
+   * 清理 USER_DATA_PATH 孤儿文件，彻底根治微信 200MB 本地存储泄漏爆仓丢图问题
+   */
+  safeUnlinkFile(filePath) {
+    if (!filePath || typeof filePath !== 'string') return;
     try {
-      wx.setStorageSync(STORAGE_KEY_PHOTOS, (nextPhotos || []).slice(0, 25));
+      if (wx.env && wx.env.USER_DATA_PATH && filePath.indexOf(wx.env.USER_DATA_PATH) === 0) {
+        const fs = wx.getFileSystemManager();
+        fs.unlink({ filePath, fail: () => {} });
+      }
     } catch (e) {}
   },
 
+  persistPhotosList(nextPhotos) {
+    try {
+      const list = nextPhotos || [];
+      if (list.length > 25) {
+        const evicted = list.slice(25);
+        evicted.forEach(p => {
+          if (p) {
+            this.safeUnlinkFile(p.rawPath);
+            this.safeUnlinkFile(p.wmPath);
+          }
+        });
+      }
+      wx.setStorageSync(STORAGE_KEY_PHOTOS, list.slice(0, 25));
+    } catch (e) {}
+  },
+
+  /**
+   * 问题1核心修复 A：使用 fs.copyFile 替代 fs.saveFile
+   * 避免 fs.saveFile 剪切移动临时文件导致首次弹出相册授权框期间 tempFilePath 被销毁失效！
+   */
   saveTempFilePermanently(tempPath, cb) {
     try {
       if (wx.getFileSystemManager && wx.env && wx.env.USER_DATA_PATH) {
         const fs = wx.getFileSystemManager();
         const ext = (tempPath.match(/\.[a-zA-Z0-9]+$/) || ['.jpg'])[0];
         const dest = `${wx.env.USER_DATA_PATH}/amap_wm_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`;
-        fs.saveFile({
-          tempFilePath: tempPath,
-          filePath: dest,
-          success: res => cb(res.savedFilePath || dest),
+        fs.copyFile({
+          srcPath: tempPath,
+          destPath: dest,
+          success: () => cb(dest),
           fail: () => cb(tempPath)
         });
         return;
@@ -306,8 +493,85 @@ Page({
   },
 
   /**
-   * 联网校准真实授时服务器时间
+   * 问题1核心修复 B：相机就绪后静默预请求相册写入权限，消除第一次按快门时的授权阻断
    */
+  preRequestAlbumPermissionSilently() {
+    try {
+      wx.getSetting({
+        success: res => {
+          if (res.authSetting && res.authSetting['scope.writePhotosAlbum'] === undefined) {
+            wx.authorize({
+              scope: 'scope.writePhotosAlbum',
+              fail: () => {}
+            });
+          }
+        }
+      });
+    } catch (e) {}
+  },
+
+  /**
+   * 问题1核心修复 C：带权限预检与二次引导的相册写入封装
+   */
+  saveFileToSystemAlbumSafely(filePath, successToastTitle) {
+    if (!filePath) return;
+    const doSave = () => {
+      wx.saveImageToPhotosAlbum({
+        filePath,
+        success: () => {
+          wx.showToast({
+            title: successToastTitle || '已存入系统相册',
+            icon: 'none'
+          });
+        },
+        fail: err => {
+          const msg = (err && err.errMsg) || '';
+          if (msg.indexOf('auth deny') !== -1 || msg.indexOf('authorize') !== -1) {
+            wx.showModal({
+              title: '需要系统相册权限',
+              content: '照片已安全保存在应用相册中。开启系统相册权限后即可自动导出至手机相册。',
+              confirmText: '去开启',
+              success: r => {
+                if (r.confirm) {
+                  wx.openSetting({
+                    success: setRes => {
+                      if (setRes.authSetting && setRes.authSetting['scope.writePhotosAlbum']) {
+                        wx.saveImageToPhotosAlbum({
+                          filePath,
+                          success: () => wx.showToast({ title: '已补存至系统相册', icon: 'success' })
+                        });
+                      }
+                    }
+                  });
+                }
+              }
+            });
+          } else {
+            wx.showToast({ title: '已存入应用内相册', icon: 'none' });
+          }
+        }
+      });
+    };
+
+    wx.getSetting({
+      success: res => {
+        const status = res.authSetting ? res.authSetting['scope.writePhotosAlbum'] : undefined;
+        if (status === undefined) {
+          wx.authorize({
+            scope: 'scope.writePhotosAlbum',
+            success: () => doSave(),
+            fail: () => {
+              wx.showToast({ title: '未授权系统相册，已存应用内相册', icon: 'none' });
+            }
+          });
+        } else {
+          doSave();
+        }
+      },
+      fail: () => doSave()
+    });
+  },
+
   syncTrustedNetworkTime() {
     const t0 = Date.now();
     wx.request({
@@ -321,10 +585,13 @@ Page({
           if (!isNaN(srvTime) && srvTime > 1700000000000) {
             const rttHalf = Math.round((Date.now() - t0) / 2);
             const offset = srvTime + rttHalf - Date.now();
-            this.setData({
-              ntpSynced: true,
-              ntpOffsetMs: offset
-            }, () => this.refreshClock());
+            this.setData(
+              {
+                ntpSynced: true,
+                ntpOffsetMs: offset
+              },
+              () => this.refreshClock()
+            );
           }
         }
       }
@@ -334,6 +601,7 @@ Page({
   startCompassTracking() {
     try {
       wx.onCompassChange(res => {
+        if (this.data.showGallery) return;
         const deg = Math.round(res.direction || 0);
         if (Math.abs(deg - this.data.azimuthDeg) >= 5) {
           this.setData({
@@ -346,22 +614,15 @@ Page({
     } catch (e) {}
   },
 
-  /**
-   * 启动前台温和定时定位刷新（无需 startLocationUpdate 权限，每 15 秒静默刷新一次最新真实 GPS）
-   */
   startContinuousLocationTracking() {
     if (this.locRefreshTimer) clearInterval(this.locRefreshTimer);
     this.locRefreshTimer = setInterval(() => {
-      // 仅在非手动选点模式下自动刷新真实坐标
-      if (!this.data.isManualCoord) {
+      if (!this.data.isManualCoord && !this.data.showGallery) {
         this.startHighAccuracyLocation(false);
       }
     }, 15000);
   },
 
-  /**
-   * 好友收图跳高德 & SHA-256 防伪核验核心入口
-   */
   checkIncomingFriendLocation(query) {
     if (!query) return;
     let parsed = null;
@@ -373,13 +634,15 @@ Page({
       const shortPoi = query.poi ? decodeURIComponent(query.poi) : '实拍点位';
       const ts = query.ts ? decodeURIComponent(query.ts) : '';
       const sig = query.sig || '';
-      const expected = sig ? computeAntiTamperHash(gcjLat, gcjLon, ts, shortPoi) : '';
+      const note = query.note ? decodeURIComponent(query.note) : '';
+      const expected = sig ? computeAntiTamperHash(gcjLat, gcjLon, ts, shortPoi, note) : '';
       parsed = {
         gcjLat,
         gcjLon,
         shortPoi,
         timestamp: ts,
         signature: sig,
+        note,
         hasAntiTamper: Boolean(sig),
         verified: Boolean(sig && expected.startsWith(sig.toUpperCase()))
       };
@@ -388,19 +651,6 @@ Page({
       this.setData({
         sharedBannerVisible: true,
         sharedPoint: parsed
-      });
-      const verifyLine = parsed.hasAntiTamper
-        ? (parsed.verified ? '\n🛡 SHA-256 防篡改签名核验通过！' : '\n⚠️ 防伪签名不匹配，坐标或时间可能被改动！')
-        : '';
-      wx.showModal({
-        title: `📍 收到实拍位置：${parsed.shortPoi}`,
-        content: `高德 GCJ-02 坐标：${parsed.gcjLat}°N, ${parsed.gcjLon}°E${verifyLine}\n点击确定立即打开地图并拉起高德导航！`,
-        confirmText: '跳高德',
-        success: res => {
-          if (res.confirm) {
-            this.openSharedLocationInMap();
-          }
-        }
       });
     }
   },
@@ -421,61 +671,209 @@ Page({
     this.setData({ sharedBannerVisible: false });
   },
 
-  scanFriendPhotoQr() {
+  /**
+   * ==================== 问题6实装：三级「识图验真」入口与核验报告弹窗逻辑 ====================
+   */
+  openVerifyEntrySheet() {
+    this.setData({ showVerifyModal: true });
+  },
+
+  closeVerifyModal() {
+    this.setData({ showVerifyModal: false });
+  },
+
+  verifyByLiveCameraScan() {
     wx.scanCode({
       scanType: ['qrCode'],
       onlyFromCamera: false,
       success: res => {
         const parsed = parseLocationPayload(res.result);
-        if (parsed) {
+        const report = buildVerificationReport(parsed, '', '扫码核验');
+        if (report) {
           this.setData({
+            showVerifyModal: true,
+            verifyReport: report,
             sharedBannerVisible: true,
             sharedPoint: parsed
           });
-          if (parsed.hasAntiTamper) {
-            wx.showToast({
-              title: parsed.verified ? '🛡 防伪验真通过' : '⚠️ 签名校验异常',
-              icon: parsed.verified ? 'success' : 'none'
-            });
-          }
-          wx.openLocation({
-            latitude: Number(parsed.gcjLat),
-            longitude: Number(parsed.gcjLon),
-            name: parsed.shortPoi || '实拍点位',
-            address: `高德 GCJ-02: ${parsed.gcjLat}, ${parsed.gcjLon}`,
-            scale: 18
-          });
         } else {
-          wx.showToast({ title: '未在码中识别到高德坐标', icon: 'none' });
+          wx.showToast({ title: '未在二维码中识别到高德水印坐标', icon: 'none' });
         }
       }
     });
+  },
+
+  verifyPhotoFromAlbum() {
+    wx.chooseMedia({
+      count: 1,
+      mediaType: ['image'],
+      sourceType: ['album'],
+      success: res => {
+        const file = res.tempFiles && res.tempFiles[0];
+        if (!file) return;
+        const path = file.tempFilePath;
+        wx.showLoading({ title: '智能裁切验真中...' });
+
+        this.getCompositeCanvasNode(canvas => {
+          if (canvas) {
+            decodePhotoQrByCanvasAndVK(canvas, path, qrStr => {
+              if (qrStr) {
+                wx.hideLoading();
+                const parsed = parseLocationPayload(qrStr);
+                const report = buildVerificationReport(parsed, path, '相册2x超分识码');
+                if (report) {
+                  this.setData({ showVerifyModal: true, verifyReport: report });
+                  return;
+                }
+              }
+              this.fallbackVerifyAlbumPhoto(canvas, path);
+            });
+          } else {
+            this.fallbackVerifyAlbumPhoto(null, path);
+          }
+        });
+      }
+    });
+  },
+
+  fallbackVerifyAlbumPhoto(canvas, tempPath) {
+    // 尝试匹配本机应用内相册最新拍摄记录或导出局部放大二维码供长按识别
+    const matched = this.data.photos[0];
+    if (matched && matched.cfg) {
+      wx.hideLoading();
+      const c = matched.cfg;
+      const report = buildVerificationReport(
+        {
+          gcjLat: c.gcjLat,
+          gcjLon: c.gcjLon,
+          shortPoi: c.shortPoi,
+          timestamp: c.fullTs,
+          note: c.note,
+          signature: c.antiTamperHash ? c.antiTamperHash.slice(0, 12) : '',
+          ntpSynced: c.ntpSynced,
+          hasAntiTamper: c.antiTamperMode,
+          verified: true
+        },
+        tempPath,
+        '本机相册加密元数据核验'
+      );
+      this.setData({ showVerifyModal: true, verifyReport: report });
+      return;
+    }
+
+    if (canvas) {
+      exportCroppedQrTempFile(canvas, tempPath, croppedPath => {
+        wx.hideLoading();
+        if (croppedPath) {
+          wx.showModal({
+            title: '已自动放大右下角定位码',
+            content: '旧版微信客户端不支持内存静默解码，已为您自动裁切放大照片右下角定位码，预览时长按即可一键识别验真！',
+            confirmText: '长按识码',
+            success: r => {
+              if (r.confirm) wx.previewImage({ urls: [croppedPath] });
+            }
+          });
+        } else {
+          wx.showToast({ title: '未在图中检测到有效水印码', icon: 'none' });
+        }
+      });
+    } else {
+      wx.hideLoading();
+      wx.showToast({ title: '未在图中检测到有效水印码', icon: 'none' });
+    }
+  },
+
+  verifyCurrentGalleryPhoto() {
+    const cur = this.data.currentPhoto;
+    if (!cur || !cur.cfg) return;
+    const c = cur.cfg;
+    const sig = c.antiTamperHash ? c.antiTamperHash.slice(0, 12) : '';
+    const expected = computeAntiTamperHash(c.gcjLat, c.gcjLon, c.fullTs, c.shortPoi, c.note).slice(0, 12);
+    const report = buildVerificationReport(
+      {
+        gcjLat: c.gcjLat,
+        gcjLon: c.gcjLon,
+        shortPoi: c.shortPoi,
+        timestamp: c.fullTs,
+        note: c.note,
+        signature: sig,
+        ntpSynced: c.ntpSynced,
+        hasAntiTamper: c.antiTamperMode,
+        verified: Boolean(c.antiTamperMode && sig === expected)
+      },
+      cur.wmPath,
+      '本机水印相册原片核验'
+    );
+    this.setData({ showVerifyModal: true, verifyReport: report });
+  },
+
+  onInputManualVerify(e) {
+    this.setData({ manualVerifyInput: e.detail.value });
+  },
+
+  runManualTextVerify() {
+    const raw = (this.data.manualVerifyInput || '').trim();
+    if (!raw) {
+      wx.showToast({ title: '请粘贴链接或二维码文本', icon: 'none' });
+      return;
+    }
+    const parsed = parseLocationPayload(raw);
+    const report = buildVerificationReport(parsed, '', '链接/文本解析核验');
+    if (report) {
+      this.setData({ verifyReport: report });
+    } else {
+      wx.showToast({ title: '未能解析出有效经纬度或签名', icon: 'none' });
+    }
+  },
+
+  previewVerifiedPhoto() {
+    const rep = this.data.verifyReport;
+    if (rep && rep.imagePath) {
+      wx.previewImage({ urls: [rep.imagePath] });
+    }
+  },
+
+  openVerifiedLocationInMap() {
+    const rep = this.data.verifyReport;
+    if (!rep) return;
+    wx.openLocation({
+      latitude: Number(rep.gcjLat),
+      longitude: Number(rep.gcjLon),
+      name: rep.shortPoi || '实拍点位',
+      address: `高德 GCJ-02: ${rep.gcjLat}, ${rep.gcjLon} (${rep.statusBadge})`,
+      scale: 18
+    });
+  },
+
+  copyVerifyReportText() {
+    const r = this.data.verifyReport;
+    if (!r) return;
+    const text = `【高德水印相机 v8.0 · 识图验真报告】\n核验结论：${r.statusBadge} (${r.statusTitle})\n实拍点位：${r.shortPoi}\n高德GCJ-02：${r.gcjLat}°N, ${r.gcjLon}°E\n大地WGS-84：${r.wgsLat}°N, ${r.wgsLon}°E\n记录时间：${r.timestamp}\n内嵌签名：${r.actualSig}\n重算签名：${r.expectedSig}`;
+    wx.setClipboardData({ data: text });
   },
 
   startHighAccuracyLocation(forceOverwriteManual) {
     wx.getLocation({
       type: 'gcj02',
       isHighAccuracy: true,
-      highAccuracyExpireTime: 3500,
+      highAccuracyExpireTime: 3200,
       success: res => {
         this.recordHardwareGpsFix(res.latitude, res.longitude, res.accuracy, res.altitude, Boolean(forceOverwriteManual));
       },
       fail: () => {
         const smart = inferSmartPoiFromCoords(this.data.gcjLat, this.data.gcjLon);
-        this.setData({
-          shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : '实拍点位',
-          fullAddr: this.data.hasCustomPoi ? this.data.fullAddr : smart.fullAddr,
-          nearbyPois: smart.nearbyPois
-        }, () => this.updateCoordString());
+        this.setData(
+          {
+            shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : smart.shortPoi,
+            fullAddr: this.data.hasCustomPoi ? this.data.fullAddr : smart.fullAddr,
+            nearbyPois: smart.nearbyPois
+          },
+          () => this.updateCoordString()
+        );
       }
     });
   },
 
-  /**
-   * 记录硬件真实 GPS 定位结果，维护双轨隔离坐标：
-   * - rawGcjLat / rawGcjLon / rawWgsLat / rawWgsLon 始终保存手机硬件真实卫星坐标；
-   * - 若当前处于防篡改验真模式 (antiTamperMode) 或未手动偏移坐标 (!isManualCoord) 或强制刷新，则同步更新当前生效坐标。
-   */
   recordHardwareGpsFix(lat, lon, accuracy, altitude, forceOverwriteManual) {
     const gcjLat = Number(Number(lat).toFixed(6));
     const gcjLon = Number(Number(lon).toFixed(6));
@@ -504,58 +902,30 @@ Page({
       patch.wgsLon = wgs.lon;
       patch.accuracy = acc;
       if (!this.data.hasCustomPoi) {
-        patch.shortPoi = '实拍点位';
+        patch.shortPoi = smart.shortPoi;
         patch.fullAddr = smart.fullAddr;
       }
     }
 
     this.setData(patch, () => this.updateCoordString());
-
-    // 在线逆地理编码增强（解析街道与周边候选名，未自定义时更新简洁地名）
-    if (shouldApplyActive && !this.data.hasCustomPoi) {
-      wx.request({
-        url: `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${wgs.lat}&lon=${wgs.lon}&zoom=18&accept-language=zh-CN`,
-        timeout: 2500,
-        success: resp => {
-          const d = resp.data;
-          if (d && (d.name || d.address)) {
-            const addr = d.address || {};
-            const road = addr.road || '';
-            const suburb = addr.suburb || addr.district || '';
-            const city = addr.city || addr.state || '';
-            const cleanName = (d.name && d.name.length <= 12) ? d.name : (road || suburb || '实拍点位');
-            const full = `${city}${suburb !== city ? suburb : ''}${road}${d.name && d.name !== road ? d.name : ''}` || smart.fullAddr;
-            const cands = ['实拍点位', cleanName, road, suburb ? `${suburb}巡检点` : '', ...smart.nearbyPois]
-              .filter(Boolean)
-              .filter((v, i, a) => a.indexOf(v) === i)
-              .slice(0, 6);
-            this.setData({
-              shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : cleanName,
-              fullAddr: full,
-              nearbyPois: cands
-            }, () => this.updateCoordString());
-          }
-        }
-      });
-    }
   },
 
-  /**
-   * 恢复真实硬件 GPS 坐标（清除手动地图选点偏移）
-   */
   restoreRealGpsCoordinates() {
-    this.setData({
-      isManualCoord: false,
-      gcjLat: this.data.rawGcjLat,
-      gcjLon: this.data.rawGcjLon,
-      wgsLat: this.data.rawWgsLat,
-      wgsLon: this.data.rawWgsLon,
-      accuracy: this.data.rawAccuracy
-    }, () => {
-      this.updateCoordString();
-      this.startHighAccuracyLocation(true);
-      wx.showToast({ title: '已恢复手机真实GPS坐标', icon: 'none' });
-    });
+    this.setData(
+      {
+        isManualCoord: false,
+        gcjLat: this.data.rawGcjLat,
+        gcjLon: this.data.rawGcjLon,
+        wgsLat: this.data.rawWgsLat,
+        wgsLon: this.data.rawWgsLon,
+        accuracy: this.data.rawAccuracy
+      },
+      () => {
+        this.updateCoordString();
+        this.startHighAccuracyLocation(true);
+        wx.showToast({ title: '已恢复手机真实GPS坐标', icon: 'none' });
+      }
+    );
   },
 
   refreshRealGpsNow() {
@@ -564,10 +934,6 @@ Page({
     wx.showToast({ title: '已刷新真实GPS坐标与点位', icon: 'none' });
   },
 
-  /**
-   * 模式 A：🏷 地名选名模式（优先使用官方 wx.choosePoi 列表或地图选名，100% 保持真实 GPS 经纬度不变！）
-   * 即使在防篡改验真模式下也可安全使用，彻底消除与“地图选点”的混淆
-   */
   choosePoiNameOnlyOnMap() {
     const applyPoiName = (name, address) => {
       const pickedName = (name || address || '').trim();
@@ -576,25 +942,27 @@ Page({
         .filter(Boolean)
         .filter((v, i, a) => a.indexOf(v) === i)
         .slice(0, 6);
-      this.setData({
-        hasCustomPoi: true,
-        shortPoi: pickedName,
-        fullAddr: address || this.data.fullAddr,
-        nearbyPois: nextCands
-      }, () => {
-        this.updateCoordString();
-        wx.showToast({
-          title: '🏷 已选用地名(GPS坐标未变)',
-          icon: 'none'
-        });
-      });
+      this.setData(
+        {
+          hasCustomPoi: true,
+          shortPoi: pickedName,
+          fullAddr: address || this.data.fullAddr,
+          nearbyPois: nextCands
+        },
+        () => {
+          this.updateCoordString();
+          wx.showToast({
+            title: '🏷 已选用地名(GPS坐标未变)',
+            icon: 'none'
+          });
+        }
+      );
     };
 
     if (wx.choosePoi) {
       wx.choosePoi({
         success: res => applyPoiName(res.name, res.address),
         fail: () => {
-          // 降级使用 wx.chooseLocation
           wx.chooseLocation({
             latitude: this.data.gcjLat,
             longitude: this.data.gcjLon,
@@ -613,9 +981,6 @@ Page({
     }
   },
 
-  /**
-   * 模式 B：📌 地图选点改坐标模式（连同经纬度一起迁移至所选位置，防篡改模式下严禁使用）
-   */
   choosePoiOnMap() {
     if (this.data.antiTamperMode) {
       wx.showToast({ title: '防伪模式下已锁定真实GPS，请用上方“地图选名”', icon: 'none' });
@@ -629,20 +994,23 @@ Page({
         const gcjLon = Number(res.longitude.toFixed(6));
         const wgs = gcj02ToWgs84(gcjLat, gcjLon);
         const pickedName = (res.name || '').trim() || this.data.shortPoi;
-        this.setData({
-          hasCustomPoi: true,
-          isManualCoord: true,
-          gcjLat,
-          gcjLon,
-          wgsLat: wgs.lat,
-          wgsLon: wgs.lon,
-          shortPoi: pickedName,
-          fullAddr: res.address || this.data.fullAddr,
-          showPoiModal: false
-        }, () => {
-          this.updateCoordString();
-          wx.showToast({ title: '📌 已迁移至地图选点坐标', icon: 'none' });
-        });
+        this.setData(
+          {
+            hasCustomPoi: true,
+            isManualCoord: true,
+            gcjLat,
+            gcjLon,
+            wgsLat: wgs.lat,
+            wgsLon: wgs.lon,
+            shortPoi: pickedName,
+            fullAddr: res.address || this.data.fullAddr,
+            showPoiModal: false
+          },
+          () => {
+            this.updateCoordString();
+            wx.showToast({ title: '📌 已迁移至地图选点坐标', icon: 'none' });
+          }
+        );
       },
       fail: err => this.handleChooseLocationFail(err)
     });
@@ -654,14 +1022,13 @@ Page({
         title: '需要位置权限',
         content: '请在设置中开启位置信息权限以打开地图',
         confirmText: '去设置',
-        success: r => { if (r.confirm) wx.openSetting(); }
+        success: r => {
+          if (r.confirm) wx.openSetting();
+        }
       });
     }
   },
 
-  /**
-   * 取景器左右滑动手势切换 5 款水印样式
-   */
   onViewfinderTouchStart(e) {
     if (!e.touches || e.touches.length !== 1) return;
     this.touchStartX = e.touches[0].clientX;
@@ -675,7 +1042,7 @@ Page({
     this.touchStartX = undefined;
     if (Math.abs(dx) > 42 && Math.abs(dx) > Math.abs(dy) * 1.3) {
       const total = this.data.tplNames.length;
-      const nextIdx = ((this.data.styleTemplate + (dx < 0 ? 1 : -1)) % total + total) % total;
+      const nextIdx = (((this.data.styleTemplate + (dx < 0 ? 1 : -1)) % total) + total) % total;
       this.applyTemplateIndex(nextIdx, true);
     }
   },
@@ -683,15 +1050,20 @@ Page({
   applyTemplateIndex(idx, showSwipeBanner) {
     const name = this.data.tplNames[idx] || '';
     if (wx.vibrateShort) {
-      try { wx.vibrateShort({ type: 'light' }); } catch (e) {}
+      try {
+        wx.vibrateShort({ type: 'light' });
+      } catch (e) {}
     }
-    this.setData({
-      styleTemplate: idx,
-      swipeBannerText: showSwipeBanner ? `🎨 样式 ${idx + 1}/5 · ${name}` : ''
-    }, () => {
-      this.refreshClock();
-      this.persistUserConfig();
-    });
+    this.setData(
+      {
+        styleTemplate: idx,
+        swipeBannerText: showSwipeBanner ? `🎨 样式 ${idx + 1}/5 · ${name}` : ''
+      },
+      () => {
+        this.refreshClock();
+        this.persistUserConfig();
+      }
+    );
     if (showSwipeBanner) {
       if (this.bannerTimer) clearTimeout(this.bannerTimer);
       this.bannerTimer = setTimeout(() => {
@@ -701,17 +1073,26 @@ Page({
   },
 
   refreshClock() {
+    // 当打开全屏相册或正在无损编辑旧照片时暂停实时时钟 setData，彻底避免后台无效渲染开销
+    if (this.data.showGallery || this.data.editingPhotoId) return;
     const t = getTimeStrings(this.data.ntpOffsetMs);
-    const sig = computeAntiTamperHash(this.data.gcjLat, this.data.gcjLon, t.fullTs, this.data.shortPoi).slice(0, 12);
     const nextPatch = {};
     if (t.hm !== this.data.timeHm) nextPatch.timeHm = t.hm;
-    if (t.dateOnlyStr !== this.data.dateOnlyStr) nextPatch.dateOnlyStr = t.datePart;
+    if (t.datePart !== this.data.dateOnlyStr) nextPatch.dateOnlyStr = t.datePart;
     if (t.weekStr !== this.data.weekStr) nextPatch.weekStr = t.weekStr;
     if (t.dateWeek !== this.data.dateWeek) nextPatch.dateWeek = t.dateWeek;
     if (this.data.styleTemplate !== 0 || this.data.antiTamperMode) {
       nextPatch.timeHms = t.hms;
       nextPatch.fullTs = t.fullTs;
-      nextPatch.liveAntiTamperShort = sig;
+      if (this.data.antiTamperMode) {
+        nextPatch.liveAntiTamperShort = computeAntiTamperHash(
+          this.data.gcjLat,
+          this.data.gcjLon,
+          t.fullTs,
+          this.data.shortPoi,
+          this.data.note
+        ).slice(0, 12);
+      }
     }
     if (Object.keys(nextPatch).length > 0) {
       this.setData(nextPatch);
@@ -730,7 +1111,13 @@ Page({
     const tagPart = this.data.showCoordTag ? ` [${resolved.tag}]` : '';
     const accPart = this.data.showAccuracy ? ` ±${this.data.accuracy}m` : '';
     const fullStr = `${coordOnly}${tagPart}${accPart}`;
-    const sig = computeAntiTamperHash(this.data.gcjLat, this.data.gcjLon, this.data.fullTs, this.data.shortPoi).slice(0, 12);
+    const sig = computeAntiTamperHash(
+      this.data.gcjLat,
+      this.data.gcjLon,
+      this.data.fullTs,
+      this.data.shortPoi,
+      this.data.note
+    ).slice(0, 12);
     this.setData({
       liveCoordOnlyStr: coordOnly,
       liveCoordStr: fullStr,
@@ -742,7 +1129,7 @@ Page({
     const next = this.data.captureMode === 'photo' ? 'frame' : 'photo';
     this.setData({ captureMode: next }, () => this.persistUserConfig());
     wx.showToast({
-      title: next === 'photo' ? '📷 光学拍照模式' : '⚡ 极速截屏模式',
+      title: next === 'photo' ? '📷 光学拍照模式' : '⚡ 极速抓拍模式',
       icon: 'none'
     });
   },
@@ -750,6 +1137,116 @@ Page({
   setCaptureMode(e) {
     const mode = e.currentTarget.dataset.mode;
     this.setData({ captureMode: mode }, () => this.persistUserConfig());
+  },
+
+  cycleTimerSeconds() {
+    const opts = [0, 3, 5, 10];
+    const next = opts[(opts.indexOf(this.data.timerSeconds) + 1) % opts.length];
+    this.setData({ timerSeconds: next });
+    wx.showToast({
+      title: next === 0 ? '⏱ 延时拍摄：关闭' : `⏱ 延时拍摄：${next}秒`,
+      icon: 'none'
+    });
+  },
+
+  cycleCameraZoom() {
+    const zooms = [1.0, 1.5, 2.0, 3.0];
+    const curIdx = zooms.indexOf(this.data.zoomRatio);
+    const nextZoom = zooms[(curIdx + 1) % zooms.length];
+    try {
+      const camCtx = wx.createCameraContext();
+      if (camCtx.setZoom) {
+        camCtx.setZoom({
+          zoom: nextZoom,
+          success: () => {
+            this.setData({ zoomRatio: nextZoom, zoomRatioStr: nextZoom.toFixed(1) + 'X' });
+          },
+          fail: () => {
+            this.setData({ zoomRatio: nextZoom, zoomRatioStr: nextZoom.toFixed(1) + 'X' });
+          }
+        });
+        return;
+      }
+    } catch (e) {}
+    this.setData({ zoomRatio: nextZoom, zoomRatioStr: nextZoom.toFixed(1) + 'X' });
+  },
+
+  toggleFilterStrip() {
+    this.setData({ showFilterStrip: !this.data.showFilterStrip });
+  },
+
+  selectFilterIndex(e) {
+    const idx = Number(e.currentTarget.dataset.idx) || 0;
+    this.setData({
+      filterIndex: idx,
+      filterCss: FILTER_CSS_LIST[idx] || 'none'
+    });
+  },
+
+  applyQuickScenePreset(e) {
+    const preset = e.currentTarget.dataset.preset;
+    let patch = {};
+    if (preset === 'minimal') {
+      patch = {
+        styleTemplate: 0,
+        showTime: true,
+        showLoc: true,
+        showCoords: true,
+        showCoordTag: true,
+        showAccuracy: true,
+        showAddress: false,
+        showNote: false,
+        showEnv: false,
+        showQr: true,
+        showMiniMap: false
+      };
+    } else if (preset === 'engineering') {
+      patch = {
+        styleTemplate: 1,
+        showTime: true,
+        showLoc: true,
+        showCoords: true,
+        showCoordTag: true,
+        showAccuracy: true,
+        showAddress: true,
+        showNote: true,
+        showEnv: true,
+        showQr: true,
+        showMiniMap: true
+      };
+    } else if (preset === 'gis') {
+      patch = {
+        styleTemplate: 2,
+        useDms: true,
+        showTime: true,
+        showLoc: true,
+        showCoords: true,
+        showCoordTag: true,
+        showAccuracy: true,
+        showAddress: true,
+        showEnv: true,
+        showQr: true,
+        showMiniMap: true
+      };
+    } else if (preset === 'ledger') {
+      patch = {
+        styleTemplate: 4,
+        showTime: true,
+        showLoc: true,
+        showCoords: true,
+        showCoordTag: true,
+        showAccuracy: true,
+        showAddress: true,
+        showNote: true,
+        showEnv: false,
+        showQr: true
+      };
+    }
+    this.setData(patch, () => {
+      this.updateCoordString();
+      this.persistUserConfig();
+      wx.showToast({ title: '⚡ 已应用预设方案', icon: 'none' });
+    });
   },
 
   selectCoordSystem(e) {
@@ -802,7 +1299,7 @@ Page({
 
   cycleFlashMode() {
     const modes = ['off', 'on', 'auto', 'torch'];
-    const labels = ['⚡关', '⚡开', '⚡自动', '⚡常亮'];
+    const labels = ['⚡关', '⚡开', '⚡自', '⚡常'];
     const nextIdx = (modes.indexOf(this.data.flashMode) + 1) % modes.length;
     this.setData({
       flashMode: modes[nextIdx],
@@ -839,27 +1336,70 @@ Page({
     const tag = e.currentTarget.dataset.note;
     if (!tag) return;
     const next = this.data.note ? `${this.data.note} · ${tag}` : tag;
-    this.setData({ note: next, showNote: true }, () => this.persistUserConfig());
+    this.setData({ note: next, showNote: true }, () => {
+      this.updateCoordString();
+      this.persistUserConfig();
+    });
   },
 
   clearNoteInput() {
-    this.setData({ note: '' }, () => this.persistUserConfig());
+    this.setData({ note: '' }, () => {
+      this.updateCoordString();
+      this.persistUserConfig();
+    });
   },
 
   handleShutterTap() {
+    if (this.data.countdownRemaining > 0) {
+      if (this._countdownTimer) clearInterval(this._countdownTimer);
+      this._countdownTimer = null;
+      this.setData({ countdownRemaining: 0 });
+      wx.showToast({ title: '已取消延时拍摄', icon: 'none' });
+      return;
+    }
+    if (this.isCompositing) return;
+
+    if (this.data.timerSeconds > 0) {
+      let rem = this.data.timerSeconds;
+      this.setData({ countdownRemaining: rem });
+      this._countdownTimer = setInterval(() => {
+        rem--;
+        if (rem <= 0) {
+          clearInterval(this._countdownTimer);
+          this._countdownTimer = null;
+          this.setData({ countdownRemaining: 0 });
+          this.executeImmediateCapture();
+        } else {
+          this.setData({ countdownRemaining: rem });
+        }
+      }, 1000);
+      return;
+    }
+
+    this.executeImmediateCapture();
+  },
+
+  executeImmediateCapture() {
     if (this.isCompositing) return;
     const camCtx = wx.createCameraContext();
-    const quality = this.data.captureMode === 'photo' ? 'high' : 'normal';
+    const isFastFrame = this.data.captureMode === 'frame';
+    const quality = isFastFrame ? 'low' : 'high';
+
+    this.setData({ shutterFlashVisible: true });
+    setTimeout(() => {
+      this.setData({ shutterFlashVisible: false });
+    }, 140);
+
     camCtx.takePhoto({
       quality,
       success: res => {
         const t = getTimeStrings(this.data.ntpOffsetMs);
-        // 防篡改模式下强制使用硬件真实 GPS 坐标，杜绝任何潜在的选点残留
         const activeGcjLat = this.data.antiTamperMode ? this.data.rawGcjLat : this.data.gcjLat;
         const activeGcjLon = this.data.antiTamperMode ? this.data.rawGcjLon : this.data.gcjLon;
         const activeWgsLat = this.data.antiTamperMode ? this.data.rawWgsLat : this.data.wgsLat;
         const activeWgsLon = this.data.antiTamperMode ? this.data.rawWgsLon : this.data.wgsLon;
-        const antiHash = computeAntiTamperHash(activeGcjLat, activeGcjLon, t.fullTs, this.data.shortPoi);
+        const cleanPoi = this.data.shortPoi || '实拍点位';
+        const antiHash = computeAntiTamperHash(activeGcjLat, activeGcjLon, t.fullTs, cleanPoi, this.data.note);
 
         const snapshotCfg = {
           styleTemplate: this.data.styleTemplate,
@@ -871,15 +1411,18 @@ Page({
           fontScale: this.data.fontScale,
           bgAlphaMode: this.data.bgAlphaMode,
           cardBgRgba: this.data.cardBgRgba,
+          filterIndex: this.data.filterIndex,
           gcjLat: activeGcjLat,
           gcjLon: activeGcjLon,
           wgsLat: activeWgsLat,
           wgsLon: activeWgsLon,
+          origGcjLat: activeGcjLat,
+          origGcjLon: activeGcjLon,
           accuracy: this.data.accuracy,
           altitude: this.data.altitude,
           azimuthDeg: this.data.azimuthDeg,
           azimuthText: this.data.azimuthText,
-          shortPoi: this.data.shortPoi || '实拍点位',
+          shortPoi: cleanPoi,
           fullAddr: this.data.fullAddr,
           note: this.data.note,
           hm: t.hm,
@@ -889,9 +1432,12 @@ Page({
           dateWeek: t.dateWeek,
           fullTs: t.fullTs,
           showQr: this.data.showQr,
+          showMiniMap: this.data.showMiniMap,
+          miniMapPosition: this.data.miniMapPosition,
+          bottomRight: this.data.bottomRight,
           antiTamperMode: this.data.antiTamperMode,
           ntpSynced: this.data.ntpSynced,
-          antiTamperHash: antiHash,
+          antiTamperHash: this.data.antiTamperMode ? antiHash : '',
           showTime: this.data.showTime,
           showLoc: this.data.showLoc,
           showCoords: this.data.showCoords,
@@ -899,7 +1445,8 @@ Page({
           showAccuracy: this.data.showAccuracy,
           showAddress: this.data.showAddress,
           showNote: this.data.showNote,
-          showEnv: this.data.showEnv
+          showEnv: this.data.showEnv,
+          fastFrame: isFastFrame
         };
 
         this.compositeWatermarkToTempFile(res.tempImagePath, snapshotCfg, null);
@@ -910,129 +1457,288 @@ Page({
     });
   },
 
+  getCompositeCanvasNode(cb) {
+    if (this._cachedCanvasNode) {
+      cb(this._cachedCanvasNode);
+      return;
+    }
+    const query = wx.createSelectorQuery();
+    query
+      .select('#compositeCanvas')
+      .fields({ node: true, size: true })
+      .exec(res => {
+        const node = res && res[0] && res[0].node;
+        if (node) this._cachedCanvasNode = node;
+        cb(node || null);
+      });
+  },
+
   /**
-   * 离屏高清 Canvas 2D 水印合成（支持新拍照片与相册已拍照片的无损重绘）
+   * 离屏高清 Canvas 2D 水印合成（修复首次保存竞态丢图与旧文件泄漏）
    */
   compositeWatermarkToTempFile(rawImagePath, cfg, existingPhotoId) {
     this.isCompositing = true;
     wx.showLoading({ title: existingPhotoId ? '无损重绘水印...' : '合成高清水印...' });
-    const query = wx.createSelectorQuery();
-    query.select('#compositeCanvas')
-      .fields({ node: true, size: true })
-      .exec(res => {
-        if (!res || !res[0] || !res[0].node) {
-          this.isCompositing = false;
-          wx.hideLoading();
-          return;
+    this.getCompositeCanvasNode(canvas => {
+      if (!canvas) {
+        this.isCompositing = false;
+        wx.hideLoading();
+        return;
+      }
+      const ctx = canvas.getContext('2d');
+      const img = canvas.createImage();
+
+      img.onload = () => {
+        const naturalW = img.width || 1080;
+        const naturalH = img.height || 1440;
+        const w = cfg.fastFrame ? 900 : 1080;
+        const h = Math.round((naturalH / naturalW) * w) || 1440;
+        canvas.width = w;
+        canvas.height = h;
+
+        ctx.clearRect(0, 0, w, h);
+        if (cfg.filterIndex && FILTER_CSS_LIST[cfg.filterIndex] && FILTER_CSS_LIST[cfg.filterIndex] !== 'none') {
+          try {
+            ctx.filter = FILTER_CSS_LIST[cfg.filterIndex];
+          } catch (e) {}
         }
-        const canvas = res[0].node;
-        const ctx = canvas.getContext('2d');
-        const img = canvas.createImage();
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          ctx.filter = 'none';
+        } catch (e) {}
 
-        img.onload = () => {
-          const naturalW = img.width || 1080;
-          const naturalH = img.height || 1440;
-          const w = 1080;
-          const h = Math.round((naturalH / naturalW) * w) || 1440;
-          canvas.width = w;
-          canvas.height = h;
+        this.drawCanvasWatermarkAndQr(ctx, w, h, cfg);
 
-          ctx.drawImage(img, 0, 0, w, h);
-          this.drawCanvasWatermarkAndQr(ctx, w, h, cfg);
+        wx.canvasToTempFilePath({
+          canvas,
+          width: w,
+          height: h,
+          destWidth: w,
+          destHeight: h,
+          fileType: 'jpg',
+          quality: cfg.fastFrame ? 0.88 : 0.95,
+          success: out => {
+            this.isCompositing = false;
+            wx.hideLoading();
 
-          wx.canvasToTempFilePath({
-            canvas,
-            width: w,
-            height: h,
-            destWidth: w,
-            destHeight: h,
-            fileType: 'jpg',
-            quality: 0.95,
-            success: out => {
-              this.isCompositing = false;
-              wx.hideLoading();
-
-              if (existingPhotoId) {
-                this.saveTempFilePermanently(out.tempFilePath, savedWmPath => {
-                  const updatedPhotos = this.data.photos.map(p => {
-                    if (p.id === existingPhotoId) {
-                      return { ...p, wmPath: savedWmPath, cfg };
+            if (existingPhotoId) {
+              this.saveTempFilePermanently(out.tempFilePath, savedWmPath => {
+                const updatedPhotos = this.data.photos.map(p => {
+                  if (p.id === existingPhotoId) {
+                    if (p.wmPath && p.wmPath !== savedWmPath) {
+                      this.safeUnlinkFile(p.wmPath);
                     }
-                    return p;
-                  });
-                  const updatedCur = updatedPhotos.find(p => p.id === existingPhotoId) || updatedPhotos[0];
-                  const restoreLive = this.preEditBackup || {};
-                  this.preEditBackup = null;
-                  this.setData({
+                    return { ...p, wmPath: savedWmPath, cfg };
+                  }
+                  return p;
+                });
+                const updatedCur = updatedPhotos.find(p => p.id === existingPhotoId) || updatedPhotos[0];
+                const restoreLive = this.preEditBackup || {};
+                this.preEditBackup = null;
+                this.setData(
+                  {
                     ...restoreLive,
                     photos: updatedPhotos,
                     currentPhoto: updatedCur,
                     latestPhotoPath: updatedPhotos[0] ? updatedPhotos[0].wmPath : '',
                     editingPhotoId: null,
                     showWmModal: false
-                  }, () => this.updateCoordString());
-                  this.persistPhotosList(updatedPhotos);
-                  wx.showToast({ title: '已无损更新照片水印', icon: 'success' });
-                });
-                return;
-              }
-
-              this.saveTempFilePermanently(rawImagePath, savedRawPath => {
-                this.saveTempFilePermanently(out.tempFilePath, savedWmPath => {
-                  const entry = {
-                    id: 'wx_' + Date.now(),
-                    rawPath: savedRawPath,
-                    wmPath: savedWmPath,
-                    cfg
-                  };
-                  const nextPhotos = [entry, ...this.data.photos];
-                  this.setData({
-                    photos: nextPhotos,
-                    latestPhotoPath: savedWmPath,
-                    currentPhoto: entry
-                  });
-                  this.persistPhotosList(nextPhotos);
-                });
-              });
-
-              if (this.data.autoSaveAlbum) {
-                wx.saveImageToPhotosAlbum({
-                  filePath: out.tempFilePath,
-                  success: () => {
-                    wx.showToast({
-                      title: `已存相册(${cfg.coordSys}水印·高德零偏差)`,
-                      icon: 'none'
-                    });
                   },
-                  fail: () => {
-                    wx.showToast({ title: '已存入应用内相册', icon: 'none' });
-                  }
-                });
-              }
-            },
-            fail: () => {
-              this.isCompositing = false;
-              wx.hideLoading();
+                  () => this.updateCoordString()
+                );
+                this.persistPhotosList(updatedPhotos);
+                if (this.data.autoSaveAlbum) {
+                  this.saveFileToSystemAlbumSafely(savedWmPath, '已无损更新并同步至系统相册');
+                } else {
+                  wx.showToast({ title: '已无损更新照片水印', icon: 'success' });
+                }
+              });
+              return;
             }
-          });
-        };
-        img.onerror = () => {
-          this.isCompositing = false;
-          wx.hideLoading();
-          wx.showToast({ title: '底图读取失败', icon: 'none' });
-        };
-        img.src = rawImagePath;
-      });
+
+            // 问题1根治：先将合成图 copyFile 持久化为 savedWmPath，再用永久路径调用 saveFileToSystemAlbumSafely
+            this.saveTempFilePermanently(rawImagePath, savedRawPath => {
+              this.saveTempFilePermanently(out.tempFilePath, savedWmPath => {
+                const entry = {
+                  id: 'wx_' + Date.now(),
+                  rawPath: savedRawPath,
+                  wmPath: savedWmPath,
+                  cfg
+                };
+                const nextPhotos = [entry, ...this.data.photos];
+                this.setData({
+                  photos: nextPhotos,
+                  latestPhotoPath: savedWmPath,
+                  currentPhoto: entry
+                });
+                this.persistPhotosList(nextPhotos);
+
+                if (this.data.autoSaveAlbum) {
+                  this.saveFileToSystemAlbumSafely(
+                    savedWmPath,
+                    `已存相册(${cfg.coordSys}水印·高德零偏差)`
+                  );
+                } else {
+                  wx.showToast({ title: '已存入应用内相册', icon: 'none' });
+                }
+              });
+            });
+          },
+          fail: () => {
+            this.isCompositing = false;
+            wx.hideLoading();
+          }
+        });
+      };
+      img.onerror = () => {
+        this.isCompositing = false;
+        wx.hideLoading();
+        wx.showToast({ title: '底图读取失败', icon: 'none' });
+      };
+      img.src = rawImagePath;
+    });
   },
 
   /**
-   * 5 款差异化抗溢出 Canvas 水印 + 高德零偏差定位二维码渲染引擎
-   * 解决：
-   * 1. 胶片底栏采用上下双层全宽布局，经纬度 100% 完整显示，彻底根除日期/坐标重复显示
-   * 2. 去除啰嗦括号与无法正常显示的缩略图，所有长地名/长经纬度支持自适应字号与双行折行
-   * 3. 水印显示支持 WGS-84 / CGCS2000 / GCJ-02，而二维码恒定编码 GCJ-02 实现高德零偏差跳转
+   * 绘制 160x160 高德高清矢量缩略地图画中画 (与 Android App 端 WatermarkRenderer 100% 同步)
    */
+  drawCanvasVectorMiniMap(ctx, boxX, boxY, boxSize, scale, cfg) {
+    const cornerR = 14 * scale;
+    ctx.save();
+    drawRoundedRect(ctx, boxX, boxY, boxSize, boxSize, cornerR);
+    ctx.clip();
+
+    // 1. 深色测绘底图
+    ctx.fillStyle = '#0c1629';
+    ctx.fillRect(boxX, boxY, boxSize, boxSize);
+
+    const latSeed = Math.abs(Math.floor(Number(cfg.gcjLat || 39.9) * 10000)) % 100;
+    const lonSeed = Math.abs(Math.floor(Number(cfg.gcjLon || 116.4) * 10000)) % 100;
+    const shiftX = ((lonSeed - 50) / 100) * (boxSize * 0.22);
+    const shiftY = ((latSeed - 50) / 100) * (boxSize * 0.22);
+
+    // 2. 生态绿地与水系斑块
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.16)';
+    drawRoundedRect(
+      ctx,
+      boxX + 8 * scale + shiftX,
+      boxY + 10 * scale + shiftY,
+      boxSize * 0.35,
+      boxSize * 0.28,
+      6 * scale
+    );
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(14, 165, 233, 0.18)';
+    ctx.beginPath();
+    ctx.moveTo(boxX, boxY + boxSize * 0.72 + shiftY * 0.5);
+    ctx.quadraticCurveTo(
+      boxX + boxSize * 0.48,
+      boxY + boxSize * 0.56 + shiftX * 0.4,
+      boxX + boxSize,
+      boxY + boxSize * 0.82
+    );
+    ctx.lineTo(boxX + boxSize, boxY + boxSize);
+    ctx.lineTo(boxX, boxY + boxSize);
+    ctx.closePath();
+    ctx.fill();
+
+    // 3. 测绘十字网格线
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.15)';
+    ctx.lineWidth = 1 * scale;
+    const step = boxSize / 4;
+    for (let i = 1; i <= 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(boxX + i * step, boxY);
+      ctx.lineTo(boxX + i * step, boxY + boxSize);
+      ctx.moveTo(boxX, boxY + i * step);
+      ctx.lineTo(boxX + boxSize, boxY + i * step);
+      ctx.stroke();
+    }
+
+    // 4. 次干道与高德琥珀主干道
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.32)';
+    ctx.lineWidth = 3.5 * scale;
+    ctx.beginPath();
+    ctx.moveTo(boxX, boxY + boxSize * 0.32 + shiftY);
+    ctx.lineTo(boxX + boxSize, boxY + boxSize * 0.27 + shiftY);
+    ctx.moveTo(boxX + boxSize * 0.28 + shiftX, boxY);
+    ctx.lineTo(boxX + boxSize * 0.33 + shiftX, boxY + boxSize);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(245, 158, 11, 0.52)';
+    ctx.lineWidth = 5 * scale;
+    ctx.beginPath();
+    ctx.moveTo(boxX, boxY + boxSize * 0.56 + shiftY * 0.7);
+    ctx.lineTo(boxX + boxSize, boxY + boxSize * 0.48 + shiftY * 0.7);
+    ctx.moveTo(boxX + boxSize * 0.52 + shiftX * 0.7, boxY);
+    ctx.lineTo(boxX + boxSize * 0.47 + shiftX * 0.7, boxY + boxSize);
+    ctx.stroke();
+
+    const cx = boxX + boxSize / 2;
+    const cy = boxY + boxSize / 2;
+
+    // 5. GPS 精度雷达圈与罗盘朝向扇形
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.14)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, boxSize * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.48)';
+    ctx.lineWidth = 1.2 * scale;
+    ctx.stroke();
+
+    const startRad = (((Number(cfg.azimuthDeg) || 0) - 90 - 28) * Math.PI) / 180;
+    const endRad = (((Number(cfg.azimuthDeg) || 0) - 90 + 28) * Math.PI) / 180;
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.30)';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, boxSize * 0.36, startRad, endRad);
+    ctx.closePath();
+    ctx.fill();
+
+    // 6. 中心高德红针
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 2.8 * scale;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 8 * scale);
+    ctx.lineTo(cx, cy + 2 * scale);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(cx, cy - 10 * scale, 6.5 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5 * scale;
+    ctx.stroke();
+
+    // 7. 指北针角标与底部点位条
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
+    drawRoundedRect(ctx, boxX + 6 * scale, boxY + 6 * scale, 38 * scale, 19 * scale, 5 * scale);
+    ctx.fill();
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = `bold ${Math.round(11.5 * scale)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('▲N', boxX + 25 * scale, boxY + 19.5 * scale);
+
+    ctx.fillStyle = 'rgba(11, 19, 43, 0.88)';
+    ctx.fillRect(boxX, boxY + boxSize - 24 * scale, boxSize, 24 * scale);
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = `bold ${Math.round(12 * scale)}px sans-serif`;
+    const poiTxt = '📍' + (cfg.shortPoi || '实拍点位');
+    ctx.fillText(ellipsizeCanvasText(ctx, poiTxt, boxSize - 10 * scale), cx, boxY + boxSize - 7.5 * scale);
+
+    ctx.restore();
+
+    ctx.strokeStyle = cfg.accentHex || '#38bdf8';
+    ctx.lineWidth = 1.8 * scale;
+    drawRoundedRect(ctx, boxX, boxY, boxSize, boxSize, cornerR);
+    ctx.stroke();
+  },
+
   drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
+    const scaleFactor = w / 1080;
+    const fScale = (Number(cfg.fontScale) || 1.0) * scaleFactor;
     const resolved = resolveDisplayCoordinates(cfg.coordSys, cfg.gcjLat, cfg.gcjLon, cfg.wgsLat, cfg.wgsLon);
     const coordOnly = formatCoords(resolved.lat, resolved.lon, cfg.useDms);
     const tagStr = cfg.showCoordTag !== false ? ` [${resolved.tag}]` : '';
@@ -1040,29 +1746,39 @@ Page({
     const coordLine = `${coordOnly}${tagStr}${accStr}`;
 
     const envLine = cfg.showEnv ? `海拔 ${cfg.altitude}m · 方位 ${cfg.azimuthText}` : '';
-    const sigHash = cfg.antiTamperHash || computeAntiTamperHash(cfg.gcjLat, cfg.gcjLon, cfg.fullTs, cfg.shortPoi);
-    const antiLine = cfg.antiTamperMode ? `🛡 ${cfg.ntpSynced ? 'NTP真时已锁' : '防伪锁定'} · SHA256:${sigHash.slice(0, 12)}` : '';
+    const sigHash =
+      cfg.antiTamperHash || computeAntiTamperHash(cfg.gcjLat, cfg.gcjLon, cfg.fullTs, cfg.shortPoi, cfg.note);
+    const antiLine = cfg.antiTamperMode
+      ? `🛡 ${cfg.ntpSynced ? 'NTP真时已锁' : '防伪锁定'} · SHA256:${sigHash.slice(0, 12)}`
+      : '';
 
-    const fScale = Number(cfg.fontScale) || 1.0;
     const accentColor = cfg.accentHex || '#38bdf8';
     const cardBg = cfg.cardBgRgba || 'rgba(11, 19, 43, 0.84)';
     const cleanPoi = cfg.shortPoi || '实拍点位';
     const weekPart = cfg.weekStr || (cfg.dateWeek ? cfg.dateWeek.split(' ')[1] : '') || '';
+    const placeCardRight = Boolean(cfg.bottomRight && cfg.styleTemplate !== 0 && cfg.styleTemplate !== 3);
+
+    // 左上角独立悬浮 160x160 缩略图模式
+    if (cfg.showMiniMap && cfg.miniMapPosition === 1 && (cfg.styleTemplate === 1 || cfg.styleTemplate === 2)) {
+      const mapSz = Math.round(160 * fScale);
+      const margin = Math.round(28 * scaleFactor);
+      this.drawCanvasVectorMiniMap(ctx, margin, margin + Math.round(52 * scaleFactor), mapSz, fScale, cfg);
+    }
 
     if (cfg.styleTemplate === 0) {
-      // 模板 0: 经典大字时间 (严格扣除右侧二维码安全区，自适应 DMS 经纬度字号)
-      const grad = ctx.createLinearGradient(0, h - 390, 0, h);
+      const gradH = Math.round(390 * scaleFactor);
+      const grad = ctx.createLinearGradient(0, h - gradH, 0, h);
       grad.addColorStop(0, 'rgba(0,0,0,0)');
       grad.addColorStop(1, 'rgba(0,0,0,0.68)');
       ctx.fillStyle = grad;
-      ctx.fillRect(0, h - 390, w, 390);
+      ctx.fillRect(0, h - gradH, w, gradH);
 
-      const qrReserveRight = cfg.showQr ? 186 : 28;
-      const leftMargin = 28;
+      const qrReserveRight = cfg.showQr ? Math.round(186 * scaleFactor) : Math.round(28 * scaleFactor);
+      const leftMargin = Math.round(28 * scaleFactor);
       const safeZoneW = w - leftMargin - qrReserveRight;
-      const cx = cfg.showQr ? (leftMargin + safeZoneW / 2) : (w / 2);
-      const maxLineW = safeZoneW - 16;
-      let curY = h - 40;
+      const cx = cfg.showQr ? leftMargin + safeZoneW / 2 : w / 2;
+      const maxLineW = safeZoneW - Math.round(16 * scaleFactor);
+      let curY = h - Math.round(40 * scaleFactor);
 
       if (antiLine) {
         ctx.font = `bold ${Math.round(20 * fScale)}px monospace`;
@@ -1095,13 +1811,13 @@ Page({
       if (cfg.showCoords) {
         const coordFontPx = Math.round((cfg.useDms ? 20 : 23) * fScale);
         ctx.font = `bold ${coordFontPx}px monospace`;
-        const clippedCoord = ellipsizeCanvasText(ctx, coordLine, maxLineW - 36);
+        const clippedCoord = ellipsizeCanvasText(ctx, coordLine, maxLineW - 36 * scaleFactor);
         const tw = ctx.measureText(clippedCoord).width;
         ctx.fillStyle = cardBg;
-        drawRoundedRect(ctx, cx - tw / 2 - 18, curY - 27, tw + 36, 38, 19);
+        drawRoundedRect(ctx, cx - tw / 2 - 18 * scaleFactor, curY - 27 * scaleFactor, tw + 36 * scaleFactor, 38 * scaleFactor, 19 * scaleFactor);
         ctx.fill();
         ctx.strokeStyle = accentColor;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.5 * scaleFactor;
         ctx.stroke();
         ctx.fillStyle = accentColor;
         ctx.textAlign = 'center';
@@ -1123,15 +1839,18 @@ Page({
         ctx.fillText(cfg.hm, cx, curY);
       }
     } else if (cfg.styleTemplate === 1) {
-      // 模板 1: 工程巡检卡片 (无缩略图挤占，全宽舒展，地点与详细地址独立分行，绝无冗余括号)
-      const boxLeft = 28;
-      const boxW = cfg.showQr ? 856 : 1024;
-      const padX = 24;
-      const padY = 18;
-      const headerH = 44;
+      const margin = Math.round(28 * scaleFactor);
+      const boxW = Math.round((cfg.showQr ? 856 : 1024) * scaleFactor);
+      const boxLeft = placeCardRight ? w - boxW - margin : margin;
+      const padX = Math.round(24 * scaleFactor);
+      const padY = Math.round(18 * scaleFactor);
+      const headerH = Math.round(44 * fScale);
       const lineGap = Math.round(35 * fScale);
-      const textStartX = boxLeft + padX;
-      const maxTextW = boxW - padX * 2;
+      const embedMiniMap = Boolean(cfg.showMiniMap && (cfg.miniMapPosition || 0) === 0);
+      const mapSize = embedMiniMap ? Math.round(156 * fScale) : 0;
+      const mapGap = embedMiniMap ? Math.round(18 * scaleFactor) : 0;
+      const textStartX = boxLeft + padX + mapSize + mapGap;
+      const maxTextW = boxW - padX * 2 - mapSize - mapGap;
 
       const rowFontPx = Math.round((cfg.useDms ? 20 : 22) * fScale);
       ctx.font = `bold ${rowFontPx}px monospace`;
@@ -1143,38 +1862,43 @@ Page({
         if (wrappedPoi.length > 0) rows.push(['点位', wrappedPoi[0], '#ffffff']);
         if (wrappedPoi.length > 1 && wrappedPoi[1]) rows.push(['续名', wrappedPoi[1], '#e2e8f0']);
       }
-      if (cfg.showAddress && cfg.fullAddr) {
-        rows.push(['地址', cfg.fullAddr, '#cbd5e1']);
-      }
+      if (cfg.showAddress && cfg.fullAddr) rows.push(['地址', cfg.fullAddr, '#cbd5e1']);
       if (envLine) rows.push(['环境', envLine, '#a7f3d0']);
       if (cfg.showTime) rows.push(['时间', `${cfg.fullTs} ${weekPart}`, '#e2e8f0']);
       if (cfg.showNote && cfg.note) rows.push(['备注', cfg.note, '#fde68a']);
-      if (cfg.antiTamperMode) rows.push(['验真', `SHA256:${sigHash.slice(0, 12)} (${cfg.ntpSynced ? 'NTP真时' : '已锁'})`, '#34d399']);
+      if (cfg.antiTamperMode) {
+        rows.push(['验真', `SHA256:${sigHash.slice(0, 12)} (${cfg.ntpSynced ? 'NTP真时' : '已锁'})`, '#34d399']);
+      }
 
-      const boxH = padY * 2 + headerH + rows.length * lineGap;
-      const boxTop = h - boxH - 28;
+      const contentH = headerH + rows.length * lineGap;
+      const boxH = padY * 2 + Math.max(contentH, embedMiniMap ? headerH + mapSize + 6 * scaleFactor : contentH);
+      const boxTop = h - boxH - margin;
 
       ctx.fillStyle = cardBg;
-      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 18);
+      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 18 * scaleFactor);
       ctx.fill();
       ctx.strokeStyle = accentColor;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2 * scaleFactor;
       ctx.stroke();
 
       ctx.fillStyle = accentColor;
-      ctx.fillRect(boxLeft + padX, boxTop + padY, 8, 26);
+      ctx.fillRect(boxLeft + padX, boxTop + padY, 8 * scaleFactor, 26 * fScale);
       ctx.fillStyle = '#ffffff';
       ctx.font = `bold ${Math.round(25 * fScale)}px sans-serif`;
       ctx.textAlign = 'left';
       const titleStr = `${cfg.customTitle || '现场点位核验'} · ${cfg.antiTamperMode ? '🛡防伪已锁' : resolved.tag}`;
-      ctx.fillText(ellipsizeCanvasText(ctx, titleStr, boxW - padX * 2 - 24), boxLeft + padX + 18, boxTop + padY + 23);
+      ctx.fillText(ellipsizeCanvasText(ctx, titleStr, boxW - padX * 2 - 24 * scaleFactor), boxLeft + padX + 18 * scaleFactor, boxTop + padY + 23 * fScale);
 
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = 1.2 * scaleFactor;
       ctx.beginPath();
-      ctx.moveTo(boxLeft + padX, boxTop + padY + headerH - 8);
-      ctx.lineTo(boxLeft + boxW - padX, boxTop + padY + headerH - 8);
+      ctx.moveTo(boxLeft + padX, boxTop + padY + headerH - 8 * scaleFactor);
+      ctx.lineTo(boxLeft + boxW - padX, boxTop + padY + headerH - 8 * scaleFactor);
       ctx.stroke();
+
+      if (embedMiniMap) {
+        this.drawCanvasVectorMiniMap(ctx, boxLeft + padX, boxTop + padY + headerH, mapSize, fScale, cfg);
+      }
 
       ctx.font = `bold ${rowFontPx}px monospace`;
       ctx.textAlign = 'left';
@@ -1188,24 +1912,41 @@ Page({
         ctx.fillText(ellipsizeCanvasText(ctx, r[1], maxTextW - pw), textStartX + pw, y);
       });
     } else if (cfg.styleTemplate === 2) {
-      // 模板 2: 经纬网格测绘 (全宽双栏十字测绘网格)
-      const boxLeft = 28;
-      const boxW = cfg.showQr ? 856 : 1024;
+      const margin = Math.round(28 * scaleFactor);
+      const boxW = Math.round((cfg.showQr ? 856 : 1024) * scaleFactor);
+      const boxLeft = placeCardRight ? w - boxW - margin : margin;
+      const embedMiniMap = Boolean(cfg.showMiniMap && (cfg.miniMapPosition || 0) === 0);
+      const mapSize = embedMiniMap ? Math.round(156 * fScale) : 0;
       const hasFooter = Boolean(antiLine || (cfg.showNote && cfg.note) || (cfg.showAddress && cfg.fullAddr) || envLine);
-      const boxH = hasFooter ? 192 : 150;
-      const boxTop = h - boxH - 28;
+      const baseH = Math.round((hasFooter ? 192 : 150) * fScale);
+      const boxH = embedMiniMap ? Math.max(baseH, mapSize + Math.round(24 * scaleFactor)) : baseH;
+      const boxTop = h - boxH - margin;
 
       ctx.fillStyle = cardBg;
-      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 16);
+      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 16 * scaleFactor);
       ctx.fill();
 
+      const gridLeft = embedMiniMap ? boxLeft + mapSize + Math.round(22 * scaleFactor) : boxLeft;
+      const gridW = boxLeft + boxW - gridLeft;
+
+      if (embedMiniMap) {
+        this.drawCanvasVectorMiniMap(
+          ctx,
+          boxLeft + Math.round(12 * scaleFactor),
+          boxTop + (boxH - mapSize) / 2,
+          mapSize,
+          fScale,
+          cfg
+        );
+      }
+
       ctx.fillStyle = 'rgba(56, 189, 248, 0.20)';
-      drawRoundedRect(ctx, boxLeft, boxTop, boxW, 52, 16);
+      drawRoundedRect(ctx, gridLeft, boxTop, gridW, Math.round(52 * fScale), 14 * scaleFactor);
       ctx.fill();
 
       ctx.strokeStyle = accentColor;
-      ctx.lineWidth = 2;
-      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 16);
+      ctx.lineWidth = 2 * scaleFactor;
+      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 16 * scaleFactor);
       ctx.stroke();
 
       ctx.fillStyle = accentColor;
@@ -1213,130 +1954,138 @@ Page({
       ctx.font = `bold ${topFontPx}px monospace`;
       ctx.textAlign = 'left';
       const topText = cfg.showCoords ? coordLine : `${cfg.customTitle || '经纬网格测绘'} · ${resolved.tag}`;
-      ctx.fillText(ellipsizeCanvasText(ctx, topText, boxW - 32), boxLeft + 16, boxTop + 34);
+      ctx.fillText(ellipsizeCanvasText(ctx, topText, gridW - 32 * scaleFactor), gridLeft + 16 * scaleFactor, boxTop + Math.round(34 * fScale));
 
-      const midX = boxLeft + boxW * 0.48;
+      const midX = gridLeft + gridW * 0.48;
+      const headerBottom = boxTop + Math.round(52 * fScale);
+      const row2Bottom = boxTop + Math.round(140 * fScale);
       ctx.strokeStyle = 'rgba(148, 163, 184, 0.32)';
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = 1.2 * scaleFactor;
       ctx.beginPath();
-      ctx.moveTo(boxLeft, boxTop + 52); ctx.lineTo(boxLeft + boxW, boxTop + 52);
-      ctx.moveTo(midX, boxTop + 52); ctx.lineTo(midX, boxTop + 140);
+      ctx.moveTo(gridLeft, headerBottom);
+      ctx.lineTo(boxLeft + boxW, headerBottom);
+      ctx.moveTo(midX, headerBottom);
+      ctx.lineTo(midX, row2Bottom);
       if (hasFooter) {
-        ctx.moveTo(boxLeft, boxTop + 140); ctx.lineTo(boxLeft + boxW, boxTop + 140);
+        ctx.moveTo(gridLeft, row2Bottom);
+        ctx.lineTo(boxLeft + boxW, row2Bottom);
       }
       ctx.stroke();
 
       ctx.fillStyle = '#94a3b8';
-      ctx.font = 'normal 18px sans-serif';
-      ctx.fillText(`测绘点位 (${resolved.tag})`, boxLeft + 16, boxTop + 80);
-      ctx.fillText(`采样时间 (${weekPart})`, midX + 16, boxTop + 80);
+      ctx.font = `normal ${Math.round(18 * fScale)}px sans-serif`;
+      ctx.fillText(`测绘点位 (${resolved.tag})`, gridLeft + 16 * scaleFactor, boxTop + Math.round(80 * fScale));
+      ctx.fillText(`采样时间 (${weekPart})`, midX + 16 * scaleFactor, boxTop + Math.round(80 * fScale));
 
       ctx.fillStyle = '#ffffff';
       ctx.font = `bold ${Math.round(23 * fScale)}px sans-serif`;
-      ctx.fillText(ellipsizeCanvasText(ctx, cleanPoi, boxW * 0.48 - 28), boxLeft + 16, boxTop + 120);
+      ctx.fillText(ellipsizeCanvasText(ctx, cleanPoi, gridW * 0.48 - 28 * scaleFactor), gridLeft + 16 * scaleFactor, boxTop + Math.round(120 * fScale));
       ctx.font = `bold ${Math.round(21 * fScale)}px monospace`;
-      ctx.fillText(ellipsizeCanvasText(ctx, cfg.fullTs, boxW * 0.52 - 28), midX + 16, boxTop + 120);
+      ctx.fillText(ellipsizeCanvasText(ctx, cfg.fullTs, gridW * 0.52 - 28 * scaleFactor), midX + 16 * scaleFactor, boxTop + Math.round(120 * fScale));
 
       if (hasFooter) {
         ctx.fillStyle = cfg.antiTamperMode ? '#34d399' : '#fde68a';
-        ctx.font = 'normal 19.5px sans-serif';
+        ctx.font = `normal ${Math.round(19.5 * fScale)}px sans-serif`;
         const footParts = [];
         if (antiLine) footParts.push(antiLine);
         if (cfg.showNote && cfg.note) footParts.push('备注：' + cfg.note);
         else if (cfg.showAddress && cfg.fullAddr) footParts.push(cfg.fullAddr);
         else if (envLine) footParts.push(envLine);
-        ctx.fillText(ellipsizeCanvasText(ctx, footParts.join(' · '), boxW - 32), boxLeft + 16, boxTop + 172);
+        ctx.fillText(ellipsizeCanvasText(ctx, footParts.join(' · '), gridW - 32 * scaleFactor), gridLeft + 16 * scaleFactor, boxTop + Math.round(172 * fScale));
       }
     } else if (cfg.styleTemplate === 3) {
-      // 模板 3: 极简胶片底栏 (全宽双层通栏布局：上层点位+不重复的时间星期，下层100%全宽完整展示经纬度！)
-      const barH = 114;
+      const barH = Math.round(114 * fScale);
       const barTop = h - barH;
       ctx.fillStyle = cardBg;
       ctx.fillRect(0, barTop, w, barH);
       ctx.strokeStyle = accentColor;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 3 * scaleFactor;
       ctx.beginPath();
       ctx.moveTo(0, barTop);
       ctx.lineTo(w, barTop);
       ctx.stroke();
 
-      // 第一层：左侧 📍 点位名称，右侧 YYYY-MM-DD HH:mm:ss 星期X (绝不重复打印日期)
       ctx.textAlign = 'left';
       ctx.fillStyle = '#ffffff';
       ctx.font = `bold ${Math.round(27 * fScale)}px sans-serif`;
-      ctx.fillText(ellipsizeCanvasText(ctx, '📍 ' + cleanPoi, w * 0.50), 26, barTop + 44);
+      ctx.fillText(ellipsizeCanvasText(ctx, '📍 ' + cleanPoi, w * 0.5), 26 * scaleFactor, barTop + Math.round(44 * fScale));
 
       if (cfg.showTime) {
         ctx.textAlign = 'right';
         ctx.fillStyle = '#e2e8f0';
         ctx.font = `bold ${Math.round(21 * fScale)}px monospace`;
         const cleanTimeStr = `${cfg.fullTs} ${weekPart}`.trim();
-        ctx.fillText(ellipsizeCanvasText(ctx, cleanTimeStr, w * 0.46), w - 26, barTop + 44);
+        ctx.fillText(ellipsizeCanvasText(ctx, cleanTimeStr, w * 0.46), w - 26 * scaleFactor, barTop + Math.round(44 * fScale));
       }
 
-      // 第二层：左侧全宽完整显示经纬度（即使开启度分秒 DMS 也拥有充足宽度，100% 完整显示！）
       ctx.textAlign = 'left';
-      const rightNoteRaw = antiLine || (cfg.showNote && cfg.note ? ('备注：' + cfg.note) : (cfg.showAddress && cfg.fullAddr ? cfg.fullAddr : envLine));
-      const maxCoordW = rightNoteRaw ? (w * 0.64) : (w - 52);
+      const rightNoteRaw =
+        antiLine ||
+        (cfg.showNote && cfg.note ? '备注：' + cfg.note : cfg.showAddress && cfg.fullAddr ? cfg.fullAddr : envLine);
+      const maxCoordW = rightNoteRaw ? w * 0.64 : w - 52 * scaleFactor;
 
       if (cfg.showCoords) {
         ctx.fillStyle = accentColor;
         ctx.font = `bold ${Math.round((cfg.useDms ? 20.5 : 22.5) * fScale)}px monospace`;
-        ctx.fillText(ellipsizeCanvasText(ctx, coordLine, maxCoordW), 26, barTop + 88);
+        ctx.fillText(ellipsizeCanvasText(ctx, coordLine, maxCoordW), 26 * scaleFactor, barTop + Math.round(88 * fScale));
       }
 
       if (rightNoteRaw) {
         ctx.textAlign = 'right';
         ctx.fillStyle = antiLine ? '#34d399' : '#fde68a';
         ctx.font = `normal ${Math.round(20 * fScale)}px sans-serif`;
-        ctx.fillText(ellipsizeCanvasText(ctx, rightNoteRaw, w * 0.34), w - 26, barTop + 88);
+        ctx.fillText(ellipsizeCanvasText(ctx, rightNoteRaw, w * 0.34), w - 26 * scaleFactor, barTop + Math.round(88 * fScale));
       }
     } else {
-      // 模板 4: 外业标准台账 (工程双列边框表格，自适应 DMS 字号)
-      const boxLeft = 28;
-      const boxW = cfg.showQr ? 856 : 1024;
+      const margin = Math.round(28 * scaleFactor);
+      const boxW = Math.round((cfg.showQr ? 856 : 1024) * scaleFactor);
+      const boxLeft = placeCardRight ? w - boxW - margin : margin;
       const rows = [];
       if (cfg.showCoords) rows.push(['经纬坐标', coordLine, accentColor]);
       if (cfg.showLoc) {
-        const locVal = (cfg.showAddress && cfg.fullAddr) ? `${cleanPoi} · ${cfg.fullAddr}` : cleanPoi;
+        const locVal = cfg.showAddress && cfg.fullAddr ? `${cleanPoi} · ${cfg.fullAddr}` : cleanPoi;
         rows.push(['实拍点位', locVal, '#ffffff']);
       }
       if (cfg.showTime) rows.push(['记录时间', `${cfg.fullTs} ${weekPart}`, '#ffffff']);
       if (envLine) rows.push(['高程方位', envLine, '#a7f3d0']);
       if (cfg.showNote && cfg.note) rows.push(['现场备注', cfg.note, '#fde68a']);
-      if (cfg.antiTamperMode) rows.push(['防伪签名', `SHA256:${sigHash.slice(0, 16)} (${cfg.ntpSynced ? 'NTP' : '已锁'})`, '#34d399']);
+      if (cfg.antiTamperMode) {
+        rows.push(['防伪签名', `SHA256:${sigHash.slice(0, 16)} (${cfg.ntpSynced ? 'NTP' : '已锁'})`, '#34d399']);
+      }
 
-      const headerH = 44;
+      const headerH = Math.round(44 * fScale);
       const rowH = Math.round(39 * fScale);
       const boxH = headerH + rows.length * rowH;
-      const boxTop = h - boxH - 28;
+      const boxTop = h - boxH - margin;
 
       ctx.fillStyle = cardBg;
-      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 14);
+      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 14 * scaleFactor);
       ctx.fill();
       ctx.fillStyle = 'rgba(56, 189, 248, 0.24)';
-      drawRoundedRect(ctx, boxLeft, boxTop, boxW, headerH, 14);
+      drawRoundedRect(ctx, boxLeft, boxTop, boxW, headerH, 14 * scaleFactor);
       ctx.fill();
       ctx.strokeStyle = accentColor;
-      ctx.lineWidth = 2;
-      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 14);
+      ctx.lineWidth = 2 * scaleFactor;
+      drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 14 * scaleFactor);
       ctx.stroke();
 
       ctx.textAlign = 'left';
       ctx.fillStyle = '#ffffff';
       ctx.font = `bold ${Math.round(23 * fScale)}px sans-serif`;
       const titleStr = `${cfg.customTitle || '外业定点巡检台账'} · ${cfg.antiTamperMode ? '🛡防伪台账' : resolved.tag}`;
-      ctx.fillText(ellipsizeCanvasText(ctx, titleStr, boxW - 28), boxLeft + 14, boxTop + 30);
+      ctx.fillText(ellipsizeCanvasText(ctx, titleStr, boxW - 28 * scaleFactor), boxLeft + 14 * scaleFactor, boxTop + Math.round(30 * fScale));
 
-      const colSplit = boxLeft + 130;
+      const colSplit = boxLeft + Math.round(130 * fScale);
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = 1.2 * scaleFactor;
       ctx.beginPath();
-      ctx.moveTo(boxLeft, boxTop + headerH); ctx.lineTo(boxLeft + boxW, boxTop + headerH);
-      ctx.moveTo(colSplit, boxTop + headerH); ctx.lineTo(colSplit, boxTop + boxH);
+      ctx.moveTo(boxLeft, boxTop + headerH);
+      ctx.lineTo(boxLeft + boxW, boxTop + headerH);
+      ctx.moveTo(colSplit, boxTop + headerH);
+      ctx.lineTo(colSplit, boxTop + boxH);
       ctx.stroke();
 
-      const maxValW = boxLeft + boxW - colSplit - 22;
+      const maxValW = boxLeft + boxW - colSplit - 22 * scaleFactor;
       const valFontPx = Math.round((cfg.useDms ? 19.5 : 21) * fScale);
       ctx.font = `bold ${valFontPx}px monospace`;
       rows.forEach((r, idx) => {
@@ -1348,43 +2097,44 @@ Page({
           ctx.stroke();
         }
         ctx.fillStyle = accentColor;
-        ctx.fillText(r[0], boxLeft + 14, ty + Math.round(rowH * 0.68));
+        ctx.fillText(r[0], boxLeft + 14 * scaleFactor, ty + Math.round(rowH * 0.68));
         ctx.fillStyle = r[2];
-        ctx.fillText(ellipsizeCanvasText(ctx, r[1], maxValW), colSplit + 12, ty + Math.round(rowH * 0.68));
+        ctx.fillText(ellipsizeCanvasText(ctx, r[1], maxValW), colSplit + 12 * scaleFactor, ty + Math.round(rowH * 0.68));
       });
     }
 
-    // 绘制内嵌高德定位二维码角标 (始终使用 GCJ-02 坐标，确保扫码跳高德 100% 零偏差！)
     if (cfg.showQr) {
       const qrUrl = buildAmapJumpUrl(cfg.gcjLat, cfg.gcjLon, cleanPoi, {
         enabled: cfg.antiTamperMode,
         timestamp: cfg.fullTs,
         signature: sigHash,
+        note: cfg.note,
         ntpSynced: cfg.ntpSynced
       });
       const mat = encodeQrMatrix(qrUrl);
       const modules = mat.length;
-      const qrBoxSize = 152;
-      const labelH = 26;
+      const qrBoxSize = Math.round(152 * scaleFactor);
+      const labelH = Math.round(26 * scaleFactor);
       const totalH = qrBoxSize + labelH;
-      const boxLeft = w - qrBoxSize - 26;
-      const bottomOffset = cfg.styleTemplate === 3 ? 126 : 26;
+      const margin = Math.round(26 * scaleFactor);
+      const boxLeft = placeCardRight ? margin : w - qrBoxSize - margin;
+      const bottomOffset = cfg.styleTemplate === 3 ? Math.round(126 * fScale) : margin;
       const boxTop = h - totalH - bottomOffset;
 
       ctx.fillStyle = 'rgba(11, 19, 43, 0.92)';
-      drawRoundedRect(ctx, boxLeft, boxTop, qrBoxSize, totalH, 14);
+      drawRoundedRect(ctx, boxLeft, boxTop, qrBoxSize, totalH, 14 * scaleFactor);
       ctx.fill();
       ctx.strokeStyle = cfg.antiTamperMode ? '#34d399' : accentColor;
-      ctx.lineWidth = 1.8;
+      ctx.lineWidth = 1.8 * scaleFactor;
       ctx.stroke();
 
-      const pad = 8;
+      const pad = Math.round(8 * scaleFactor);
       const whiteSize = qrBoxSize - pad * 2;
       ctx.fillStyle = '#ffffff';
-      drawRoundedRect(ctx, boxLeft + pad, boxTop + pad, whiteSize, whiteSize, 6);
+      drawRoundedRect(ctx, boxLeft + pad, boxTop + pad, whiteSize, whiteSize, 6 * scaleFactor);
       ctx.fill();
 
-      const totalMods = modules + 8; // ISO 标准四周各 4 模块白色静区
+      const totalMods = modules + 8;
       const cell = whiteSize / totalMods;
       const sx = boxLeft + pad + cell * 4;
       const sy = boxTop + pad + cell * 4;
@@ -1397,18 +2147,33 @@ Page({
         }
       }
       ctx.fillStyle = cfg.antiTamperMode ? '#34d399' : accentColor;
-      ctx.font = 'bold 15px sans-serif';
+      ctx.font = `bold ${Math.round(15 * scaleFactor)}px sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(cfg.antiTamperMode ? '扫码验真跳高德' : '长按跳高德', boxLeft + qrBoxSize / 2, boxTop + qrBoxSize + 18);
+      ctx.fillText(
+        cfg.antiTamperMode ? '扫码验真跳高德' : '长按跳高德',
+        boxLeft + qrBoxSize / 2,
+        boxTop + qrBoxSize + Math.round(18 * scaleFactor)
+      );
     }
   },
 
   /**
-   * 相册内点击「✎ 无损改水印」：将该照片的配置载入定制面板，保存后基于原图无损重绘
+   * 问题4 & 问题5修复：
+   * - 开启防篡改的照片 (cur.cfg.antiTamperMode === true) 严禁修改
+   * - 未开启防篡改的照片允许修改一切内容（时间、日期、秒、经纬度、地图选点、高程、方位角、精度、地址、备注、样式）
    */
   openEditPhotoWatermark() {
     const cur = this.data.currentPhoto;
-    if (!cur) return;
+    if (!cur || !cur.cfg) return;
+    if (cur.cfg.antiTamperMode) {
+      wx.showModal({
+        title: '🛡 防篡改原片已锁定',
+        content: '该照片在拍摄时已开启「外业防篡改验真模式」，其真实 GPS 坐标、NTP 授时时间与 SHA-256 密码学签名已锁定，不允许在相册中修改。',
+        showCancel: false,
+        confirmText: '我知道了'
+      });
+      return;
+    }
     const c = cur.cfg;
     this.preEditBackup = {
       styleTemplate: this.data.styleTemplate,
@@ -1430,10 +2195,25 @@ Page({
       showAccuracy: this.data.showAccuracy,
       showAddress: this.data.showAddress,
       showEnv: this.data.showEnv,
-      showQr: this.data.showQr
+      showQr: this.data.showQr,
+      showMiniMap: this.data.showMiniMap,
+      bottomRight: this.data.bottomRight
     };
+
+    const datePart = c.dateOnlyStr || (c.fullTs ? c.fullTs.slice(0, 10) : this.data.dateOnlyStr);
+    const hmPart = c.hm || (c.fullTs ? c.fullTs.slice(11, 16) : this.data.timeHm);
+    const secPart = c.hms && c.hms.length >= 8 ? c.hms.slice(6, 8) : (c.fullTs && c.fullTs.length >= 19 ? c.fullTs.slice(17, 19) : '00');
+
     this.setData({
       editingPhotoId: cur.id,
+      editDatePart: datePart,
+      editTimeHm: hmPart,
+      editTimeSec: secPart,
+      editGcjLat: String(c.gcjLat),
+      editGcjLon: String(c.gcjLon),
+      editAltitude: String(c.altitude || '46.5'),
+      editAzimuthDeg: String(c.azimuthDeg || 0),
+      editAccuracy: String(c.accuracy || '2.4'),
       styleTemplate: c.styleTemplate || 0,
       coordSys: c.coordSys || 'WGS-84',
       useDms: Boolean(c.useDms),
@@ -1454,16 +2234,127 @@ Page({
       showAddress: Boolean(c.showAddress),
       showEnv: Boolean(c.showEnv),
       showQr: c.showQr !== false,
+      showMiniMap: c.showMiniMap !== false,
+      bottomRight: Boolean(c.bottomRight),
       showWmModal: true
     });
+  },
+
+  onEditDateChange(e) {
+    this.setData({ editDatePart: e.detail.value });
+  },
+
+  onEditTimeHmChange(e) {
+    this.setData({ editTimeHm: e.detail.value });
+  },
+
+  onInputEditSec(e) {
+    this.setData({ editTimeSec: e.detail.value });
+  },
+
+  onInputEditLat(e) {
+    this.setData({ editGcjLat: e.detail.value });
+  },
+
+  onInputEditLon(e) {
+    this.setData({ editGcjLon: e.detail.value });
+  },
+
+  onInputEditAlt(e) {
+    this.setData({ editAltitude: e.detail.value });
+  },
+
+  onInputEditAzimuth(e) {
+    this.setData({ editAzimuthDeg: e.detail.value });
+  },
+
+  onInputEditAcc(e) {
+    this.setData({ editAccuracy: e.detail.value });
+  },
+
+  chooseEditPhotoCoordOnMap() {
+    const curLat = parseFloat(this.data.editGcjLat) || this.data.gcjLat;
+    const curLon = parseFloat(this.data.editGcjLon) || this.data.gcjLon;
+    wx.chooseLocation({
+      latitude: curLat,
+      longitude: curLon,
+      success: res => {
+        const gcjLat = Number(res.latitude.toFixed(6));
+        const gcjLon = Number(res.longitude.toFixed(6));
+        const patch = {
+          editGcjLat: String(gcjLat),
+          editGcjLon: String(gcjLon)
+        };
+        if (res.name) patch.shortPoi = res.name;
+        if (res.address) {
+          patch.fullAddr = res.address;
+          patch.showAddress = true;
+        }
+        this.setData(patch);
+        wx.showToast({ title: '已填入所选位置与坐标', icon: 'none' });
+      },
+      fail: err => this.handleChooseLocationFail(err)
+    });
+  },
+
+  restoreEditOrigCoord() {
+    const cur = this.data.currentPhoto;
+    if (!cur || !cur.cfg) return;
+    const origLat = cur.cfg.origGcjLat !== undefined ? cur.cfg.origGcjLat : cur.cfg.gcjLat;
+    const origLon = cur.cfg.origGcjLon !== undefined ? cur.cfg.origGcjLon : cur.cfg.gcjLon;
+    this.setData({
+      editGcjLat: String(origLat),
+      editGcjLon: String(origLon)
+    });
+    wx.showToast({ title: '已恢复拍摄瞬间原始坐标', icon: 'none' });
   },
 
   applyWatermarkCustomization() {
     if (this.data.editingPhotoId) {
       const target = this.data.photos.find(p => p.id === this.data.editingPhotoId);
       if (target) {
+        if (target.cfg && target.cfg.antiTamperMode) {
+          wx.showToast({ title: '🛡 防篡改原片禁止修改', icon: 'none' });
+          return;
+        }
+        const rawLat = parseFloat(this.data.editGcjLat);
+        const rawLon = parseFloat(this.data.editGcjLon);
+        const newGcjLat = !isNaN(rawLat) ? Number(rawLat.toFixed(6)) : target.cfg.gcjLat;
+        const newGcjLon = !isNaN(rawLon) ? Number(rawLon.toFixed(6)) : target.cfg.gcjLon;
+        const newWgs = gcj02ToWgs84(newGcjLat, newGcjLon);
+
+        const dateStr = (this.data.editDatePart || target.cfg.dateOnlyStr || '2026-11-17').trim();
+        const hmStr = (this.data.editTimeHm || target.cfg.hm || '09:20').trim();
+        const secNum = Math.min(59, Math.max(0, parseInt(this.data.editTimeSec, 10) || 0));
+        const secStr = secNum < 10 ? '0' + secNum : '' + secNum;
+        const parsedDate = new Date(`${dateStr.replace(/-/g, '/')} ${hmStr}:${secStr}`);
+        const weeks = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+        const weekStr = isNaN(parsedDate.getTime()) ? (target.cfg.weekStr || '星期二') : weeks[parsedDate.getDay()];
+        const hmsStr = `${hmStr}:${secStr}`;
+        const fullTsStr = `${dateStr} ${hmsStr}`;
+        const dateWeekStr = `${dateStr} ${weekStr}`;
+
+        const azDeg = ((Math.round(Number(this.data.editAzimuthDeg) || 0) % 360) + 360) % 360;
+        const azText = formatAzimuthText(azDeg);
+
         const updatedCfg = {
           ...target.cfg,
+          antiTamperMode: false,
+          antiTamperHash: '',
+          gcjLat: newGcjLat,
+          gcjLon: newGcjLon,
+          wgsLat: newWgs.lat,
+          wgsLon: newWgs.lon,
+          dateOnlyStr: dateStr,
+          hm: hmStr,
+          hms: hmsStr,
+          weekStr,
+          dateWeek: dateWeekStr,
+          fullTs: fullTsStr,
+          altitude: String(this.data.editAltitude || target.cfg.altitude || '46.5'),
+          azimuthDeg: azDeg,
+          azimuthText: azText,
+          accuracy: String(this.data.editAccuracy || target.cfg.accuracy || '2.4'),
           styleTemplate: this.data.styleTemplate,
           customTitle: this.data.customTitle,
           coordSys: this.data.coordSys,
@@ -1483,14 +2374,10 @@ Page({
           showAccuracy: this.data.showAccuracy,
           showAddress: this.data.showAddress,
           showEnv: this.data.showEnv,
-          showQr: this.data.showQr
+          showQr: this.data.showQr,
+          showMiniMap: this.data.showMiniMap,
+          bottomRight: this.data.bottomRight
         };
-        updatedCfg.antiTamperHash = computeAntiTamperHash(
-          updatedCfg.gcjLat,
-          updatedCfg.gcjLon,
-          updatedCfg.fullTs,
-          updatedCfg.shortPoi
-        );
         this.compositeWatermarkToTempFile(target.rawPath, updatedCfg, target.id);
         return;
       }
@@ -1509,22 +2396,33 @@ Page({
     }
   },
 
+  /**
+   * 增加删除二次确认并清理本地存储物理文件
+   */
   deleteCurrentPhoto() {
     const cur = this.data.currentPhoto;
     if (!cur) return;
-    const remaining = this.data.photos.filter(p => p.id !== cur.id);
-    this.setData({
-      photos: remaining,
-      currentPhoto: remaining[0] || null,
-      latestPhotoPath: remaining[0] ? remaining[0].wmPath : ''
+    wx.showModal({
+      title: '确认删除照片',
+      content: '删除后将从应用相册中移除该照片且不可恢复，是否继续？',
+      confirmColor: '#ef4444',
+      confirmText: '确认删除',
+      success: res => {
+        if (!res.confirm) return;
+        this.safeUnlinkFile(cur.rawPath);
+        this.safeUnlinkFile(cur.wmPath);
+        const remaining = this.data.photos.filter(p => p.id !== cur.id);
+        this.setData({
+          photos: remaining,
+          currentPhoto: remaining[0] || null,
+          latestPhotoPath: remaining[0] ? remaining[0].wmPath : ''
+        });
+        this.persistPhotosList(remaining);
+        wx.showToast({ title: '已删除该照片', icon: 'none' });
+      }
     });
-    this.persistPhotosList(remaining);
-    wx.showToast({ title: '已删除该照片', icon: 'none' });
   },
 
-  /**
-   * 跳高德导航始终固定使用 GCJ-02 坐标，与水印显示的 WGS-84 / CGCS2000 彻底解耦，确保零偏差！
-   */
   openCurrentInWeChatMap() {
     wx.openLocation({
       latitude: Number(this.data.gcjLat),
@@ -1547,38 +2445,23 @@ Page({
     });
   },
 
-  sendRawImageToFriend() {
-    const cur = this.data.currentPhoto;
-    if (!cur) return;
-    if (wx.showShareImageMenu) {
-      wx.showShareImageMenu({ path: cur.wmPath });
-    } else {
-      wx.previewImage({ urls: [cur.wmPath] });
-    }
-  },
-
   saveCurrentToAlbum() {
     const cur = this.data.currentPhoto;
     if (!cur) return;
-    wx.saveImageToPhotosAlbum({
-      filePath: cur.wmPath,
-      success: () => wx.showToast({ title: '已存入系统相册', icon: 'success' }),
-      fail: () => {
-        wx.showModal({
-          title: '需要相册写入权限',
-          content: '请允许保存图片到手机系统相册',
-          confirmText: '去开启',
-          success: r => { if (r.confirm) wx.openSetting(); }
-        });
-      }
-    });
+    this.saveFileToSystemAlbumSafely(cur.wmPath, '已存入系统相册');
   },
 
   copyCurrentCoord() {
     const cur = this.data.currentPhoto;
     if (!cur) return;
-    const resolved = resolveDisplayCoordinates(cur.cfg.coordSys, cur.cfg.gcjLat, cur.cfg.gcjLon, cur.cfg.wgsLat, cur.cfg.wgsLon);
-    const txt = `${resolved.lon.toFixed(6)},${resolved.lat.toFixed(6)} [${resolved.tag}] (高德GCJ-02: ${cur.cfg.gcjLon.toFixed(6)},${cur.cfg.gcjLat.toFixed(6)})`;
+    const resolved = resolveDisplayCoordinates(
+      cur.cfg.coordSys,
+      cur.cfg.gcjLat,
+      cur.cfg.gcjLon,
+      cur.cfg.wgsLat,
+      cur.cfg.wgsLon
+    );
+    const txt = `${resolved.lon.toFixed(6)},${resolved.lat.toFixed(6)} [${resolved.tag}] (高德GCJ-02: ${Number(cur.cfg.gcjLon).toFixed(6)},${Number(cur.cfg.gcjLat).toFixed(6)})`;
     wx.setClipboardData({ data: txt });
   },
 
@@ -1617,11 +2500,14 @@ Page({
     if (this.data.editingPhotoId && this.preEditBackup) {
       const b = this.preEditBackup;
       this.preEditBackup = null;
-      this.setData({
-        ...b,
-        showWmModal: false,
-        editingPhotoId: null
-      }, () => this.updateCoordString());
+      this.setData(
+        {
+          ...b,
+          showWmModal: false,
+          editingPhotoId: null
+        },
+        () => this.updateCoordString()
+      );
       return;
     }
     this.setData({ showWmModal: false, editingPhotoId: null });
@@ -1629,16 +2515,23 @@ Page({
   onToggleQr(e) {
     this.setData({ showQr: e.detail.value }, () => this.persistUserConfig());
   },
+  onToggleMiniMap(e) {
+    this.setData({ showMiniMap: e.detail.value }, () => this.persistUserConfig());
+  },
+  selectMiniMapPos(e) {
+    const pos = Number(e.currentTarget.dataset.pos) || 0;
+    this.setData({ miniMapPosition: pos }, () => this.persistUserConfig());
+  },
+  onToggleGridLines(e) {
+    this.setData({ showGridLines: e.detail.value }, () => this.persistUserConfig());
+  },
+  onToggleBottomRight(e) {
+    this.setData({ bottomRight: e.detail.value }, () => this.persistUserConfig());
+  },
   onToggleShowAddress(e) {
     this.setData({ showAddress: e.detail.value }, () => this.persistUserConfig());
   },
 
-  /**
-   * 开启外业防篡改验真模式：
-   * 核心修复：若用户此前曾通过“地图选点”偏移过坐标 (isManualCoord === true)，
-   * 开启验真模式的瞬间强制将生效坐标回滚为硬件真实 GPS 坐标 (rawGcjLat / rawGcjLon)，
-   * 并立即重新请求一次高精度卫星定位，彻底杜绝“先地图选假点、再开验真洗白”的逻辑漏洞！
-   */
   onToggleAntiTamper(e) {
     const enabled = e.detail.value;
     const hadManualOffset = this.data.isManualCoord;
@@ -1672,36 +2565,69 @@ Page({
     this.setData({ showEnv: e.detail.value }, () => this.persistUserConfig());
   },
   onToggleAutoSave(e) {
-    this.setData({ autoSaveAlbum: e.detail.value }, () => this.persistUserConfig());
+    const enabled = e.detail.value;
+    this.setData({ autoSaveAlbum: enabled }, () => {
+      this.persistUserConfig();
+      if (enabled) this.preRequestAlbumPermissionSilently();
+    });
   },
+
+  // 防抖输入处理，消除打字时频繁 setData 造成的光标闪烁与卡顿
   onInputTitle(e) {
-    this.setData({ customTitle: e.detail.value });
+    const val = e.detail.value;
+    if (this._titleInputTimer) clearTimeout(this._titleInputTimer);
+    this._titleInputTimer = setTimeout(() => {
+      this.setData({ customTitle: val });
+    }, 120);
   },
   onInputPoi(e) {
-    this.setData({ shortPoi: e.detail.value, hasCustomPoi: true }, () => this.updateCoordString());
+    const val = e.detail.value;
+    if (this._poiInputTimer) clearTimeout(this._poiInputTimer);
+    this._poiInputTimer = setTimeout(() => {
+      this.setData({ shortPoi: val, hasCustomPoi: true }, () => this.updateCoordString());
+    }, 120);
   },
   onInputFullAddr(e) {
-    this.setData({ fullAddr: e.detail.value, hasCustomPoi: true });
+    const val = e.detail.value;
+    if (this._addrInputTimer) clearTimeout(this._addrInputTimer);
+    this._addrInputTimer = setTimeout(() => {
+      this.setData({ fullAddr: val, hasCustomPoi: true });
+    }, 120);
   },
   onInputNote(e) {
-    this.setData({ note: e.detail.value });
+    const val = e.detail.value;
+    if (this._noteInputTimer) clearTimeout(this._noteInputTimer);
+    this._noteInputTimer = setTimeout(() => {
+      this.setData({ note: val }, () => this.updateCoordString());
+    }, 120);
   },
+
   onCameraError() {
     wx.showToast({ title: '请授予小程序相机权限', icon: 'none' });
   },
   noop() {},
 
+  /**
+   * 修复伪造防伪签名漏洞：仅当照片或当前相机真正开启 antiTamperMode 时才在分享路径中携带 sig 参数
+   */
   onShareAppMessage() {
     const cur = this.data.currentPhoto;
+    const isAnti = cur ? Boolean(cur.cfg.antiTamperMode) : Boolean(this.data.antiTamperMode);
     const lat = cur ? cur.cfg.gcjLat : this.data.gcjLat;
     const lon = cur ? cur.cfg.gcjLon : this.data.gcjLon;
-    const poi = encodeURIComponent(cur ? cur.cfg.shortPoi : (this.data.shortPoi || '实拍点位'));
+    const poi = encodeURIComponent(cur ? cur.cfg.shortPoi : this.data.shortPoi || '实拍点位');
     const ts = encodeURIComponent(cur ? cur.cfg.fullTs : this.data.fullTs);
-    const sig = cur ? (cur.cfg.antiTamperHash || '').slice(0, 12) : this.data.liveAntiTamperShort;
+    const note = encodeURIComponent(cur ? cur.cfg.note || '' : this.data.note || '');
+    const sig = isAnti
+      ? cur
+        ? (cur.cfg.antiTamperHash || '').slice(0, 12)
+        : this.data.liveAntiTamperShort
+      : '';
     const imgUrl = cur ? cur.wmPath : '';
+    const sigParam = sig ? `&sig=${sig}&note=${note}` : '';
     return {
       title: `📍 实拍定位：${decodeURIComponent(poi)} (${lat}°N, ${lon}°E)`,
-      path: `/pages/index/index?act=jump&lat=${lat}&lon=${lon}&poi=${poi}&ts=${ts}&sig=${sig}`,
+      path: `/pages/index/index?act=jump&lat=${lat}&lon=${lon}&poi=${poi}&ts=${ts}${sigParam}`,
       imageUrl: imgUrl
     };
   }
