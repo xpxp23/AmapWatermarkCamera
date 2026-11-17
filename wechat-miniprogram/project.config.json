@@ -1,7 +1,16 @@
 {
   "description": "极速经纬水印相机 v6.0.0 · 高德GCJ-02零偏差微信小程序版",
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      {
+        "type": "file",
+        "value": "images/logo_*.png"
+      },
+      {
+        "type": "file",
+        "value": "images/*.svg"
+      }
+    ],
     "include": []
   },
   "setting": {
@@ -29,7 +38,7 @@
   },
   "compileType": "miniprogram",
   "libVersion": "3.3.0",
-  "appid": "wx83c319b451bc7b0d",
+  "appid": "touristappid",
   "projectname": "AmapWatermarkCamera-MiniProgram",
   "condition": {},
   "simulatorPluginLibVersion": {},
