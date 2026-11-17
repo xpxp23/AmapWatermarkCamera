@@ -13,9 +13,7 @@
   "requiredPrivateInfos": [
     "getLocation",
     "chooseLocation",
-    "choosePoi",
-    "getFuzzyLocation",
-    "chooseAddress"
+    "choosePoi"
   ],
   "permission": {
     "scope.userLocation": {

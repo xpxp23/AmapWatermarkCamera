@@ -461,30 +461,12 @@ Page({
         this.recordHardwareGpsFix(res.latitude, res.longitude, res.accuracy, res.altitude, Boolean(forceOverwriteManual));
       },
       fail: () => {
-        // 当高精度单次定位失败或被省电策略拦截时，无缝尝试使用已开通的模糊定位兜底
-        if (wx.getFuzzyLocation) {
-          wx.getFuzzyLocation({
-            type: 'gcj02',
-            success: fRes => {
-              this.recordHardwareGpsFix(fRes.latitude, fRes.longitude, 100.0, this.data.altitude, Boolean(forceOverwriteManual));
-            },
-            fail: () => {
-              const smart = inferSmartPoiFromCoords(this.data.gcjLat, this.data.gcjLon);
-              this.setData({
-                shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : '实拍点位',
-                fullAddr: this.data.hasCustomPoi ? this.data.fullAddr : smart.fullAddr,
-                nearbyPois: smart.nearbyPois
-              }, () => this.updateCoordString());
-            }
-          });
-        } else {
-          const smart = inferSmartPoiFromCoords(this.data.gcjLat, this.data.gcjLon);
-          this.setData({
-            shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : '实拍点位',
-            fullAddr: this.data.hasCustomPoi ? this.data.fullAddr : smart.fullAddr,
-            nearbyPois: smart.nearbyPois
-          }, () => this.updateCoordString());
-        }
+        const smart = inferSmartPoiFromCoords(this.data.gcjLat, this.data.gcjLon);
+        this.setData({
+          shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : '实拍点位',
+          fullAddr: this.data.hasCustomPoi ? this.data.fullAddr : smart.fullAddr,
+          nearbyPois: smart.nearbyPois
+        }, () => this.updateCoordString());
       }
     });
   },
