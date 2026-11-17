@@ -29,9 +29,10 @@
   },
   "compileType": "miniprogram",
   "libVersion": "3.3.0",
-  "appid": "wx806d83c92c3db27d",
+  "appid": "wx83c319b451bc7b0d",
   "projectname": "AmapWatermarkCamera-MiniProgram",
   "condition": {},
   "simulatorPluginLibVersion": {},
-  "editorSetting": {}
+  "editorSetting": {},
+  "isGameTourist": false
 }
