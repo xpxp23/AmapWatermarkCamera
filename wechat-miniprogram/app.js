@@ -1,6 +1,6 @@
 App({
   globalData: {
-    version: '6.0.0',
+    version: '7.1.0',
     sharedLocationPayload: null
   },
   onLaunch(options) {

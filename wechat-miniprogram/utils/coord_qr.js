@@ -1,6 +1,6 @@
 /**
- * 极速经纬水印相机 v7.0.0 · 微信小程序高德 GCJ-02 / WGS-84 双向纠偏、
- * ISO/IEC 18004 V1-V9 全容量离线二维码引擎、SHA-256 防篡改验真与高德 Mini-Map 矢量测绘渲染引擎
+ * 极速经纬水印相机 v7.1.0 · 微信小程序三坐标系（默认 WGS-84 / 国标 CGCS2000 / 高德 GCJ-02）双向解耦引擎、
+ * ISO/IEC 18004 V1-V9 全容量离线二维码引擎与 FIPS 180-4 SHA-256 外业防篡改验真引擎
  */
 
 const PI = Math.PI;
@@ -60,6 +60,29 @@ function gcj02ToWgs84(gcjLat, gcjLon) {
   return {
     lat: Number(wgsLat.toFixed(6)),
     lon: Number(wgsLon.toFixed(6))
+  };
+}
+
+/**
+ * 根据水印目标坐标系 (WGS-84 / CGCS2000 / GCJ-02) 返回用于水印显示的经纬度
+ * 注意：CGCS2000 与 WGS-84 在米级/分米级外业导航定位精度下同属地心大地坐标系（无 GCJ-02 加密偏移），
+ * 而所有高德跳转、二维码与微信地图导航始终固定使用底层的 GCJ-02 坐标，确保 100% 零偏差！
+ */
+function resolveDisplayCoordinates(coordSys, gcjLat, gcjLon, wgsLat, wgsLon) {
+  if (coordSys === 'GCJ-02') {
+    return {
+      lat: Number(Number(gcjLat).toFixed(6)),
+      lon: Number(Number(gcjLon).toFixed(6)),
+      tag: 'GCJ-02'
+    };
+  }
+  const cleanWgs = (wgsLat !== undefined && wgsLon !== undefined)
+    ? { lat: Number(Number(wgsLat).toFixed(6)), lon: Number(Number(wgsLon).toFixed(6)) }
+    : gcj02ToWgs84(gcjLat, gcjLon);
+  return {
+    lat: cleanWgs.lat,
+    lon: cleanWgs.lon,
+    tag: coordSys === 'CGCS2000' ? 'CGCS2000' : 'WGS-84'
   };
 }
 
@@ -187,7 +210,7 @@ function sha256Hex(message) {
 
 /**
  * 计算外业防篡改签名摘要 (16位大写 SHA-256 截断验真码)
- * 绑定：GCJ-02 6位经纬度 + 秒级时间戳 + 地点简称 + 授时状态
+ * 绑定：真实 GCJ-02 6位经纬度 + 秒级时间戳 + 地点简称
  */
 function computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi) {
   const latStr = Number(gcjLat || 0).toFixed(6);
@@ -206,9 +229,6 @@ function verifyAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, signature) {
 
 /**
  * ISO/IEC 18004 QR Code Matrix Engine (Version 1 ~ Version 9, Level L)
- * 修复：
- * 1. Format Information 0x77C4 严格按 MSB->LSB (14 - i) 顺序写入，100% 兼容微信/高德/OpenCV 扫码
- * 2. 扩充支持 Version 1 ~ 9 (最高容纳 229 字节 UTF-8)，支持双 Block 交织与 V7-V9 版本信息块
  */
 const QR_SPECS = [
   { ver: 1, size: 21, dataBytes: 19, eccBytes: 7, numBlocks: 1, align: [] },
@@ -395,7 +415,6 @@ function encodeQrMatrix(text) {
     }
   }
 
-  // ISO/IEC 18004 Format Information (Level L = 01, Mask 0 = 000 -> 0x77C4, MSB bit 14 placed first)
   const fmt = 0x77c4;
   const bit = i => ((fmt >>> (14 - i)) & 1) !== 0;
   for (let i = 0; i <= 5; i++) mat[8][i] = bit(i);
@@ -409,6 +428,10 @@ function encodeQrMatrix(text) {
   return mat;
 }
 
+/**
+ * 构建高德零偏差跳转 URL（无论水印显示的是 WGS-84、CGCS2000 还是 GCJ-02，
+ * 二维码和高德跳转永远固定使用底层的 GCJ-02 坐标，确保高德地图定位丝毫不差！）
+ */
 function buildAmapJumpUrl(gcjLat, gcjLon, shortPoi, antiTamperOpts) {
   const latStr = Number(gcjLat).toFixed(6);
   const lonStr = Number(gcjLon).toFixed(6);
@@ -447,7 +470,7 @@ function parseLocationPayload(rawInput) {
   if (posMatch) {
     const lon = parseFloat(posMatch[1]);
     const lat = parseFloat(posMatch[2]);
-    const poi = extractParam(origStr, 'name') || extractParam(decodedStr, 'name') || '好友水印实拍点';
+    const poi = extractParam(origStr, 'name') || extractParam(decodedStr, 'name') || '实拍点位';
     const ts = extractParam(origStr, 'ts') || extractParam(decodedStr, 'ts');
     const sig = extractParam(origStr, 'sig') || extractParam(decodedStr, 'sig');
     const ntp = (extractParam(origStr, 'ntp') || extractParam(decodedStr, 'ntp')) === '1';
@@ -474,7 +497,7 @@ function parseLocationPayload(rawInput) {
   if (latMatch && lonMatch) {
     const lat = parseFloat(latMatch[1]);
     const lon = parseFloat(lonMatch[1]);
-    const poi = extractParam(origStr, 'poi') || extractParam(decodedStr, 'poi') || '好友水印实拍点';
+    const poi = extractParam(origStr, 'poi') || extractParam(decodedStr, 'poi') || '实拍点位';
     const ts = extractParam(origStr, 'ts') || extractParam(decodedStr, 'ts');
     const sig = extractParam(origStr, 'sig') || extractParam(decodedStr, 'sig');
     if (!isNaN(lat) && !isNaN(lon)) {
@@ -504,7 +527,7 @@ function parseLocationPayload(rawInput) {
     return {
       gcjLat: Number(gcjLat.toFixed(6)),
       gcjLon: Number(gcjLon.toFixed(6)),
-      shortPoi: '扫码识别点位',
+      shortPoi: '实拍点位',
       hasAntiTamper: false,
       verified: false
     };
@@ -513,176 +536,19 @@ function parseLocationPayload(rawInput) {
 }
 
 /**
- * 160x160px 高德高清矢量缩略地图（Mini-Map 画中画）绘制引擎
- * 基于当前 GCJ-02 经纬度确定性生成周边路网、水系/绿地斑块、测绘十字丝、电子罗盘朝向扇形与中心高德红针
- */
-function drawVectorMiniMap(ctx, boxX, boxY, boxSize, gcjLat, gcjLon, azimuthDeg, shortPoi, scaleFactor) {
-  const s = scaleFactor || 1;
-  ctx.save();
-
-  // 1. 裁剪圆角地图视口
-  const r = 14 * s;
-  ctx.beginPath();
-  if (ctx.roundRect) {
-    ctx.roundRect(boxX, boxY, boxSize, boxSize, r);
-  } else {
-    ctx.rect(boxX, boxY, boxSize, boxSize);
-  }
-  ctx.clip();
-
-  // 2. 深色高德极夜测绘底图填充
-  ctx.fillStyle = '#0c1629';
-  ctx.fillRect(boxX, boxY, boxSize, boxSize);
-
-  // 根据经纬度小数位生成确定性的周边路网与地形偏移，使点位移动时路网平滑位移
-  const latSeed = Math.floor(Math.abs(gcjLat * 10000)) % 100;
-  const lonSeed = Math.floor(Math.abs(gcjLon * 10000)) % 100;
-  const shiftX = ((lonSeed - 50) / 100) * (boxSize * 0.22);
-  const shiftY = ((latSeed - 50) / 100) * (boxSize * 0.22);
-
-  // 3. 绿地与水系斑块
-  ctx.fillStyle = 'rgba(16, 185, 129, 0.13)';
-  ctx.fillRect(boxX + 8 * s + shiftX, boxY + 10 * s + shiftY, boxSize * 0.34, boxSize * 0.28);
-  ctx.fillStyle = 'rgba(14, 165, 233, 0.16)';
-  ctx.beginPath();
-  ctx.moveTo(boxX, boxY + boxSize * 0.72 + shiftY * 0.5);
-  ctx.quadraticCurveTo(
-    boxX + boxSize * 0.48,
-    boxY + boxSize * 0.56 + shiftX * 0.4,
-    boxX + boxSize,
-    boxY + boxSize * 0.82
-  );
-  ctx.lineTo(boxX + boxSize, boxY + boxSize);
-  ctx.lineTo(boxX, boxY + boxSize);
-  ctx.closePath();
-  ctx.fill();
-
-  // 4. 经纬测绘网格线
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)';
-  ctx.lineWidth = 1 * s;
-  const gridStep = boxSize / 4;
-  for (let i = 1; i < 4; i++) {
-    ctx.beginPath();
-    ctx.moveTo(boxX + i * gridStep, boxY);
-    ctx.lineTo(boxX + i * gridStep, boxY + boxSize);
-    ctx.moveTo(boxX, boxY + i * gridStep);
-    ctx.lineTo(boxX + boxSize, boxY + i * gridStep);
-    ctx.stroke();
-  }
-
-  // 5. 周边次干道与主干道矢量路网
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
-  ctx.lineWidth = 3.5 * s;
-  ctx.beginPath();
-  ctx.moveTo(boxX, boxY + boxSize * 0.32 + shiftY);
-  ctx.lineTo(boxX + boxSize, boxY + boxSize * 0.27 + shiftY);
-  ctx.moveTo(boxX + boxSize * 0.28 + shiftX, boxY);
-  ctx.lineTo(boxX + boxSize * 0.33 + shiftX, boxY + boxSize);
-  ctx.moveTo(boxX + boxSize * 0.74 + shiftX * 0.6, boxY);
-  ctx.lineTo(boxX + boxSize * 0.68 + shiftX * 0.6, boxY + boxSize);
-  ctx.stroke();
-
-  // 城市主干道（琥珀金高德道路高亮）
-  ctx.strokeStyle = 'rgba(245, 158, 11, 0.48)';
-  ctx.lineWidth = 5 * s;
-  ctx.beginPath();
-  ctx.moveTo(boxX, boxY + boxSize * 0.56 + shiftY * 0.7);
-  ctx.lineTo(boxX + boxSize, boxY + boxSize * 0.48 + shiftY * 0.7);
-  ctx.moveTo(boxX + boxSize * 0.52 + shiftX * 0.7, boxY);
-  ctx.lineTo(boxX + boxSize * 0.47 + shiftX * 0.7, boxY + boxSize);
-  ctx.stroke();
-
-  const cx = boxX + boxSize / 2;
-  const cy = boxY + boxSize / 2;
-
-  // 6. 雷达精度圈
-  ctx.fillStyle = 'rgba(56, 189, 248, 0.12)';
-  ctx.beginPath();
-  ctx.arc(cx, cy, boxSize * 0.24, 0, PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
-  ctx.lineWidth = 1.2 * s;
-  ctx.stroke();
-
-  // 7. 电子罗盘朝向扇形 (Azimuth View Cone)
-  const rad = ((Number(azimuthDeg || 0) - 90) * PI) / 180;
-  const coneSpread = (28 * PI) / 180;
-  const coneRadius = boxSize * 0.36;
-  ctx.fillStyle = 'rgba(56, 189, 248, 0.28)';
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.arc(cx, cy, coneRadius, rad - coneSpread, rad + coneSpread);
-  ctx.closePath();
-  ctx.fill();
-
-  // 8. 中心高德定位红针 (Pin Drop)
-  ctx.strokeStyle = '#dc2626';
-  ctx.lineWidth = 2.6 * s;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - 8 * s);
-  ctx.lineTo(cx, cy + 2 * s);
-  ctx.stroke();
-
-  ctx.fillStyle = '#ef4444';
-  ctx.beginPath();
-  ctx.arc(cx, cy - 10 * s, 6.5 * s, 0, PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1.5 * s;
-  ctx.stroke();
-
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.arc(cx - 1.5 * s, cy - 11.5 * s, 1.8 * s, 0, PI * 2);
-  ctx.fill();
-
-  // 9. 左上角指北针 N 角标 & 底部点位微缩标签
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
-  ctx.fillRect(boxX + 6 * s, boxY + 6 * s, 36 * s, 18 * s);
-  ctx.fillStyle = '#38bdf8';
-  ctx.font = `bold ${Math.round(11 * s)}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.fillText('▲N', boxX + 24 * s, boxY + 19 * s);
-
-  ctx.fillStyle = 'rgba(11, 19, 43, 0.86)';
-  ctx.fillRect(boxX, boxY + boxSize - 24 * s, boxSize, 24 * s);
-  ctx.fillStyle = '#e2e8f0';
-  ctx.font = `bold ${Math.round(11.5 * s)}px sans-serif`;
-  ctx.textAlign = 'center';
-  const shortLabel = String(shortPoi || '高德测绘点').slice(0, 8);
-  ctx.fillText('📍' + shortLabel, cx, boxY + boxSize - 8 * s);
-
-  ctx.restore();
-
-  // 外边框描边
-  ctx.save();
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
-  ctx.lineWidth = 1.8 * s;
-  ctx.beginPath();
-  if (ctx.roundRect) {
-    ctx.roundRect(boxX, boxY, boxSize, boxSize, r);
-  } else {
-    ctx.rect(boxX, boxY, boxSize, boxSize);
-  }
-  ctx.stroke();
-  ctx.restore();
-}
-
-/**
- * 内置全国高频城市与地标离线网格索引 + 智能逆地理推演
- * 当未配置外部 Key 或处于无网/弱网环境时，根据真实 GCJ-02 坐标自动推演省市区与片区名，彻底告别写死“小庄村”
+ * 简洁干净的默认点位与周边候选词生成（彻底去除啰嗦的括号坐标后缀，默认统一为“实拍点位”）
  */
 const CITY_ANCHORS = [
-  { name: '北京市中心区', city: '北京市东城区', lat: 39.908823, lon: 116.397470 },
-  { name: '上海陆家嘴片区', city: '上海市浦东新区', lat: 31.239702, lon: 121.499763 },
+  { name: '北京中心区', city: '北京市朝阳区', lat: 39.908823, lon: 116.397470 },
+  { name: '上海陆家嘴', city: '上海市浦东新区', lat: 31.239702, lon: 121.499763 },
   { name: '广州珠江新城', city: '广东省广州市天河区', lat: 23.119293, lon: 113.321206 },
   { name: '深圳南山科技园', city: '广东省深圳市南山区', lat: 22.540503, lon: 113.953412 },
-  { name: '杭州西湖滨江区', city: '浙江省杭州市西湖区', lat: 30.259244, lon: 120.219375 },
+  { name: '杭州西湖滨江', city: '浙江省杭州市西湖区', lat: 30.259244, lon: 120.219375 },
   { name: '成都天府新区', city: '四川省成都市武侯区', lat: 30.657420, lon: 104.065840 },
   { name: '武汉光谷片区', city: '湖北省武汉市洪山区', lat: 30.505600, lon: 114.408600 },
   { name: '南京河西新城', city: '江苏省南京市建邺区', lat: 32.003600, lon: 118.732500 },
   { name: '西安高新片区', city: '陕西省西安市雁塔区', lat: 34.218600, lon: 108.889100 },
-  { name: '重庆江北嘴片区', city: '重庆市江北区', lat: 29.571000, lon: 106.574000 }
+  { name: '重庆江北嘴', city: '重庆市江北区', lat: 29.571000, lon: 106.574000 }
 ];
 
 function inferSmartPoiFromCoords(gcjLat, gcjLon) {
@@ -698,27 +564,28 @@ function inferSmartPoiFromCoords(gcjLat, gcjLon) {
       nearest = c;
     }
   }
-  const gridCode = `${Math.abs(lat).toFixed(3)}°N·${Math.abs(lon).toFixed(3)}°E`;
   if (nearest && minDegSq < 0.25) {
     return {
-      shortPoi: `${nearest.name}实拍点`,
-      fullAddr: `${nearest.city} · 高德GCJ-02精准网格 (${gridCode})`,
+      shortPoi: '实拍点位',
+      fullAddr: nearest.city,
       nearbyPois: [
-        `${nearest.name}1号点`,
-        `${nearest.city}巡检点`,
-        `现场核验点(${lat.toFixed(4)}°N)`,
-        '主干道施工段',
+        '实拍点位',
+        nearest.name,
+        '1号巡检点',
+        '施工现场',
+        '隐蔽工程核验点',
         '外业测绘基准桩'
       ]
     };
   }
   return {
-    shortPoi: `实拍点位(${lat.toFixed(4)}°N)`,
-    fullAddr: `高德GCJ-02精准坐标 ${lat.toFixed(6)}°N, ${lon.toFixed(6)}°E`,
+    shortPoi: '实拍点位',
+    fullAddr: '',
     nearbyPois: [
-      `实拍点(${lat.toFixed(4)}°N)`,
-      '1号巡检点位',
-      '工程隐蔽验收点',
+      '实拍点位',
+      '1号巡检点',
+      '施工现场',
+      '隐蔽工程验收点',
       '测绘控制点A',
       '外业打卡现场'
     ]
@@ -728,6 +595,7 @@ function inferSmartPoiFromCoords(gcjLat, gcjLon) {
 module.exports = {
   wgs84ToGcj02,
   gcj02ToWgs84,
+  resolveDisplayCoordinates,
   formatCoords,
   formatAzimuthText,
   sha256Hex,
@@ -736,6 +604,5 @@ module.exports = {
   encodeQrMatrix,
   buildAmapJumpUrl,
   parseLocationPayload,
-  drawVectorMiniMap,
   inferSmartPoiFromCoords
 };

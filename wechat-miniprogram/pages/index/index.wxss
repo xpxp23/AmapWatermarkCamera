@@ -7,11 +7,11 @@
   justify-content: space-between;
 }
 
-/* 1. 顶部工具栏：左置紧凑排列，预留右侧 200rpx 避让微信官方胶囊按钮 */
+/* 1. 顶部工具栏：左置紧凑排列，严格预留右侧 206rpx 避让微信官方胶囊按钮 */
 .top-bar {
   background-color: #000000;
-  padding-left: 28rpx;
-  padding-right: 210rpx;
+  padding-left: 26rpx;
+  padding-right: 206rpx;
   padding-bottom: 14rpx;
   display: flex;
   align-items: center;
@@ -78,12 +78,13 @@
   color: #64748b;
 }
 
+/* 顶部 GPS 状态胶囊 */
 .gps-pill {
   position: absolute;
-  top: 24rpx;
-  left: 24rpx;
-  background-color: rgba(11, 19, 43, 0.84);
-  border: 1px solid rgba(56, 189, 248, 0.42);
+  top: 22rpx;
+  left: 22rpx;
+  background-color: rgba(11, 19, 43, 0.85);
+  border: 1px solid rgba(56, 189, 248, 0.45);
   border-radius: 32rpx;
   padding: 10rpx 22rpx;
   display: flex;
@@ -103,57 +104,38 @@
   background-color: #fbbf24;
 }
 
+.gps-dot.manual {
+  background-color: #f59e0b;
+}
+
 .gps-pill-text {
   font-size: 21rpx;
   color: #ffffff;
 }
 
-/* 左上角独立悬浮 Mini-Map 预览卡 */
-.floating-minimap-card {
+/* 左右滑动切换模板悬浮提示 */
+.swipe-toast-pill {
   position: absolute;
-  top: 94rpx;
-  left: 24rpx;
-  width: 180rpx;
-  height: 180rpx;
-  background-color: rgba(12, 22, 41, 0.90);
-  border: 2rpx solid rgba(56, 189, 248, 0.65);
-  border-radius: 20rpx;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  overflow: hidden;
+  top: 86rpx;
+  left: 22rpx;
+  background-color: rgba(15, 23, 42, 0.90);
+  border: 1px solid #38bdf8;
+  border-radius: 26rpx;
+  padding: 8rpx 20rpx;
 }
 
-.minimap-north-tag {
-  font-size: 18rpx;
+.swipe-toast-txt {
+  font-size: 21rpx;
+  font-weight: bold;
   color: #38bdf8;
-  padding: 8rpx 12rpx;
-  background-color: rgba(15, 23, 42, 0.78);
-}
-
-.minimap-grid-center {
-  font-size: 36rpx;
-  text-align: center;
-  color: #ef4444;
-}
-
-.minimap-poi-bar {
-  font-size: 18rpx;
-  color: #ffffff;
-  background-color: rgba(11, 19, 43, 0.90);
-  text-align: center;
-  padding: 6rpx 8rpx;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 好友分享位置 & 防伪核验横幅 */
 .shared-jump-banner {
   position: absolute;
-  top: 96rpx;
-  left: 24rpx;
-  right: 24rpx;
+  top: 94rpx;
+  left: 22rpx;
+  right: 22rpx;
   background-color: rgba(15, 23, 42, 0.95);
   border: 2rpx solid #38bdf8;
   border-radius: 24rpx;
@@ -217,7 +199,7 @@
   border-radius: 16rpx;
 }
 
-/* 实时水印容器 */
+/* ==================== 模板 0/1/2/4 悬浮水印容器 ==================== */
 .live-wm-container {
   position: absolute;
   left: 20rpx;
@@ -229,7 +211,7 @@
   justify-content: space-between;
 }
 
-/* 模板 0: 经典大字时间 (含防碰撞安全右边距) */
+/* 模板 0: 经典大字时间 */
 .wm-tpl-0 {
   flex: 1;
   display: flex;
@@ -243,7 +225,7 @@
 }
 
 .wm-big-time {
-  font-size: 82rpx;
+  font-size: 80rpx;
   font-weight: 300;
   color: #ffffff;
 }
@@ -261,13 +243,24 @@
   font-size: 24rpx;
   color: #ffffff;
   margin-right: 12rpx;
+  flex-shrink: 0;
 }
 
 .wm-poi-text {
   font-size: 24rpx;
   color: #ffffff;
   font-weight: bold;
-  max-width: 280rpx;
+  max-width: 300rpx;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wm-addr-line {
+  margin-top: 6rpx;
+  font-size: 20rpx;
+  color: #cbd5e1;
+  max-width: 96%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -275,25 +268,34 @@
 
 .wm-coord-pill {
   margin-top: 10rpx;
-  background-color: rgba(11, 19, 43, 0.82);
-  border: 1px solid rgba(56, 189, 248, 0.45);
+  background-color: rgba(11, 19, 43, 0.84);
+  border: 1px solid rgba(56, 189, 248, 0.50);
   border-radius: 28rpx;
-  padding: 6rpx 20rpx;
+  padding: 6rpx 18rpx;
   font-size: 20rpx;
   color: #38bdf8;
+  max-width: 98%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wm-coord-pill.dms-compact {
+  font-size: 17.5rpx;
+  padding: 6rpx 14rpx;
 }
 
 .wm-env-text {
   margin-top: 6rpx;
-  font-size: 20rpx;
+  font-size: 19.5rpx;
   color: #a7f3d0;
 }
 
 .wm-note-text {
   margin-top: 6rpx;
-  font-size: 21rpx;
+  font-size: 20.5rpx;
   color: #fde68a;
-  max-width: 520rpx;
+  max-width: 96%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -301,7 +303,7 @@
 
 .wm-verify-line {
   margin-top: 6rpx;
-  font-size: 19rpx;
+  font-size: 18.5rpx;
   color: #34d399;
 }
 
@@ -311,7 +313,7 @@
   background-color: rgba(11, 19, 43, 0.85);
   border: 1px solid rgba(56, 189, 248, 0.48);
   border-radius: 20rpx;
-  padding: 18rpx;
+  padding: 16rpx 18rpx;
   margin-right: 14rpx;
   overflow: hidden;
 }
@@ -320,14 +322,14 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  margin-bottom: 10rpx;
+  margin-bottom: 8rpx;
   padding-bottom: 8rpx;
   border-bottom: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .wm-accent-bar {
   width: 8rpx;
-  height: 28rpx;
+  height: 26rpx;
   background-color: #38bdf8;
   border-radius: 4rpx;
   margin-right: 12rpx;
@@ -335,7 +337,7 @@
 
 .wm-card-header {
   flex: 1;
-  font-size: 25rpx;
+  font-size: 24rpx;
   font-weight: bold;
   color: #ffffff;
   white-space: nowrap;
@@ -346,9 +348,10 @@
 .wm-card-tag {
   font-size: 18rpx;
   color: #38bdf8;
-  background-color: rgba(56, 189, 248, 0.18);
-  padding: 4rpx 12rpx;
+  background-color: rgba(56, 189, 248, 0.16);
+  padding: 4rpx 10rpx;
   border-radius: 8rpx;
+  margin-left: 8rpx;
 }
 
 .wm-card-tag.verify {
@@ -356,70 +359,27 @@
   background-color: rgba(16, 185, 129, 0.22);
 }
 
-.wm-card-body-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-}
-
-.wm-inline-minimap {
-  width: 128rpx;
-  height: 128rpx;
-  background-color: #0c1629;
-  border: 1px solid rgba(56, 189, 248, 0.55);
-  border-radius: 14rpx;
-  margin-right: 14rpx;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  overflow: hidden;
-}
-
-.wm-inline-minimap.small {
-  width: 106rpx;
-  height: 106rpx;
-  margin: 8rpx;
-}
-
-.minimap-mini-n {
-  font-size: 16rpx;
-  color: #38bdf8;
-  padding: 4rpx 8rpx;
-}
-
-.minimap-mini-pin {
-  font-size: 28rpx;
-  text-align: center;
-  color: #ef4444;
-}
-
-.minimap-mini-lbl {
-  font-size: 16rpx;
-  color: #e2e8f0;
-  background-color: rgba(15, 23, 42, 0.88);
-  text-align: center;
-  padding: 4rpx;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .wm-card-lines {
-  flex: 1;
+  width: 100%;
   overflow: hidden;
 }
 
 .wm-card-row {
   font-size: 20rpx;
-  color: #e2e8f0;
+  color: #ffffff;
   margin-top: 6rpx;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.wm-card-row.sky {
-  color: #38bdf8;
+.wm-card-row.dms-compact {
+  font-size: 18rpx;
+}
+
+.wm-card-row.muted {
+  color: #cbd5e1;
+  font-size: 19rpx;
 }
 
 .wm-card-row.emerald {
@@ -441,41 +401,45 @@
 }
 
 .wm-grid-top {
-  background-color: rgba(56, 189, 248, 0.22);
+  background-color: rgba(56, 189, 248, 0.20);
   color: #38bdf8;
-  font-size: 21rpx;
+  font-size: 20rpx;
   font-weight: bold;
-  padding: 12rpx 16rpx;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.30);
+  padding: 10rpx 14rpx;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.wm-grid-top.dms-compact {
+  font-size: 17.5rpx;
 }
 
 .wm-grid-cells {
   display: flex;
   flex-direction: row;
   align-items: center;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.30);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
 }
 
 .wm-grid-cell {
   flex: 1;
-  padding: 12rpx 14rpx;
+  padding: 10rpx 14rpx;
   overflow: hidden;
 }
 
 .wm-grid-cell.left {
-  border-right: 1px solid rgba(148, 163, 184, 0.30);
+  border-right: 1px solid rgba(148, 163, 184, 0.28);
 }
 
 .wm-grid-label {
-  font-size: 18rpx;
+  font-size: 17.5rpx;
   color: #94a3b8;
 }
 
 .wm-grid-val {
-  font-size: 22rpx;
+  font-size: 21rpx;
   font-weight: bold;
   color: #ffffff;
   margin-top: 4rpx;
@@ -484,78 +448,108 @@
   text-overflow: ellipsis;
 }
 
-.wm-grid-footer {
-  padding: 10rpx 16rpx;
+.wm-grid-val.mono {
   font-size: 19rpx;
+}
+
+.wm-grid-footer {
+  padding: 8rpx 14rpx;
+  font-size: 18.5rpx;
   color: #fde68a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* 模板 3: 极简胶片底栏 */
-.wm-tpl-film {
+/* ==================== 模板 3: 极简胶片底栏 (独立全宽双层通栏，零截断零重复) ==================== */
+.film-bar-wrapper {
   position: absolute;
-  left: -20rpx;
-  right: -20rpx;
-  bottom: -20rpx;
-  height: 112rpx;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.film-floating-qr {
+  margin-right: 20rpx;
+  margin-bottom: 14rpx;
+}
+
+.wm-tpl-film-full {
+  width: 100%;
   background-color: rgba(8, 12, 20, 0.92);
   border-top: 3rpx solid #38bdf8;
-  padding: 14rpx 24rpx;
+  padding: 14rpx 24rpx 16rpx;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.wm-film-row-top {
+  width: 100%;
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
 }
 
-.wm-film-left {
-  width: 44%;
-  overflow: hidden;
-}
-
 .wm-film-poi {
   font-size: 25rpx;
   font-weight: bold;
   color: #ffffff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.wm-film-sub {
-  font-size: 19rpx;
-  color: #94a3b8;
-  margin-top: 6rpx;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.wm-film-right {
-  width: 54%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  overflow: hidden;
-}
-
-.wm-film-coord {
-  font-size: 20rpx;
-  font-weight: bold;
-  color: #38bdf8;
+  max-width: 48%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .wm-film-time {
-  font-size: 19rpx;
+  font-size: 20rpx;
   color: #e2e8f0;
-  margin-top: 6rpx;
+  white-space: nowrap;
+}
+
+.wm-film-row-bottom {
+  width: 100%;
+  margin-top: 8rpx;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wm-film-coord-full {
+  font-size: 20rpx;
+  font-weight: bold;
+  color: #38bdf8;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.wm-film-badge {
+  font-size: 18.5rpx;
+  margin-left: 16rpx;
+  max-width: 38%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wm-film-badge.emerald {
+  color: #34d399;
+}
+
+.wm-film-badge.amber {
+  color: #fde68a;
+}
+
+.wm-film-badge.muted {
+  color: #94a3b8;
 }
 
 /* 模板 4: 外业标准台账 */
@@ -569,12 +563,15 @@
 }
 
 .wm-ledger-header {
-  background-color: rgba(56, 189, 248, 0.28);
+  background-color: rgba(56, 189, 248, 0.24);
   color: #ffffff;
-  font-size: 22rpx;
+  font-size: 21.5rpx;
   font-weight: bold;
-  padding: 10rpx 16rpx;
-  border-bottom: 1px solid rgba(56, 189, 248, 0.5);
+  padding: 10rpx 14rpx;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.48);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wm-ledger-row {
@@ -585,12 +582,13 @@
 }
 
 .wm-ledger-k {
-  width: 120rpx;
-  padding: 8rpx 12rpx;
-  font-size: 19rpx;
+  width: 112rpx;
+  padding: 8rpx 10rpx;
+  font-size: 18.5rpx;
   font-weight: bold;
   color: #38bdf8;
   border-right: 1px solid rgba(148, 163, 184, 0.25);
+  flex-shrink: 0;
 }
 
 .wm-ledger-v {
@@ -603,8 +601,8 @@
   text-overflow: ellipsis;
 }
 
-.wm-ledger-v.sky {
-  color: #38bdf8;
+.wm-ledger-v.dms-compact {
+  font-size: 17rpx;
 }
 
 .wm-ledger-v.amber {
@@ -617,7 +615,7 @@
 
 /* 右下角二维码预览角标 */
 .wm-qr-preview-badge {
-  width: 124rpx;
+  width: 120rpx;
   background-color: rgba(11, 19, 43, 0.90);
   border: 1px solid rgba(56, 189, 248, 0.55);
   border-radius: 16rpx;
@@ -628,13 +626,9 @@
   flex-shrink: 0;
 }
 
-.wm-qr-preview-badge.above-film {
-  margin-bottom: 106rpx;
-}
-
 .wm-qr-box {
-  width: 92rpx;
-  height: 92rpx;
+  width: 90rpx;
+  height: 90rpx;
   background-color: #ffffff;
   border-radius: 8rpx;
   position: relative;
@@ -665,9 +659,9 @@
 
 .wm-qr-center-dot {
   position: absolute;
-  left: 20rpx;
-  right: 20rpx;
-  top: 32rpx;
+  left: 18rpx;
+  right: 18rpx;
+  top: 31rpx;
   background-color: #0284c7;
   color: #ffffff;
   font-size: 16rpx;
@@ -678,7 +672,7 @@
 }
 
 .wm-qr-txt {
-  font-size: 18rpx;
+  font-size: 17.5rpx;
   color: #38bdf8;
   margin-top: 6rpx;
   font-weight: bold;
@@ -711,7 +705,7 @@
 
 /* 3. 底部主控栏 */
 .bottom-bar {
-  height: 200rpx;
+  height: 196rpx;
   background-color: #000000;
   padding: 0 36rpx;
   display: flex;
@@ -775,7 +769,7 @@
   background-color: rgba(255, 255, 255, 0.28);
 }
 
-/* ==================== 弹窗与重构相册样式 ==================== */
+/* ==================== 弹窗与相册样式 ==================== */
 .modal-mask {
   position: fixed;
   left: 0;
@@ -798,7 +792,6 @@
   justify-content: space-between;
 }
 
-/* 相册顶栏：严格预留右侧 200rpx 避开微信胶囊按钮 */
 .sheet-header {
   padding-left: 24rpx;
   padding-right: 204rpx;
@@ -841,7 +834,6 @@
   border-radius: 24rpx;
 }
 
-/* 相册空状态 */
 .gallery-empty-state {
   flex: 1;
   display: flex;
@@ -892,9 +884,8 @@
   height: 100%;
 }
 
-/* 相册横向缩略图条 */
 .gallery-thumb-strip {
-  height: 124rpx;
+  height: 120rpx;
   background-color: #050811;
   border-top: 1px solid #1e293b;
   white-space: nowrap;
@@ -904,8 +895,8 @@
 
 .thumb-item {
   display: inline-block;
-  width: 92rpx;
-  height: 92rpx;
+  width: 90rpx;
+  height: 90rpx;
   border-radius: 14rpx;
   margin-right: 16rpx;
   overflow: hidden;
@@ -924,7 +915,7 @@
 
 .gallery-info-panel {
   background-color: #0f172a;
-  padding: 24rpx 28rpx 36rpx;
+  padding: 22rpx 28rpx 34rpx;
   border-top: 1px solid #1e293b;
 }
 
@@ -932,7 +923,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 18rpx;
+  margin-bottom: 16rpx;
 }
 
 .info-text-col {
@@ -950,8 +941,14 @@
   text-overflow: ellipsis;
 }
 
+.info-sys-badge {
+  font-size: 20rpx;
+  color: #38bdf8;
+  margin-left: 8rpx;
+}
+
 .info-gcj {
-  font-size: 23rpx;
+  font-size: 22rpx;
   color: #38bdf8;
   margin-top: 4rpx;
 }
@@ -976,14 +973,14 @@
 .action-grid {
   display: flex;
   flex-direction: column;
-  gap: 14rpx;
+  gap: 12rpx;
 }
 
 .btn-primary-nav {
   width: 100% !important;
   background-color: #2563eb;
   color: #ffffff;
-  font-size: 26rpx;
+  font-size: 25rpx;
   font-weight: bold;
   border-radius: 18rpx;
 }
@@ -992,7 +989,7 @@
   width: 100% !important;
   background-color: #059669;
   color: #ffffff;
-  font-size: 26rpx;
+  font-size: 25rpx;
   font-weight: bold;
   border-radius: 18rpx;
 }
@@ -1002,51 +999,280 @@
   flex-direction: row;
   justify-content: space-between;
   margin-top: 14rpx;
-  gap: 14rpx;
+  gap: 12rpx;
 }
 
 .btn-sub {
   flex: 1;
   background-color: #1e293b;
   color: #e2e8f0;
-  font-size: 22rpx;
+  font-size: 21rpx;
+  padding: 0 8rpx !important;
+}
+
+.btn-sub.highlight {
+  color: #fde68a;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+}
+
+.btn-sub.relocate-btn {
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.45);
 }
 
 .btn-sub.danger {
   color: #f87171;
 }
 
+/* ==================== 弹窗卡片与双模式地点校准 UI ==================== */
 .dialog-card {
-  width: 88vw;
-  max-height: 84vh;
+  width: 90vw;
+  max-height: 86vh;
   overflow-y: auto;
   background-color: #0f172a;
   border: 1px solid #334155;
   border-radius: 28rpx;
-  padding: 32rpx;
+  padding: 30rpx;
 }
 
 .dialog-title {
   font-size: 30rpx;
   font-weight: bold;
   color: #ffffff;
-  margin-bottom: 20rpx;
-}
-
-.anti-tamper-notice {
-  background-color: rgba(5, 150, 105, 0.18);
-  border: 1px solid rgba(52, 211, 153, 0.45);
-  color: #34d399;
-  font-size: 21rpx;
-  padding: 14rpx 18rpx;
-  border-radius: 14rpx;
   margin-bottom: 18rpx;
 }
 
-.setting-section-label {
-  font-size: 23rpx;
+/* 坐标源状态横幅 */
+.coord-source-banner {
+  padding: 16rpx 20rpx;
+  border-radius: 16rpx;
+  margin-bottom: 20rpx;
+  border: 1px solid #334155;
+  background-color: #090d16;
+}
+
+.coord-source-banner.real {
+  border-color: rgba(52, 211, 153, 0.45);
+  background-color: rgba(5, 150, 105, 0.12);
+}
+
+.coord-source-banner.manual {
+  border-color: rgba(245, 158, 11, 0.55);
+  background-color: rgba(217, 119, 6, 0.14);
+}
+
+.source-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6rpx;
+}
+
+.source-tag {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.source-restore-btn {
+  font-size: 21rpx;
+  font-weight: bold;
   color: #38bdf8;
-  margin-bottom: 12rpx;
+  background-color: rgba(2, 132, 199, 0.22);
+  padding: 4rpx 14rpx;
+  border-radius: 20rpx;
+}
+
+.source-coord-line {
+  font-size: 20rpx;
+  color: #38bdf8;
+}
+
+.source-coord-line.sub {
+  font-size: 19rpx;
+  color: #94a3b8;
+  margin-top: 2rpx;
+}
+
+/* 🏷 地图选名胶囊按钮 (仅改名不改坐标) */
+.label-with-action {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10rpx;
+}
+
+.btn-pick-name-only {
+  background-color: rgba(16, 185, 129, 0.20);
+  border: 1px solid #34d399;
+  color: #34d399;
+  font-size: 20rpx;
+  font-weight: bold;
+  padding: 6rpx 16rpx;
+  border-radius: 24rpx;
+}
+
+.helper-hint {
+  font-size: 19.5rpx;
+  color: #94a3b8;
+  line-height: 1.45;
+  margin-top: 8rpx;
+}
+
+/* 📌 地图选点改坐标独立盒 */
+.map-relocate-box {
+  background-color: #090d16;
+  border: 1px solid #1e293b;
+  border-radius: 18rpx;
+  padding: 18rpx;
+  margin-top: 12rpx;
+}
+
+.relocate-header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6rpx;
+}
+
+.relocate-title {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #e2e8f0;
+}
+
+.relocate-lock-badge {
+  font-size: 19rpx;
+  color: #34d399;
+  background-color: rgba(16, 185, 129, 0.18);
+  padding: 4rpx 12rpx;
+  border-radius: 12rpx;
+}
+
+.relocate-desc {
+  font-size: 19.5rpx;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+/* 三坐标系三选一分段器 */
+.coord-sys-selector {
+  display: flex;
+  flex-direction: row;
+  gap: 12rpx;
+}
+
+.coord-sys-pill {
+  flex: 1;
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 16rpx;
+  padding: 14rpx 8rpx;
+  text-align: center;
+}
+
+.coord-sys-pill.selected {
+  background-color: #0284c7;
+  border-color: #38bdf8;
+}
+
+.sys-name {
+  font-size: 23rpx;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.sys-desc {
+  font-size: 18rpx;
+  color: #cbd5e1;
+  margin-top: 4rpx;
+}
+
+/* 外观深度定制行 (颜色圆点 + 字号 + 透明度) */
+.custom-appearance-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rpx;
+  margin-bottom: 10rpx;
+}
+
+.color-dots-group {
+  display: flex;
+  flex-direction: row;
+  gap: 12rpx;
+}
+
+.color-dot {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 20rpx;
+  border: 2rpx solid transparent;
+}
+
+.color-dot.selected {
+  border: 4rpx solid #ffffff;
+}
+
+.scale-pills-group {
+  display: flex;
+  flex-direction: row;
+  background-color: #090d16;
+  border-radius: 14rpx;
+  padding: 4rpx;
+  border: 1px solid #1e293b;
+}
+
+.mini-opt {
+  font-size: 19rpx;
+  color: #94a3b8;
+  padding: 6rpx 12rpx;
+  border-radius: 10rpx;
+}
+
+.mini-opt.selected {
+  background-color: #0284c7;
+  color: #ffffff;
+  font-weight: bold;
+}
+
+/* 要素开关双列矩阵 */
+.toggle-matrix {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 8rpx;
+}
+
+.matrix-chip {
+  width: calc(50% - 8rpx);
+  box-sizing: border-box;
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 21rpx;
+  padding: 12rpx 14rpx;
+  border-radius: 14rpx;
+  text-align: center;
+}
+
+.matrix-chip.on {
+  background-color: rgba(2, 132, 199, 0.28);
+  border-color: #38bdf8;
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.setting-section-label {
+  font-size: 22rpx;
+  font-weight: bold;
+  color: #38bdf8;
+  margin-bottom: 10rpx;
 }
 
 .chip-wrap {
@@ -1055,14 +1281,14 @@
   flex-wrap: wrap;
   gap: 12rpx;
   margin-top: 10rpx;
-  margin-bottom: 16rpx;
+  margin-bottom: 14rpx;
 }
 
 .quick-chip {
   background-color: #1e293b;
   border: 1px solid #334155;
   color: #cbd5e1;
-  font-size: 21rpx;
+  font-size: 20.5rpx;
   padding: 8rpx 18rpx;
   border-radius: 24rpx;
 }
@@ -1074,18 +1300,23 @@
   font-weight: bold;
 }
 
+.quick-chip.clear {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
 .mode-switch-row {
   display: flex;
-  gap: 14rpx;
-  margin-bottom: 14rpx;
+  gap: 12rpx;
+  margin-bottom: 12rpx;
 }
 
 .mode-option {
   flex: 1;
-  padding: 16rpx 10rpx;
+  padding: 14rpx 8rpx;
   text-align: center;
-  font-size: 22rpx;
-  border-radius: 16rpx;
+  font-size: 21.5rpx;
+  border-radius: 14rpx;
   background-color: #1e293b;
   color: #94a3b8;
   border: 1px solid #334155;
@@ -1102,36 +1333,43 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12rpx 0;
-  font-size: 24rpx;
+  padding: 10rpx 0;
+  font-size: 23.5rpx;
   color: #ffffff;
 }
 
+.switch-row.compact {
+  padding: 4rpx 0 8rpx;
+}
+
+.input-label-inline {
+  font-size: 22rpx;
+  color: #cbd5e1;
+}
+
 .input-group {
-  margin-bottom: 18rpx;
+  margin-bottom: 16rpx;
 }
 
 .input-label {
-  font-size: 22rpx;
+  font-size: 21.5rpx;
   color: #94a3b8;
-  display: block;
-  margin-bottom: 8rpx;
 }
 
 .text-input {
   background-color: #020617;
   border: 1px solid #334155;
   border-radius: 14rpx;
-  padding: 14rpx 20rpx;
+  padding: 12rpx 18rpx;
   color: #ffffff;
-  font-size: 25rpx;
+  font-size: 24.5rpx;
 }
 
 .btn-confirm {
   margin-top: 20rpx;
   background-color: #2563eb;
   color: #ffffff;
-  font-size: 27rpx;
+  font-size: 26rpx;
   font-weight: bold;
   border-radius: 18rpx;
 }
