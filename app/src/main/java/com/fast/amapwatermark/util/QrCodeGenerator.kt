@@ -1,19 +1,35 @@
 package com.fast.amapwatermark.util
 
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.util.LruCache
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Locale
+import kotlin.math.abs
 
 /**
- * Pure Kotlin, zero-dependency ISO/IEC 18004 QR Code Matrix Generator (Byte mode, ECC Level L, V1..V9)
- * + FIPS 180-4 SHA-256 Anti-Tamper Cryptographic Signature & Verification Engine (v8.0.0).
+ * Pure Kotlin, zero-dependency ISO/IEC 18004 QR Code Matrix Generator (Byte mode, ECC Level L, V1..V14, 8-mask penalty selection)
+ * + FIPS 180-4 SHA-256 Anti-Tamper Cryptographic Signature & Perceptual Image Fingerprint Engine (v9.0.0).
  */
 object QrCodeGenerator {
 
     private const val ANTI_TAMPER_SALT = "AMAP_WM_V7_TRUST_ANCHOR_2026"
     private val matrixCache = LruCache<String, Array<BooleanArray>>(64)
+    private val HEX_REGEX = Regex("^[0-9A-F]{10,64}$")
+
+    // ISO/IEC 18004 Format Information (15-bit BCH + XOR 0x5412) for ECC Level L (01) and Mask 0..7
+    private val FORMAT_INFO_ECC_L = intArrayOf(
+        0x77C4, // mask 0
+        0x72F3, // mask 1
+        0x7DAA, // mask 2
+        0x789D, // mask 3
+        0x662F, // mask 4
+        0x6318, // mask 5
+        0x6C41, // mask 6
+        0x6976  // mask 7
+    )
 
     data class VerifiedLocationPayload(
         val gcjLat: Double,
@@ -23,6 +39,7 @@ object QrCodeGenerator {
         val shortPoi: String,
         val timestamp: String = "",
         val note: String = "",
+        val imageHash: String = "",
         val signature: String = "",
         val expectedSignature: String = "",
         val ntpSynced: Boolean = false,
@@ -40,6 +57,7 @@ object QrCodeGenerator {
         val alignCenters: IntArray
     )
 
+    // ISO/IEC 18004 ECC Level L specs for V1..V14 (supports up to 457 UTF-8 bytes)
     private val SPECS = arrayOf(
         VersionSpec(1, 21, 19, 7, 1, intArrayOf()),
         VersionSpec(2, 25, 34, 10, 1, intArrayOf(6, 18)),
@@ -49,34 +67,92 @@ object QrCodeGenerator {
         VersionSpec(6, 41, 136, 18, 2, intArrayOf(6, 34)),
         VersionSpec(7, 45, 156, 20, 2, intArrayOf(6, 22, 38)),
         VersionSpec(8, 49, 194, 24, 2, intArrayOf(6, 24, 42)),
-        VersionSpec(9, 53, 232, 30, 2, intArrayOf(6, 26, 46))
-    )
-
-    private val VERSION_INFO_BITS = mapOf(
-        7 to 0x07C94,
-        8 to 0x085BC,
-        9 to 0x09A99
+        VersionSpec(9, 53, 232, 30, 2, intArrayOf(6, 26, 46)),
+        VersionSpec(10, 57, 274, 18, 4, intArrayOf(6, 28, 50)),
+        VersionSpec(11, 61, 324, 20, 4, intArrayOf(6, 30, 54)),
+        VersionSpec(12, 65, 370, 24, 4, intArrayOf(6, 32, 58)),
+        VersionSpec(13, 69, 428, 26, 4, intArrayOf(6, 34, 62)),
+        VersionSpec(14, 73, 461, 30, 4, intArrayOf(6, 26, 46, 66))
     )
 
     /**
-     * Compute 16-char uppercase SHA-256 Anti-Tamper digest binding GCJ-02 coordinates, timestamp, POI, and optional note.
+     * Compute 18-bit BCH(18,6) version information for QR V7..V40.
+     */
+    private fun computeVersionInfoBits(version: Int): Int {
+        var rem = version
+        for (i in 0 until 12) {
+            rem = (rem shl 1) xor ((rem ushr 11) * 0x1F25)
+        }
+        return (version shl 12) or rem
+    }
+
+    /**
+     * Compute lightweight 64-bit perceptual image fingerprint (9x8 grayscale dHash -> 16 uppercase hex chars).
+     * Binds actual visual pixels to anti-tamper metadata to detect image substitution.
+     */
+    fun computeImagePerceptualHash(bitmap: Bitmap): String {
+        if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return ""
+        var scaled: Bitmap? = null
+        return try {
+            scaled = Bitmap.createScaledBitmap(bitmap, 9, 8, true)
+            val gray = IntArray(9 * 8)
+            for (y in 0 until 8) {
+                for (x in 0 until 9) {
+                    val px = scaled.getPixel(x, y)
+                    val r = Color.red(px)
+                    val g = Color.green(px)
+                    val b = Color.blue(px)
+                    gray[y * 9 + x] = (r * 299 + g * 587 + b * 114) / 1000
+                }
+            }
+            var bits = 0L
+            for (y in 0 until 8) {
+                for (x in 0 until 8) {
+                    bits = bits shl 1
+                    if (gray[y * 9 + x] > gray[y * 9 + x + 1]) {
+                        bits = bits or 1L
+                    }
+                }
+            }
+            String.format(Locale.US, "%016X", bits)
+        } catch (_: Exception) {
+            ""
+        } finally {
+            if (scaled != null && scaled !== bitmap && !scaled.isRecycled) {
+                scaled.recycle()
+            }
+        }
+    }
+
+    /**
+     * Compute 16-char uppercase SHA-256 Anti-Tamper digest binding GCJ-02 coordinates, timestamp, POI, optional note, and optional perceptual imageHash.
      */
     fun computeAntiTamperHash(
         gcjLat: Double,
         gcjLon: Double,
         timestamp: String,
         shortPoi: String,
-        note: String = ""
+        note: String = "",
+        imageHash: String = ""
     ): String {
         val latStr = String.format(Locale.US, "%.6f", gcjLat)
         val lonStr = String.format(Locale.US, "%.6f", gcjLon)
         val tsClean = timestamp.trim()
         val poiClean = shortPoi.trim().take(10).ifBlank { "实拍点位" }
         val noteClean = note.trim().take(12)
-        val payload = if (noteClean.isNotEmpty()) {
-            "$latStr|$lonStr|$tsClean|$poiClean|$noteClean|$ANTI_TAMPER_SALT"
-        } else {
-            "$latStr|$lonStr|$tsClean|$poiClean|$ANTI_TAMPER_SALT"
+        val imgClean = imageHash.trim().uppercase(Locale.US).take(16)
+        val payload = buildString {
+            append(latStr).append('|')
+            append(lonStr).append('|')
+            append(tsClean).append('|')
+            append(poiClean)
+            if (noteClean.isNotEmpty()) {
+                append('|').append(noteClean)
+            }
+            if (imgClean.isNotEmpty()) {
+                append("|IMG:").append(imgClean)
+            }
+            append('|').append(ANTI_TAMPER_SALT)
         }
         return try {
             val md = MessageDigest.getInstance("SHA-256")
@@ -91,20 +167,25 @@ object QrCodeGenerator {
         }
     }
 
+    /**
+     * Strict cryptographic verification (v9.0.0):
+     * - Enforces signature length >= 10 and valid uppercase hex characters.
+     * - No fallback to empty note when a note is present (closes legacy note-tampering bypass).
+     */
     fun verifyAntiTamperHash(
         gcjLat: Double,
         gcjLon: Double,
         timestamp: String,
         shortPoi: String,
         signature: String,
-        note: String = ""
+        note: String = "",
+        imageHash: String = ""
     ): Boolean {
         val cleanSig = signature.trim().uppercase(Locale.US)
-        if (cleanSig.length < 10) return false
-        val expectedWithNote = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note)
-        if (expectedWithNote.startsWith(cleanSig)) return true
-        val expectedLegacy = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, "")
-        return expectedLegacy.startsWith(cleanSig)
+        if (cleanSig.length < 10 || !HEX_REGEX.matches(cleanSig)) return false
+        if (timestamp.isBlank()) return false
+        val expected = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note, imageHash)
+        return expected.startsWith(cleanSig)
     }
 
     fun buildAmapJumpUrl(
@@ -115,7 +196,8 @@ object QrCodeGenerator {
         timestamp: String = "",
         antiTamperHash: String = "",
         ntpSynced: Boolean = false,
-        note: String = ""
+        note: String = "",
+        imageHash: String = ""
     ): String {
         val latStr = String.format(Locale.US, "%.6f", gcjLat)
         val lonStr = String.format(Locale.US, "%.6f", gcjLon)
@@ -130,8 +212,9 @@ object QrCodeGenerator {
 
         val tsClean = timestamp.trim()
         val noteClean = note.trim().take(12)
+        val imgClean = imageHash.trim().uppercase(Locale.US).take(16)
         val sig = antiTamperHash.ifBlank {
-            computeAntiTamperHash(gcjLat, gcjLon, tsClean, cleanPoi, noteClean)
+            computeAntiTamperHash(gcjLat, gcjLon, tsClean, cleanPoi, noteClean, imgClean)
         }.take(12)
         val encodedTs = try {
             URLEncoder.encode(tsClean, "UTF-8")
@@ -143,11 +226,12 @@ object QrCodeGenerator {
             val encNote = try { URLEncoder.encode(noteClean, "UTF-8") } catch (_: Exception) { "" }
             if (encNote.isNotEmpty()) "&note=$encNote" else ""
         } else ""
-        return "$base&ts=$encodedTs&sig=$sig&ntp=$ntpFlag$noteParam"
+        val imgParam = if (imgClean.isNotEmpty()) "&ih=$imgClean" else ""
+        return "$base&ts=$encodedTs&sig=$sig&ntp=$ntpFlag$noteParam$imgParam"
     }
 
     /**
-     * Parse and cryptographically verify QR URLs, EXIF strings, or shared coordinate text (v8.0.0)
+     * Parse and cryptographically verify QR URLs, EXIF strings, or shared coordinate text (v9.0.0)
      */
     fun parseAndVerifyPayload(rawInput: String, sourceLabel: String = "二维码/链接核验"): VerifiedLocationPayload? {
         val origStr = rawInput.trim()
@@ -178,10 +262,11 @@ object QrCodeGenerator {
                 val ts = extractParam(origStr, "ts").ifBlank { extractParam(decodedStr, "ts") }
                 val sig = extractParam(origStr, "sig").ifBlank { extractParam(decodedStr, "sig") }.uppercase(Locale.US)
                 val note = extractParam(origStr, "note").ifBlank { extractParam(decodedStr, "note") }
+                val imgHash = extractParam(origStr, "ih").ifBlank { extractParam(decodedStr, "ih") }.uppercase(Locale.US)
                 val ntp = (extractParam(origStr, "ntp").ifBlank { extractParam(decodedStr, "ntp") }) == "1"
                 val wgs = CoordinateConverter.gcj02ToWgs84(lat, lon)
-                val expected = if (ts.isNotBlank()) computeAntiTamperHash(lat, lon, ts, poi, note).take(12) else ""
-                val verified = if (sig.isNotBlank()) verifyAntiTamperHash(lat, lon, ts, poi, sig, note) else false
+                val expected = if (ts.isNotBlank()) computeAntiTamperHash(lat, lon, ts, poi, note, imgHash).take(12) else ""
+                val verified = if (sig.isNotBlank()) verifyAntiTamperHash(lat, lon, ts, poi, sig, note, imgHash) else false
                 return VerifiedLocationPayload(
                     gcjLat = lat,
                     gcjLon = lon,
@@ -190,6 +275,7 @@ object QrCodeGenerator {
                     shortPoi = poi,
                     timestamp = ts,
                     note = note,
+                    imageHash = imgHash,
                     signature = sig,
                     expectedSignature = expected,
                     ntpSynced = ntp,
@@ -200,12 +286,12 @@ object QrCodeGenerator {
             }
         }
 
-        val numRegex = Regex("([0-9]{1,3}\\.[0-9]{3,8})")
+        val numRegex = Regex("([+-]?[0-9]{1,3}\\.[0-9]{3,8})")
         val nums = numRegex.findAll(decodedStr).mapNotNull { it.value.toDoubleOrNull() }.toList()
         if (nums.size >= 2) {
             val a = nums[0]
             val b = nums[1]
-            val isALon = a > 65.0 && b < 60.0
+            val isALon = abs(a) > 65.0 && abs(b) < 60.0
             val gcjLon = if (isALon) a else b
             val gcjLat = if (isALon) b else a
             val wgs = CoordinateConverter.gcj02ToWgs84(gcjLat, gcjLon)
@@ -233,31 +319,54 @@ object QrCodeGenerator {
     fun encodeUrlToMatrix(content: String): Array<BooleanArray> {
         matrixCache.get(content)?.let { return it }
         val rawBytes = content.toByteArray(Charsets.UTF_8)
-        val spec = SPECS.firstOrNull { rawBytes.size + 3 <= it.totalDataBytes } ?: SPECS.last()
-        val payload = safeUtf8Slice(rawBytes, spec.totalDataBytes - 3)
+        val spec = SPECS.firstOrNull {
+            val headerBytes = if (it.version >= 10) 4 else 3
+            rawBytes.size + headerBytes <= it.totalDataBytes
+        } ?: SPECS.last()
+        val headerBytes = if (spec.version >= 10) 4 else 3
+        val payload = safeUtf8Slice(rawBytes, spec.totalDataBytes - headerBytes)
 
-        val dataCodewords = buildDataCodewords(payload, spec.totalDataBytes)
+        val dataCodewords = buildDataCodewords(payload, spec.totalDataBytes, spec.version)
         val finalCodewords = interleaveWithEcc(dataCodewords, spec)
-        val matrix = Array(spec.size) { BooleanArray(spec.size) }
+        val baseMatrix = Array(spec.size) { BooleanArray(spec.size) }
         val isFunction = Array(spec.size) { BooleanArray(spec.size) }
 
-        drawFunctionPatterns(matrix, isFunction, spec)
-        drawCodewords(matrix, isFunction, finalCodewords, spec.size)
-        applyMask0AndFormatBits(matrix, isFunction, spec.size)
+        drawFunctionPatterns(baseMatrix, isFunction, spec)
+        drawCodewords(baseMatrix, isFunction, finalCodewords, spec.size)
 
-        matrixCache.put(content, matrix)
-        return matrix
+        // Evaluate all 8 ISO/IEC 18004 masks and pick the lowest penalty score
+        var bestMask = 0
+        var bestPenalty = Int.MAX_VALUE
+        var bestMatrix: Array<BooleanArray>? = null
+
+        for (maskId in 0..7) {
+            val candidate = Array(spec.size) { r -> baseMatrix[r].copyOf() }
+            applyMaskAndFormatBits(candidate, isFunction, spec.size, maskId)
+            val penalty = computeMaskPenalty(candidate, spec.size)
+            if (penalty < bestPenalty) {
+                bestPenalty = penalty
+                bestMask = maskId
+                bestMatrix = candidate
+            }
+        }
+
+        val finalMatrix = bestMatrix ?: baseMatrix.also {
+            applyMaskAndFormatBits(it, isFunction, spec.size, bestMask)
+        }
+        matrixCache.put(content, finalMatrix)
+        return finalMatrix
     }
 
-    private fun buildDataCodewords(bytes: ByteArray, capacity: Int): IntArray {
+    private fun buildDataCodewords(bytes: ByteArray, capacity: Int, version: Int): IntArray {
         val bits = ArrayList<Int>(capacity * 8)
         fun appendBits(value: Int, len: Int) {
             for (i in len - 1 downTo 0) {
                 bits.add((value ushr i) and 1)
             }
         }
-        appendBits(0b0100, 4)
-        appendBits(bytes.size, 8)
+        appendBits(0b0100, 4) // Byte mode indicator
+        val countBits = if (version >= 10) 16 else 8
+        appendBits(bytes.size, countBits)
         for (b in bytes) {
             appendBits(b.toInt() and 0xFF, 8)
         }
@@ -284,27 +393,42 @@ object QrCodeGenerator {
         return out
     }
 
+    /**
+     * Supports both even and uneven RS block splits (required for V10, V12, V14).
+     */
     private fun interleaveWithEcc(data: IntArray, spec: VersionSpec): IntArray {
         if (spec.numBlocks == 1) {
             val ecc = computeReedSolomon(data, spec.eccBytesPerBlock)
             return data + ecc
         }
-        val blockSize = spec.totalDataBytes / spec.numBlocks
-        val blocks = Array(spec.numBlocks) { b ->
-            data.copyOfRange(b * blockSize, (b + 1) * blockSize)
+        val numBlocks = spec.numBlocks
+        val shortBlockLen = spec.totalDataBytes / numBlocks
+        val numLongBlocks = spec.totalDataBytes % numBlocks
+        val numShortBlocks = numBlocks - numLongBlocks
+
+        val blocks = ArrayList<IntArray>(numBlocks)
+        var offset = 0
+        for (b in 0 until numBlocks) {
+            val len = if (b < numShortBlocks) shortBlockLen else (shortBlockLen + 1)
+            blocks.add(data.copyOfRange(offset, offset + len))
+            offset += len
         }
-        val eccBlocks = Array(spec.numBlocks) { b ->
+        val eccBlocks = Array(numBlocks) { b ->
             computeReedSolomon(blocks[b], spec.eccBytesPerBlock)
         }
-        val result = IntArray(spec.totalDataBytes + spec.eccBytesPerBlock * spec.numBlocks)
+
+        val result = IntArray(spec.totalDataBytes + spec.eccBytesPerBlock * numBlocks)
         var idx = 0
-        for (i in 0 until blockSize) {
-            for (b in 0 until spec.numBlocks) {
-                result[idx++] = blocks[b][i]
+        val maxBlockLen = if (numLongBlocks > 0) shortBlockLen + 1 else shortBlockLen
+        for (i in 0 until maxBlockLen) {
+            for (b in 0 until numBlocks) {
+                if (i < blocks[b].size) {
+                    result[idx++] = blocks[b][i]
+                }
             }
         }
         for (i in 0 until spec.eccBytesPerBlock) {
-            for (b in 0 until spec.numBlocks) {
+            for (b in 0 until numBlocks) {
                 result[idx++] = eccBlocks[b][i]
             }
         }
@@ -361,7 +485,7 @@ object QrCodeGenerator {
         fun drawFinder(cx: Int, cy: Int) {
             for (dy in -4..4) {
                 for (dx in -4..4) {
-                    val dist = maxOf(kotlin.math.abs(dx), kotlin.math.abs(dy))
+                    val dist = maxOf(abs(dx), abs(dy))
                     setFuncModule(cx + dx, cy + dy, dist != 2 && dist != 4)
                 }
             }
@@ -382,7 +506,7 @@ object QrCodeGenerator {
                 if ((ax == 6 && ay == 6) || (ax == 6 && ay == sz - 7) || (ax == sz - 7 && ay == 6)) continue
                 for (dy in -2..2) {
                     for (dx in -2..2) {
-                        val dist = maxOf(kotlin.math.abs(dx), kotlin.math.abs(dy))
+                        val dist = maxOf(abs(dx), abs(dy))
                         setFuncModule(ax + dx, ay + dy, dist != 1)
                     }
                 }
@@ -402,7 +526,7 @@ object QrCodeGenerator {
         setFuncModule(8, sz - 8, true)
 
         if (spec.version >= 7) {
-            val vbits = VERSION_INFO_BITS[spec.version] ?: 0
+            val vbits = computeVersionInfoBits(spec.version)
             for (i in 0 until 6) {
                 for (j in 0 until 3) {
                     val bit = ((vbits ushr (i * 3 + j)) and 1) != 0
@@ -443,19 +567,34 @@ object QrCodeGenerator {
         }
     }
 
-    private fun applyMask0AndFormatBits(
+    private fun shouldInvertByMask(maskId: Int, x: Int, y: Int): Boolean {
+        return when (maskId) {
+            0 -> (x + y) % 2 == 0
+            1 -> y % 2 == 0
+            2 -> x % 3 == 0
+            3 -> (x + y) % 3 == 0
+            4 -> ((y / 2) + (x / 3)) % 2 == 0
+            5 -> ((x * y) % 2) + ((x * y) % 3) == 0
+            6 -> (((x * y) % 2) + ((x * y) % 3)) % 2 == 0
+            7 -> (((x + y) % 2) + ((x * y) % 3)) % 2 == 0
+            else -> false
+        }
+    }
+
+    private fun applyMaskAndFormatBits(
         matrix: Array<BooleanArray>,
         isFunc: Array<BooleanArray>,
-        sz: Int
+        sz: Int,
+        maskId: Int
     ) {
         for (y in 0 until sz) {
             for (x in 0 until sz) {
-                if (!isFunc[y][x] && (x + y) % 2 == 0) {
+                if (!isFunc[y][x] && shouldInvertByMask(maskId, x, y)) {
                     matrix[y][x] = !matrix[y][x]
                 }
             }
         }
-        val formatBits = 0x77C4
+        val formatBits = FORMAT_INFO_ECC_L[maskId.coerceIn(0, 7)]
         fun bit(i: Int): Boolean = ((formatBits ushr (14 - i)) and 1) != 0
 
         for (i in 0..5) matrix[8][i] = bit(i)
@@ -467,5 +606,95 @@ object QrCodeGenerator {
         for (i in 0..7) matrix[sz - 1 - i][8] = bit(i)
         for (i in 8..14) matrix[8][sz - 15 + i] = bit(i)
         matrix[sz - 8][8] = true
+    }
+
+    /**
+     * ISO/IEC 18004 Mask Penalty Score (N1 + N2 + N3 + N4).
+     */
+    private fun computeMaskPenalty(matrix: Array<BooleanArray>, sz: Int): Int {
+        var penalty = 0
+        var darkCount = 0
+
+        // N1: Adjacent modules in row/column in same color (>= 5)
+        for (y in 0 until sz) {
+            var runColor = matrix[y][0]
+            var runLen = 1
+            if (runColor) darkCount++
+            for (x in 1 until sz) {
+                val c = matrix[y][x]
+                if (c) darkCount++
+                if (c == runColor) {
+                    runLen++
+                } else {
+                    if (runLen >= 5) penalty += 3 + (runLen - 5)
+                    runColor = c
+                    runLen = 1
+                }
+            }
+            if (runLen >= 5) penalty += 3 + (runLen - 5)
+        }
+        for (x in 0 until sz) {
+            var runColor = matrix[0][x]
+            var runLen = 1
+            for (y in 1 until sz) {
+                val c = matrix[y][x]
+                if (c == runColor) {
+                    runLen++
+                } else {
+                    if (runLen >= 5) penalty += 3 + (runLen - 5)
+                    runColor = c
+                    runLen = 1
+                }
+            }
+            if (runLen >= 5) penalty += 3 + (runLen - 5)
+        }
+
+        // N2: 2x2 blocks of same color
+        for (y in 0 until sz - 1) {
+            val row0 = matrix[y]
+            val row1 = matrix[y + 1]
+            for (x in 0 until sz - 1) {
+                val c = row0[x]
+                if (c == row0[x + 1] && c == row1[x] && c == row1[x + 1]) {
+                    penalty += 3
+                }
+            }
+        }
+
+        // N3: Finder-like 1:1:3:1:1 patterns with 4 light modules on either side
+        for (y in 0 until sz) {
+            val row = matrix[y]
+            for (x in 0..sz - 11) {
+                if (matchesFinderPatternRow(row, x)) penalty += 40
+            }
+        }
+        for (x in 0 until sz) {
+            for (y in 0..sz - 11) {
+                if (matchesFinderPatternCol(matrix, x, y)) penalty += 40
+            }
+        }
+
+        // N4: Dark module ratio balance
+        val total = sz * sz
+        val k = abs(darkCount * 20 - total * 10) / total
+        penalty += k * 10
+
+        return penalty
+    }
+
+    private fun matchesFinderPatternRow(row: BooleanArray, x: Int): Boolean {
+        val p1 = row[x] && !row[x + 1] && row[x + 2] && row[x + 3] && row[x + 4] && !row[x + 5] && row[x + 6] &&
+                !row[x + 7] && !row[x + 8] && !row[x + 9] && !row[x + 10]
+        if (p1) return true
+        return !row[x] && !row[x + 1] && !row[x + 2] && !row[x + 3] &&
+                row[x + 4] && !row[x + 5] && row[x + 6] && row[x + 7] && row[x + 8] && !row[x + 9] && row[x + 10]
+    }
+
+    private fun matchesFinderPatternCol(m: Array<BooleanArray>, x: Int, y: Int): Boolean {
+        val p1 = m[y][x] && !m[y + 1][x] && m[y + 2][x] && m[y + 3][x] && m[y + 4][x] && !m[y + 5][x] && m[y + 6][x] &&
+                !m[y + 7][x] && !m[y + 8][x] && !m[y + 9][x] && !m[y + 10][x]
+        if (p1) return true
+        return !m[y][x] && !m[y + 1][x] && !m[y + 2][x] && !m[y + 3][x] &&
+                m[y + 4][x] && !m[y + 5][x] && m[y + 6][x] && m[y + 7][x] && m[y + 8][x] && !m[y + 9][x] && m[y + 10][x]
     }
 }

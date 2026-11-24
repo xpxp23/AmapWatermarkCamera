@@ -1,0 +1,185 @@
+<view class="wm-overlay-root">
+  <!-- 模板 0 可选底部托底暗影 (默认关闭，开启时与 Canvas 导出 100% 所见即所得) -->
+  <view wx:if="{{styleTemplate === 0 && showBottomScrim}}" class="tpl0-bottom-scrim"></view>
+
+  <!-- 左上角独立悬浮 160x160 高德矢量缩略图 -->
+  <view
+    wx:if="{{showMiniMap && miniMapPosition === 1 && (styleTemplate === 1 || styleTemplate === 2)}}"
+    class="floating-minimap-box"
+    style="border-color: {{accentHex}};"
+    catchtap="onTapMap"
+  >
+    <view class="minimap-north-tag">▲N</view>
+    <view class="minimap-road-h"></view>
+    <view class="minimap-road-v"></view>
+    <view class="minimap-radar-circle">
+      <view class="minimap-center-pin"></view>
+    </view>
+    <view class="minimap-poi-bar">📍{{shortPoi}}</view>
+  </view>
+
+  <!-- 模板 0/1/2/4 悬浮水印容器 -->
+  <view
+    wx:if="{{styleTemplate !== 3}}"
+    class="live-wm-container {{bottomRight && styleTemplate !== 0 ? 'reverse-row' : ''}}"
+  >
+    <!-- 模板 0: 经典大字时间 -->
+    <view
+      wx:if="{{styleTemplate === 0}}"
+      class="wm-tpl-0 {{showQr ? 'with-qr' : ''}}"
+      style="transform: scale({{fontScale}}); transform-origin: center bottom;"
+      catchtap="onTapWatermark"
+    >
+      <view wx:if="{{showTime}}" class="wm-big-time">{{timeHm}}</view>
+      <view class="wm-sub-line">
+        <view wx:if="{{showTime}}" class="wm-date-text">{{dateWeek}}</view>
+        <view wx:if="{{showLoc}}" class="wm-poi-text" catchtap="onTapPoi">📍{{shortPoi}}</view>
+      </view>
+      <view wx:if="{{showAddress && fullAddr}}" class="wm-addr-line">{{fullAddr}}</view>
+      <view
+        wx:if="{{showCoords}}"
+        class="wm-coord-pill {{useDms ? 'dms-compact' : ''}}"
+        style="border-color: {{accentHex}}; color: {{accentHex}}; background-color: {{cardBgRgba}};"
+      >{{liveCoordStr}}</view>
+      <view wx:if="{{showEnv}}" class="wm-env-text">海拔 {{altitude}}m · 方位 {{azimuthText}}</view>
+      <view wx:if="{{showNote && note}}" class="wm-note-text">备注：{{note}}</view>
+      <view wx:if="{{antiTamperMode}}" class="wm-verify-line">🛡 {{ntpSynced ? 'NTP真时已锁' : '防伪锁定'}} · SHA256:{{liveAntiTamperShort}}</view>
+    </view>
+
+    <!-- 模板 1: 工程巡检卡片 -->
+    <view
+      wx:elif="{{styleTemplate === 1}}"
+      class="wm-tpl-card"
+      style="background-color: {{cardBgRgba}}; border-color: {{accentHex}}; transform: scale({{fontScale}}); transform-origin: {{bottomRight ? 'right' : 'left'}} bottom;"
+      catchtap="onTapWatermark"
+    >
+      <view class="wm-card-header-row">
+        <view class="wm-accent-bar" style="background-color: {{accentHex}};"></view>
+        <view class="wm-card-header">{{customTitle}}</view>
+        <view wx:if="{{showCoordTag || antiTamperMode}}" class="wm-card-tag {{antiTamperMode ? 'verify' : ''}}" style="color: {{antiTamperMode ? '#34d399' : accentHex}};">
+          {{antiTamperMode ? '🛡防伪已锁' : coordSys}}
+        </view>
+      </view>
+      <view class="wm-card-body-row">
+        <view wx:if="{{showMiniMap && miniMapPosition === 0}}" class="embedded-minimap-box" style="border-color: {{accentHex}};">
+          <view class="minimap-north-tag">▲N</view>
+          <view class="minimap-road-h"></view>
+          <view class="minimap-road-v"></view>
+          <view class="minimap-radar-circle">
+            <view class="minimap-center-pin"></view>
+          </view>
+          <view class="minimap-poi-bar">📍{{shortPoi}}</view>
+        </view>
+        <view class="wm-card-lines">
+          <view wx:if="{{showCoords}}" class="wm-card-row {{useDms ? 'dms-compact' : ''}}" style="color: {{accentHex}};">经纬：{{liveCoordOnlyStr}}{{showAccuracy ? (' ±' + accuracy + 'm') : ''}}</view>
+          <view wx:if="{{showLoc}}" class="wm-card-row" catchtap="onTapPoi">点位：{{shortPoi}}</view>
+          <view wx:if="{{showAddress && fullAddr}}" class="wm-card-row muted">地址：{{fullAddr}}</view>
+          <view wx:if="{{showEnv}}" class="wm-card-row emerald">环境：海拔{{altitude}}m · {{azimuthText}}</view>
+          <view wx:if="{{showTime}}" class="wm-card-row">时间：{{fullTs}} {{weekStr}}</view>
+          <view wx:if="{{showNote && note}}" class="wm-card-row amber">备注：{{note}}</view>
+          <view wx:if="{{antiTamperMode}}" class="wm-card-row emerald">验真：SHA256:{{liveAntiTamperShort}}</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 模板 2: 经纬网格测绘 -->
+    <view
+      wx:elif="{{styleTemplate === 2}}"
+      class="wm-tpl-grid"
+      style="background-color: {{cardBgRgba}}; border-color: {{accentHex}}; transform: scale({{fontScale}}); transform-origin: {{bottomRight ? 'right' : 'left'}} bottom;"
+      catchtap="onTapWatermark"
+    >
+      <view class="wm-grid-top {{useDms ? 'dms-compact' : ''}}" style="color: {{accentHex}};">
+        {{showCoords ? liveCoordStr : (customTitle + ' · ' + coordSys)}}
+      </view>
+      <view class="wm-grid-cells">
+        <view wx:if="{{showMiniMap && miniMapPosition === 0}}" class="embedded-minimap-box small" style="border-color: {{accentHex}};">
+          <view class="minimap-north-tag">▲N</view>
+          <view class="minimap-radar-circle"><view class="minimap-center-pin"></view></view>
+        </view>
+        <view class="wm-grid-cell left" catchtap="onTapPoi">
+          <view class="wm-grid-label">测绘点位 ({{coordSys}})</view>
+          <view class="wm-grid-val">{{shortPoi}}</view>
+        </view>
+        <view class="wm-grid-cell right">
+          <view class="wm-grid-label">采样时间 ({{weekStr}})</view>
+          <view class="wm-grid-val mono">{{dateOnlyStr}} {{timeHms}}</view>
+        </view>
+      </view>
+      <view wx:if="{{antiTamperMode || (showNote && note) || (showAddress && fullAddr) || showEnv}}" class="wm-grid-footer">
+        {{antiTamperMode ? ('🛡SHA256:' + liveAntiTamperShort + (note ? ' · ' + note : '')) : (note ? ('备注：' + note) : (showAddress && fullAddr ? fullAddr : ('海拔' + altitude + 'm · ' + azimuthText)))}}
+      </view>
+    </view>
+
+    <!-- 模板 4: 外业标准台账 -->
+    <view
+      wx:else
+      class="wm-tpl-ledger"
+      style="background-color: {{cardBgRgba}}; border-color: {{accentHex}}; transform: scale({{fontScale}}); transform-origin: {{bottomRight ? 'right' : 'left'}} bottom;"
+      catchtap="onTapWatermark"
+    >
+      <view class="wm-ledger-header">{{customTitle}} · {{antiTamperMode ? '🛡防伪台账' : coordSys}}</view>
+      <view wx:if="{{showCoords}}" class="wm-ledger-row">
+        <view class="wm-ledger-k" style="color: {{accentHex}};">经纬坐标</view>
+        <view class="wm-ledger-v {{useDms ? 'dms-compact' : ''}}" style="color: {{accentHex}};">{{liveCoordOnlyStr}}{{showAccuracy ? (' ±' + accuracy + 'm') : ''}}</view>
+      </view>
+      <view wx:if="{{showLoc}}" class="wm-ledger-row" catchtap="onTapPoi">
+        <view class="wm-ledger-k" style="color: {{accentHex}};">实拍点位</view>
+        <view class="wm-ledger-v">{{shortPoi}}{{showAddress && fullAddr ? (' · ' + fullAddr) : ''}}</view>
+      </view>
+      <view wx:if="{{showTime}}" class="wm-ledger-row">
+        <view class="wm-ledger-k" style="color: {{accentHex}};">记录时间</view>
+        <view class="wm-ledger-v">{{fullTs}} {{weekStr}}</view>
+      </view>
+      <view wx:if="{{showEnv}}" class="wm-ledger-row">
+        <view class="wm-ledger-k" style="color: {{accentHex}};">高程方位</view>
+        <view class="wm-ledger-v emerald">海拔{{altitude}}m · {{azimuthText}}</view>
+      </view>
+      <view wx:if="{{showNote && note}}" class="wm-ledger-row">
+        <view class="wm-ledger-k" style="color: {{accentHex}};">现场备注</view>
+        <view class="wm-ledger-v amber">{{note}}</view>
+      </view>
+      <view wx:if="{{antiTamperMode}}" class="wm-ledger-row">
+        <view class="wm-ledger-k" style="color: {{accentHex}};">防伪签名</view>
+        <view class="wm-ledger-v emerald">SHA256:{{liveAntiTamperShort}}</view>
+      </view>
+    </view>
+
+    <!-- 右下角「扫码跳高德」角标 -->
+    <view wx:if="{{showQr}}" class="wm-qr-preview-badge" style="border-color: {{accentHex}};" catchtap="onTapMap">
+      <view class="wm-qr-box">
+        <view class="wm-qr-finder tl"></view>
+        <view class="wm-qr-finder tr"></view>
+        <view class="wm-qr-finder bl"></view>
+        <view class="wm-qr-center-dot">高德</view>
+      </view>
+      <view class="wm-qr-txt" style="color: {{antiTamperMode ? '#34d399' : accentHex}};">{{antiTamperMode ? '扫码验真' : '扫码跳高德'}}</view>
+    </view>
+  </view>
+
+  <!-- 模板 3: 极简胶片底栏 -->
+  <view wx:if="{{styleTemplate === 3}}" class="film-bar-wrapper">
+    <view wx:if="{{showQr}}" class="wm-qr-preview-badge film-floating-qr" style="border-color: {{accentHex}};" catchtap="onTapMap">
+      <view class="wm-qr-box">
+        <view class="wm-qr-finder tl"></view>
+        <view class="wm-qr-finder tr"></view>
+        <view class="wm-qr-finder bl"></view>
+        <view class="wm-qr-center-dot">高德</view>
+      </view>
+      <view class="wm-qr-txt" style="color: {{antiTamperMode ? '#34d399' : accentHex}};">{{antiTamperMode ? '扫码验真' : '扫码跳高德'}}</view>
+    </view>
+
+    <view class="wm-tpl-film-full" style="background-color: {{cardBgRgba}}; border-top-color: {{accentHex}};" catchtap="onTapWatermark">
+      <view class="wm-film-row-top">
+        <view class="wm-film-poi" catchtap="onTapPoi">📍 {{shortPoi}}</view>
+        <view wx:if="{{showTime}}" class="wm-film-time">{{fullTs}} {{weekStr}}</view>
+      </view>
+      <view class="wm-film-row-bottom">
+        <view wx:if="{{showCoords}}" class="wm-film-coord-full" style="color: {{accentHex}};">{{liveCoordStr}}</view>
+        <view wx:if="{{antiTamperMode}}" class="wm-film-badge emerald">🛡SHA256:{{liveAntiTamperShort}}</view>
+        <view wx:elif="{{showNote && note}}" class="wm-film-badge amber">{{note}}</view>
+        <view wx:elif="{{showAddress && fullAddr}}" class="wm-film-badge muted">{{fullAddr}}</view>
+      </view>
+    </view>
+  </view>
+</view>

@@ -1,5 +1,8 @@
 {
-  "navigationBarTitleText": "极速经纬水印相机",
+  "navigationBarTitleText": "极速高德水印相机 v9.0",
   "navigationStyle": "custom",
-  "disableScroll": true
+  "disableScroll": true,
+  "usingComponents": {
+    "watermark-overlay": "/components/watermark-overlay/watermark-overlay"
+  }
 }

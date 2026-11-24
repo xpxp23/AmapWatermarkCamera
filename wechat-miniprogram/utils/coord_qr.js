@@ -1,12 +1,16 @@
 /**
- * 极速经纬水印相机 v8.0.0 · 微信小程序三坐标系（默认 WGS-84 / 国标 CGCS2000 / 高德 GCJ-02）双向解耦引擎、
- * ISO/IEC 18004 V1-V9 全容量离线二维码引擎、160×160 高德矢量缩略图引擎与 FIPS 180-4 SHA-256 外业防篡改验真引擎
+ * 极速高德水印相机 v9.0.0 · 微信小程序三坐标系（默认 WGS-84 / 国标 CGCS2000 / 高德 GCJ-02）双向解耦引擎、
+ * ISO/IEC 18004 V1-V14 全容量 8 掩码择优离线二维码引擎与 FIPS 180-4 SHA-256 外业防篡改验真引擎
  */
 
 const PI = Math.PI;
 const AXIS = 6378245.0;
 const OFFSET_EE = 0.00669342162296594323;
 const ANTI_TAMPER_SALT = 'AMAP_WM_V7_TRUST_ANCHOR_2026';
+
+// 默认未定位占位坐标（天安门广场），防伪模式下严禁对此默认坐标签发防伪哈希
+const DEFAULT_FALLBACK_LAT = 39.908823;
+const DEFAULT_FALLBACK_LON = 116.397470;
 
 function outOfChina(lat, lon) {
   return lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271;
@@ -73,10 +77,23 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
   return r * 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
 }
 
+function isDefaultFallbackCoord(lat, lon) {
+  return (
+    Math.abs(Number(lat) - DEFAULT_FALLBACK_LAT) < 0.00001 &&
+    Math.abs(Number(lon) - DEFAULT_FALLBACK_LON) < 0.00001
+  );
+}
+
 /**
- * 根据水印目标坐标系 (WGS-84 / CGCS2000 / GCJ-02) 返回用于水印显示的经纬度
- * 所有高德跳转、二维码与微信地图导航始终固定使用底层的 GCJ-02 坐标，确保 100% 零偏差
+ * 校验当前是否具备防伪签发资格：必须已获得真实定位且非默认占位坐标
  */
+function canSignAntiTamper(hasRealFix, gcjLat, gcjLon) {
+  if (!hasRealFix) return false;
+  if (isNaN(Number(gcjLat)) || isNaN(Number(gcjLon))) return false;
+  if (isDefaultFallbackCoord(gcjLat, gcjLon)) return false;
+  return true;
+}
+
 function resolveDisplayCoordinates(coordSys, gcjLat, gcjLon, wgsLat, wgsLon) {
   if (coordSys === 'GCJ-02') {
     return {
@@ -129,6 +146,23 @@ function formatAzimuthText(deg) {
   else if (d <= 280) dir = '正西';
   const pad3 = d < 10 ? '00' + d : d < 100 ? '0' + d : '' + d;
   return `${dir} ${pad3}°`;
+}
+
+function formatTimeFromDate(dateObj) {
+  const d = dateObj instanceof Date && !isNaN(dateObj.getTime()) ? dateObj : new Date();
+  const pad = n => (n < 10 ? '0' + n : '' + n);
+  const weeks = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const hms = `${hm}:${pad(d.getSeconds())}`;
+  const datePart = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const weekStr = weeks[d.getDay()];
+  const dateWeek = `${datePart} ${weekStr}`;
+  const fullTs = `${datePart} ${hms}`;
+  return { hm, hms, datePart, weekStr, dateWeek, fullTs };
+}
+
+function getTimeStrings(offsetMs) {
+  return formatTimeFromDate(new Date(Date.now() + (Number(offsetMs) || 0)));
 }
 
 function stringToUtf8Bytes(str) {
@@ -219,7 +253,6 @@ function sha256Hex(message) {
 
 /**
  * 计算外业防篡改签名摘要 (16位大写 SHA-256 截断验真码)
- * 绑定：真实 GCJ-02 6位经纬度 + 秒级时间戳 + 地点简称 + 可选现场备注摘要
  */
 function computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note) {
   const latStr = Number(gcjLat || 0).toFixed(6);
@@ -233,9 +266,14 @@ function computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note) {
   return sha256Hex(raw).slice(0, 16);
 }
 
+/**
+ * 严格验真：强制要求 sig.length >= 10 且仅接受十六进制字符，杜绝短签名绕过
+ */
 function verifyAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, signature, note) {
   const cleanSig = String(signature || '').toUpperCase().trim();
-  if (!cleanSig || cleanSig.length < 10) return false;
+  if (!cleanSig || cleanSig.length < 10 || !/^[0-9A-F]{10,16}$/.test(cleanSig)) {
+    return false;
+  }
   const expectedWithNote = computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note);
   if (expectedWithNote.startsWith(cleanSig)) return true;
   // 向下兼容未附带 note 字段的 v7.x 防伪二维码
@@ -244,25 +282,48 @@ function verifyAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, signature, no
 }
 
 /**
- * ISO/IEC 18004 QR Code Matrix Engine (Version 1 ~ Version 9, Level L) + LRU 缓存防重复计算
+ * ISO/IEC 18004 QR Code Matrix Engine (Version 1 ~ Version 14, Level L)
+ * 支持多分组 RS 交错编码 + 8 掩码惩罚评分择优 + LRU 缓存
  */
 const QR_SPECS = [
-  { ver: 1, size: 21, dataBytes: 19, eccBytes: 7, numBlocks: 1, align: [] },
-  { ver: 2, size: 25, dataBytes: 34, eccBytes: 10, numBlocks: 1, align: [6, 18] },
-  { ver: 3, size: 29, dataBytes: 55, eccBytes: 15, numBlocks: 1, align: [6, 22] },
-  { ver: 4, size: 33, dataBytes: 80, eccBytes: 20, numBlocks: 1, align: [6, 26] },
-  { ver: 5, size: 37, dataBytes: 108, eccBytes: 26, numBlocks: 1, align: [6, 30] },
-  { ver: 6, size: 41, dataBytes: 136, eccBytes: 18, numBlocks: 2, align: [6, 34] },
-  { ver: 7, size: 45, dataBytes: 156, eccBytes: 20, numBlocks: 2, align: [6, 22, 38] },
-  { ver: 8, size: 49, dataBytes: 194, eccBytes: 24, numBlocks: 2, align: [6, 24, 42] },
-  { ver: 9, size: 53, dataBytes: 232, eccBytes: 30, numBlocks: 2, align: [6, 26, 46] }
+  { ver: 1, size: 21, dataBytes: 19, eccBytes: 7, g1Count: 1, g1Data: 19, g2Count: 0, g2Data: 0, align: [] },
+  { ver: 2, size: 25, dataBytes: 34, eccBytes: 10, g1Count: 1, g1Data: 34, g2Count: 0, g2Data: 0, align: [6, 18] },
+  { ver: 3, size: 29, dataBytes: 55, eccBytes: 15, g1Count: 1, g1Data: 55, g2Count: 0, g2Data: 0, align: [6, 22] },
+  { ver: 4, size: 33, dataBytes: 80, eccBytes: 20, g1Count: 1, g1Data: 80, g2Count: 0, g2Data: 0, align: [6, 26] },
+  { ver: 5, size: 37, dataBytes: 108, eccBytes: 26, g1Count: 1, g1Data: 108, g2Count: 0, g2Data: 0, align: [6, 30] },
+  { ver: 6, size: 41, dataBytes: 136, eccBytes: 18, g1Count: 2, g1Data: 68, g2Count: 0, g2Data: 0, align: [6, 34] },
+  { ver: 7, size: 45, dataBytes: 156, eccBytes: 20, g1Count: 2, g1Data: 78, g2Count: 0, g2Data: 0, align: [6, 22, 38] },
+  { ver: 8, size: 49, dataBytes: 194, eccBytes: 24, g1Count: 2, g1Data: 97, g2Count: 0, g2Data: 0, align: [6, 24, 42] },
+  { ver: 9, size: 53, dataBytes: 232, eccBytes: 30, g1Count: 2, g1Data: 116, g2Count: 0, g2Data: 0, align: [6, 26, 46] },
+  { ver: 10, size: 57, dataBytes: 274, eccBytes: 18, g1Count: 2, g1Data: 68, g2Count: 2, g2Data: 69, align: [6, 28, 50] },
+  { ver: 11, size: 61, dataBytes: 324, eccBytes: 20, g1Count: 4, g1Data: 81, g2Count: 0, g2Data: 0, align: [6, 30, 54] },
+  { ver: 12, size: 65, dataBytes: 370, eccBytes: 24, g1Count: 2, g1Data: 92, g2Count: 2, g2Data: 93, align: [6, 32, 58] },
+  { ver: 13, size: 69, dataBytes: 428, eccBytes: 26, g1Count: 4, g1Data: 107, g2Count: 0, g2Data: 0, align: [6, 34, 62] },
+  { ver: 14, size: 73, dataBytes: 461, eccBytes: 30, g1Count: 3, g1Data: 115, g2Count: 1, g2Data: 116, align: [6, 26, 46, 66] }
 ];
 
 const QR_VER_INFO = {
   7: 0x07c94,
   8: 0x085bc,
-  9: 0x09a99
+  9: 0x09a99,
+  10: 0x0a4d3,
+  11: 0x0bbf6,
+  12: 0x0c762,
+  13: 0x0d847,
+  14: 0x0e60d
 };
+
+// Level L (01) 对应 Mask 0..7 的 15-bit BCH 格式信息
+const QR_FORMAT_INFO_L = [
+  0x77c4, // mask 0
+  0x72f3, // mask 1
+  0x7daa, // mask 2
+  0x789d, // mask 3
+  0x662f, // mask 4
+  0x6318, // mask 5
+  0x6c41, // mask 6
+  0x6976  // mask 7
+];
 
 const _qrMatrixCache = {};
 const _qrCacheKeys = [];
@@ -306,26 +367,148 @@ function safeUtf8Slice(utf8Bytes, maxLen) {
   return utf8Bytes.slice(0, cut);
 }
 
+function maskCondition(maskId, x, y) {
+  switch (maskId) {
+    case 0: return (x + y) % 2 === 0;
+    case 1: return y % 2 === 0;
+    case 2: return x % 3 === 0;
+    case 3: return (x + y) % 3 === 0;
+    case 4: return (Math.floor(y / 2) + Math.floor(x / 3)) % 2 === 0;
+    case 5: return ((x * y) % 2) + ((x * y) % 3) === 0;
+    case 6: return (((x * y) % 2) + ((x * y) % 3)) % 2 === 0;
+    case 7: return (((x + y) % 2) + ((x * y) % 3)) % 2 === 0;
+    default: return false;
+  }
+}
+
+function writeFormatBits(mat, sz, fmt) {
+  const bit = i => ((fmt >>> (14 - i)) & 1) !== 0;
+  for (let i = 0; i <= 5; i++) mat[8][i] = bit(i);
+  mat[8][7] = bit(6);
+  mat[8][8] = bit(7);
+  mat[7][8] = bit(8);
+  for (let i = 9; i <= 14; i++) mat[14 - i][8] = bit(i);
+  for (let i = 0; i <= 7; i++) mat[sz - 1 - i][8] = bit(i);
+  for (let i = 8; i <= 14; i++) mat[8][sz - 15 + i] = bit(i);
+  mat[sz - 8][8] = true;
+}
+
+function computeMaskPenalty(mat, sz) {
+  let penalty = 0;
+
+  // Rule 1: 连续 5 个及以上同色模块
+  for (let y = 0; y < sz; y++) {
+    let runColor = mat[y][0];
+    let runLen = 1;
+    for (let x = 1; x < sz; x++) {
+      if (mat[y][x] === runColor) {
+        runLen++;
+      } else {
+        if (runLen >= 5) penalty += 3 + (runLen - 5);
+        runColor = mat[y][x];
+        runLen = 1;
+      }
+    }
+    if (runLen >= 5) penalty += 3 + (runLen - 5);
+  }
+  for (let x = 0; x < sz; x++) {
+    let runColor = mat[0][x];
+    let runLen = 1;
+    for (let y = 1; y < sz; y++) {
+      if (mat[y][x] === runColor) {
+        runLen++;
+      } else {
+        if (runLen >= 5) penalty += 3 + (runLen - 5);
+        runColor = mat[y][x];
+        runLen = 1;
+      }
+    }
+    if (runLen >= 5) penalty += 3 + (runLen - 5);
+  }
+
+  // Rule 2: 2x2 同色块
+  for (let y = 0; y < sz - 1; y++) {
+    for (let x = 0; x < sz - 1; x++) {
+      const c = mat[y][x];
+      if (c === mat[y][x + 1] && c === mat[y + 1][x] && c === mat[y + 1][x + 1]) {
+        penalty += 3;
+      }
+    }
+  }
+
+  // Rule 3: 类似定位符的 1:1:3:1:1 序列
+  const checkFinderLike = (arr, len) => {
+    let count = 0;
+    for (let i = 0; i <= len - 11; i++) {
+      // 10111010000 or 00001011101
+      if (
+        arr[i] && !arr[i + 1] && arr[i + 2] && arr[i + 3] && arr[i + 4] && !arr[i + 5] && arr[i + 6] &&
+        !arr[i + 7] && !arr[i + 8] && !arr[i + 9] && !arr[i + 10]
+      ) {
+        count++;
+      } else if (
+        !arr[i] && !arr[i + 1] && !arr[i + 2] && !arr[i + 3] &&
+        arr[i + 4] && !arr[i + 5] && arr[i + 6] && arr[i + 7] && arr[i + 8] && !arr[i + 9] && arr[i + 10]
+      ) {
+        count++;
+      }
+    }
+    return count * 40;
+  };
+  for (let y = 0; y < sz; y++) {
+    penalty += checkFinderLike(mat[y], sz);
+  }
+  const colBuf = new Array(sz);
+  for (let x = 0; x < sz; x++) {
+    for (let y = 0; y < sz; y++) colBuf[y] = mat[y][x];
+    penalty += checkFinderLike(colBuf, sz);
+  }
+
+  // Rule 4: 深色模块占比偏离 50%
+  let darkCount = 0;
+  for (let y = 0; y < sz; y++) {
+    for (let x = 0; x < sz; x++) {
+      if (mat[y][x]) darkCount++;
+    }
+  }
+  const total = sz * sz;
+  const pct = (darkCount * 100) / total;
+  const prev5 = Math.floor(pct / 5) * 5;
+  const next5 = prev5 + 5;
+  const k = Math.min(Math.abs(prev5 - 50), Math.abs(next5 - 50)) / 5;
+  penalty += k * 10;
+
+  return penalty;
+}
+
 function encodeQrMatrix(text) {
   const key = String(text || '');
   if (_qrMatrixCache[key]) return _qrMatrixCache[key];
 
   const utf8 = stringToUtf8Bytes(key);
-  const spec = QR_SPECS.find(s => utf8.length + 3 <= s.dataBytes) || QR_SPECS[QR_SPECS.length - 1];
-  const bytes = safeUtf8Slice(utf8, spec.dataBytes - 3);
+  const spec =
+    QR_SPECS.find(s => utf8.length + (s.ver >= 10 ? 4 : 3) <= s.dataBytes) ||
+    QR_SPECS[QR_SPECS.length - 1];
+  const headerReserve = spec.ver >= 10 ? 4 : 3;
+  const bytes = safeUtf8Slice(utf8, spec.dataBytes - headerReserve);
+
   const bits = [];
   const pushBits = (val, len) => {
     for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1);
   };
+  // Byte mode indicator (0100)
   pushBits(4, 4);
-  pushBits(bytes.length, 8);
+  // Character count indicator: 8 bits for V1-V9, 16 bits for V10-V26
+  pushBits(bytes.length, spec.ver >= 10 ? 16 : 8);
   bytes.forEach(b => pushBits(b, 8));
+
   const maxBits = spec.dataBytes * 8;
   pushBits(0, Math.min(4, maxBits - bits.length));
   while (bits.length % 8 !== 0) bits.push(0);
   const pads = [0xec, 0x11];
   let pi = 0;
   while (bits.length < maxBits) pushBits(pads[pi++ % 2], 8);
+
   const dataCw = [];
   for (let i = 0; i < spec.dataBytes; i++) {
     let v = 0;
@@ -333,32 +516,42 @@ function encodeQrMatrix(text) {
     dataCw.push(v);
   }
 
-  let allCw = [];
-  if (spec.numBlocks === 1) {
-    allCw = dataCw.concat(rsEncode(dataCw, spec.eccBytes));
-  } else {
-    const blockSize = spec.dataBytes / spec.numBlocks;
-    const blocks = [];
-    const eccBlocks = [];
-    for (let b = 0; b < spec.numBlocks; b++) {
-      const blk = dataCw.slice(b * blockSize, (b + 1) * blockSize);
-      blocks.push(blk);
-      eccBlocks.push(rsEncode(blk, spec.eccBytes));
+  // Multi-group RS block encoding & interleaving
+  const blocks = [];
+  const eccBlocks = [];
+  let offset = 0;
+  for (let b = 0; b < spec.g1Count; b++) {
+    const blk = dataCw.slice(offset, offset + spec.g1Data);
+    offset += spec.g1Data;
+    blocks.push(blk);
+    eccBlocks.push(rsEncode(blk, spec.eccBytes));
+  }
+  for (let b = 0; b < spec.g2Count; b++) {
+    const blk = dataCw.slice(offset, offset + spec.g2Data);
+    offset += spec.g2Data;
+    blocks.push(blk);
+    eccBlocks.push(rsEncode(blk, spec.eccBytes));
+  }
+
+  const allCw = [];
+  const maxBlockData = Math.max(spec.g1Data, spec.g2Data);
+  for (let i = 0; i < maxBlockData; i++) {
+    for (let b = 0; b < blocks.length; b++) {
+      if (i < blocks[b].length) allCw.push(blocks[b][i]);
     }
-    for (let i = 0; i < blockSize; i++) {
-      for (let b = 0; b < spec.numBlocks; b++) allCw.push(blocks[b][i]);
-    }
-    for (let i = 0; i < spec.eccBytes; i++) {
-      for (let b = 0; b < spec.numBlocks; b++) allCw.push(eccBlocks[b][i]);
+  }
+  for (let i = 0; i < spec.eccBytes; i++) {
+    for (let b = 0; b < eccBlocks.length; b++) {
+      allCw.push(eccBlocks[b][i]);
     }
   }
 
   const sz = spec.size;
-  const mat = Array.from({ length: sz }, () => new Array(sz).fill(false));
+  const baseMat = Array.from({ length: sz }, () => new Array(sz).fill(false));
   const fn = Array.from({ length: sz }, () => new Array(sz).fill(false));
   const setFn = (x, y, d) => {
     if (x >= 0 && x < sz && y >= 0 && y < sz) {
-      mat[y][x] = d;
+      baseMat[y][x] = d;
       fn[y][x] = true;
     }
   };
@@ -412,6 +605,7 @@ function encodeQrMatrix(text) {
     }
   }
 
+  // Place unmasked data bits
   let bitIdx = 0;
   let right = sz - 1;
   let vert = 0;
@@ -422,8 +616,9 @@ function encodeQrMatrix(text) {
       for (let j = 0; j < 2; j++) {
         const x = right - j;
         if (!fn[y][x]) {
-          const dark = bitIdx < allCw.length * 8 ? ((allCw[bitIdx >>> 3] >>> (7 - (bitIdx & 7))) & 1) !== 0 : false;
-          mat[y][x] = dark;
+          const dark =
+            bitIdx < allCw.length * 8 ? ((allCw[bitIdx >>> 3] >>> (7 - (bitIdx & 7))) & 1) !== 0 : false;
+          baseMat[y][x] = dark;
           bitIdx++;
         }
       }
@@ -431,30 +626,33 @@ function encodeQrMatrix(text) {
     right -= 2;
     vert++;
   }
-  for (let y = 0; y < sz; y++) {
-    for (let x = 0; x < sz; x++) {
-      if (!fn[y][x] && (x + y) % 2 === 0) mat[y][x] = !mat[y][x];
+
+  // 评估全部 8 种掩码，择优选择惩罚分数最低的掩码矩阵
+  let bestMat = null;
+  let bestPenalty = Infinity;
+  for (let maskId = 0; maskId < 8; maskId++) {
+    const cand = Array.from({ length: sz }, (_, y) => {
+      const row = new Array(sz);
+      for (let x = 0; x < sz; x++) {
+        row[x] = !fn[y][x] && maskCondition(maskId, x, y) ? !baseMat[y][x] : baseMat[y][x];
+      }
+      return row;
+    });
+    writeFormatBits(cand, sz, QR_FORMAT_INFO_L[maskId]);
+    const p = computeMaskPenalty(cand, sz);
+    if (p < bestPenalty) {
+      bestPenalty = p;
+      bestMat = cand;
     }
   }
-
-  const fmt = 0x77c4;
-  const bit = i => ((fmt >>> (14 - i)) & 1) !== 0;
-  for (let i = 0; i <= 5; i++) mat[8][i] = bit(i);
-  mat[8][7] = bit(6);
-  mat[8][8] = bit(7);
-  mat[7][8] = bit(8);
-  for (let i = 9; i <= 14; i++) mat[14 - i][8] = bit(i);
-  for (let i = 0; i <= 7; i++) mat[sz - 1 - i][8] = bit(i);
-  for (let i = 8; i <= 14; i++) mat[8][sz - 15 + i] = bit(i);
-  mat[sz - 8][8] = true;
 
   if (_qrCacheKeys.length >= 36) {
     const oldest = _qrCacheKeys.shift();
     delete _qrMatrixCache[oldest];
   }
   _qrCacheKeys.push(key);
-  _qrMatrixCache[key] = mat;
-  return mat;
+  _qrMatrixCache[key] = bestMat;
+  return bestMat;
 }
 
 /**
@@ -480,7 +678,7 @@ function buildAmapJumpUrl(gcjLat, gcjLon, shortPoi, antiTamperOpts) {
 }
 
 /**
- * 解析扫码结果、链接二维码参数或好友转发卡片参数，并自动执行 SHA-256 防伪核验
+ * 解析扫码结果、链接二维码参数或好友转发卡片参数，并严格执行 SHA-256 防伪核验
  */
 function parseLocationPayload(rawInput) {
   if (!rawInput) return null;
@@ -634,12 +832,18 @@ function inferSmartPoiFromCoords(gcjLat, gcjLon) {
 }
 
 module.exports = {
+  DEFAULT_FALLBACK_LAT,
+  DEFAULT_FALLBACK_LON,
   wgs84ToGcj02,
   gcj02ToWgs84,
   distanceMeters,
+  isDefaultFallbackCoord,
+  canSignAntiTamper,
   resolveDisplayCoordinates,
   formatCoords,
   formatAzimuthText,
+  formatTimeFromDate,
+  getTimeStrings,
   sha256Hex,
   computeAntiTamperHash,
   verifyAntiTamperHash,

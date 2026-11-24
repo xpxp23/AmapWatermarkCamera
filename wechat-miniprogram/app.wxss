@@ -1,12 +1,44 @@
+/* 极速高德水印相机 v9.0.0 · 全局 Design Token 与基础样式 */
 page {
-  background-color: #000000;
-  color: #ffffff;
+  --bg-page: #000000;
+  --bg-surface: #0b132b;
+  --bg-elevated: #0f172a;
+  --bg-pill: rgba(30, 41, 59, 0.82);
+  --border-subtle: rgba(148, 163, 184, 0.24);
+  --border-accent: rgba(56, 189, 248, 0.55);
+  --accent-blue: #38bdf8;
+  --accent-blue-bg: rgba(2, 132, 199, 0.25);
+  --accent-emerald: #34d399;
+  --accent-emerald-bg: rgba(5, 150, 105, 0.25);
+  --accent-amber: #fbbf24;
+  --accent-amber-bg: rgba(217, 119, 6, 0.25);
+  --accent-danger: #f87171;
+  --text-primary: #ffffff;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+
+  background-color: var(--bg-page);
+  color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
-  height: 100vh;
-  overflow: hidden;
   box-sizing: border-box;
 }
 
 .mono {
   font-family: "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+}
+
+.accent {
+  color: var(--accent-blue) !important;
+}
+
+.emerald {
+  color: var(--accent-emerald) !important;
+}
+
+.amber {
+  color: var(--accent-amber) !important;
+}
+
+.danger {
+  color: var(--accent-danger) !important;
 }

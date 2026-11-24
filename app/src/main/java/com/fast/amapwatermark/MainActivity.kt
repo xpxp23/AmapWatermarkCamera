@@ -1,27 +1,25 @@
 package com.fast.amapwatermark
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.Paint
-import android.graphics.RenderEffect
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.OrientationEventListener
 import android.view.Surface
-import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -45,14 +43,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroidSize
-import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -62,18 +57,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
@@ -84,13 +73,13 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import com.fast.amapwatermark.ui.*
 import com.fast.amapwatermark.util.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -99,14 +88,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 class MainActivity : ComponentActivity() {
     private lateinit var fastLocationManager: FastLocationManager
@@ -124,7 +112,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.BLACK
         window.navigationBarColor = android.graphics.Color.BLACK
-        fastLocationManager = FastLocationManager(this)
+        fastLocationManager = FastLocationManager(applicationContext)
 
         setContent {
             MaterialTheme(
@@ -148,11 +136,15 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         fastLocationManager.stopUpdates()
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        fastLocationManager.release()
+    }
 }
 
 private val QUICK_TITLE_TAGS = listOf("现场点位核验", "工程巡检记录", "隐蔽工程验收", "外业测绘定桩", "安全隐患排查", "物资进场取证")
 private val QUICK_NOTE_TAGS = listOf("核验合格", "定位已校准", "施工进行中", "待整改复核", "初检通过", "已闭环归档")
-private val QUICK_POI_TAGS = listOf("1号点位", "施工现场", "巡检点A", "北门入口", "主楼基坑")
 
 @Composable
 fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
@@ -160,8 +152,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("amap_wm_prefs_v6", Context.MODE_PRIVATE) }
-
-    val loc by locationManager.locationState
 
     var deviceOrientation by remember { mutableStateOf(0) }
     var continuousUiRotation by remember { mutableStateOf(0f) }
@@ -220,11 +210,12 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         }
     }
 
-    val uiIconRotation by animateFloatAsState(
+    val uiIconRotationState = animateFloatAsState(
         targetValue = continuousUiRotation,
         animationSpec = tween(durationMillis = 280),
         label = "uiIconRotation"
     )
+    val rotationProvider: () -> Float = { uiIconRotationState.value }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -233,7 +224,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     }
 
     // Camera hardware & capture mode states
-    // captureMode: 1 = 📷 光学拍照模式 (Hardware ImageCapture ISP + Auto Flash), 0 = ⚡ 极速截屏模式 (0ms PreviewView Snapshot)
     var captureMode by remember { mutableStateOf(prefs.getInt("captureMode", 1)) }
     var isFrontCamera by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf(0) } // 0: 关, 1: 开, 2: 自动, 3: 常亮
@@ -252,7 +242,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     var exposureIndex by remember { mutableStateOf(0) }
     var exposureRange by remember { mutableStateOf(-4..4) }
 
-    // Persisted Watermark & Filter configuration
+    // Persisted Watermark configuration (v9.0.0: zero filter state, showBottomScrim default false, asyncOptimal default false)
     var styleTemplate by remember { mutableStateOf(prefs.getInt("styleTemplate", 0)) }
     var customTitle by remember { mutableStateOf(prefs.getString("customTitle", "现场点位核验") ?: "现场点位核验") }
     var coordSystem by remember { mutableStateOf(prefs.getString("coordSystem", "WGS-84") ?: "WGS-84") }
@@ -274,14 +264,15 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     var showNote by remember { mutableStateOf(prefs.getBoolean("showNote", true)) }
     var showMiniMap by remember { mutableStateOf(prefs.getBoolean("showMiniMap", true)) }
     var miniMapPosition by remember { mutableStateOf(prefs.getInt("miniMapPosition", 0)) }
+    var showBottomScrim by remember { mutableStateOf(prefs.getBoolean("showBottomScrim", false)) }
     var antiTamperMode by remember { mutableStateOf(prefs.getBoolean("antiTamperMode", false)) }
     var bottomRight by remember { mutableStateOf(prefs.getBoolean("bottomRight", false)) }
-    var filterIndex by remember { mutableStateOf(0) }
 
-    var asyncOptimal by remember { mutableStateOf(prefs.getBoolean("asyncOptimal", true)) }
+    var asyncOptimal by remember { mutableStateOf(prefs.getBoolean("asyncOptimal", false)) }
     var accuracyThreshold by remember { mutableStateOf(prefs.getInt("accuracyThreshold", 10)) }
     var keepCleanOriginal by remember { mutableStateOf(prefs.getBoolean("keepCleanOriginal", false)) }
     var showGridLines by remember { mutableStateOf(prefs.getBoolean("showGridLines", false)) }
+
     var templateSwitchBanner by remember { mutableStateOf<String?>(null) }
     var templateBannerTrigger by remember { mutableStateOf(0) }
 
@@ -289,13 +280,13 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         val total = WatermarkRenderer.STYLE_NAMES.size
         val normalized = ((newIndex % total) + total) % total
         styleTemplate = normalized
-        templateSwitchBanner = "🎨 模板 ${normalized + 1}/$total · ${WatermarkRenderer.STYLE_NAMES[normalized]}"
+        templateSwitchBanner = "模板 ${normalized + 1}/$total · ${WatermarkRenderer.STYLE_NAMES[normalized]}"
         templateBannerTrigger++
     }
 
     LaunchedEffect(templateBannerTrigger) {
         if (templateSwitchBanner != null) {
-            delay(1600L)
+            delay(1500L)
             templateSwitchBanner = null
         }
     }
@@ -304,8 +295,8 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         captureMode, styleTemplate, customTitle, coordSystem, useDms, customNote,
         fontScale, accentColorIndex, bgAlpha, showTime, showLocation,
         showCoords, showCoordTag, showAccuracy, showAltitude, showAzimuth,
-        showQrCode, showAddress, showNote, showMiniMap, miniMapPosition, antiTamperMode,
-        bottomRight, asyncOptimal, accuracyThreshold, keepCleanOriginal, showGridLines
+        showQrCode, showAddress, showNote, showMiniMap, miniMapPosition, showBottomScrim,
+        antiTamperMode, bottomRight, asyncOptimal, accuracyThreshold, keepCleanOriginal, showGridLines
     ) {
         delay(250L)
         prefs.edit()
@@ -330,6 +321,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             .putBoolean("showNote", showNote)
             .putBoolean("showMiniMap", showMiniMap)
             .putInt("miniMapPosition", miniMapPosition)
+            .putBoolean("showBottomScrim", showBottomScrim)
             .putBoolean("antiTamperMode", antiTamperMode)
             .putBoolean("bottomRight", bottomRight)
             .putBoolean("asyncOptimal", asyncOptimal)
@@ -339,21 +331,81 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             .apply()
     }
 
-    var showFilterStrip by remember { mutableStateOf(false) }
+    // Dialog / Screen States
     var showLocationSheet by remember { mutableStateOf(false) }
     var showWatermarkSheet by remember { mutableStateOf(false) }
     var watermarkSheetTab by remember { mutableStateOf(0) }
+    var showResetConfirmDialog by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showGalleryScreen by remember { mutableStateOf(false) }
-    var selectedGalleryPhoto by remember { mutableStateOf<PhotoEntry?>(null) }
     var editingPhoto by remember { mutableStateOf<PhotoEntry?>(null) }
-    var pendingDeletePhoto by remember { mutableStateOf<PhotoEntry?>(null) }
+    var pendingDeletePhotos by remember { mutableStateOf<List<PhotoEntry>>(emptyList()) }
     var showVerifyDialog by remember { mutableStateOf(false) }
     var verifyPayload by remember { mutableStateOf<QrCodeGenerator.VerifiedLocationPayload?>(null) }
     var justCapturedPhoto by remember { mutableStateOf<PhotoEntry?>(null) }
 
+    // Batch Watermark States
+    var pendingBatchUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var batchProgressState by remember { mutableStateOf<BatchProgressState?>(null) }
+    var batchJob by remember { mutableStateOf<Job?>(null) }
+
     var photos by remember { mutableStateOf<List<PhotoEntry>>(emptyList()) }
     var latestThumbBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    fun buildCurrentTemplateBaseConfig(): WatermarkConfig {
+        return WatermarkConfig(
+            styleTemplate = styleTemplate,
+            customTitle = customTitle,
+            coordSystem = coordSystem,
+            useDms = useDms,
+            note = if (antiTamperMode) "" else customNote,
+            showTime = showTime,
+            showLocation = showLocation,
+            showCoords = showCoords,
+            showCoordTag = showCoordTag,
+            showAccuracy = showAccuracy,
+            showAltitude = showAltitude,
+            showAzimuth = showAzimuth,
+            showQrCode = showQrCode,
+            showAddress = showAddress,
+            showNote = showNote,
+            showMiniMap = showMiniMap,
+            miniMapPosition = miniMapPosition,
+            showBottomScrim = showBottomScrim,
+            bottomRight = bottomRight,
+            bgAlpha = bgAlpha,
+            fontScale = fontScale,
+            accentColorIndex = accentColorIndex
+        )
+    }
+
+    fun exportAndShareCsv(targetList: List<PhotoEntry>) {
+        if (targetList.isEmpty()) {
+            Toast.makeText(context, "暂无可导出的照片记录", Toast.LENGTH_SHORT).show()
+            return
+        }
+        scope.launch {
+            val csvFile = withContext(Dispatchers.IO) {
+                WatermarkRenderer.exportPhotosLedgerCsv(context, targetList)
+            }
+            if (csvFile != null) {
+                try {
+                    val uri = WatermarkRenderer.getShareUriForFile(context, csvFile)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/csv"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, "高德水印相机工程台账")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "导出工程台账 CSV"))
+                } catch (e: Exception) {
+                    Toast.makeText(context, "分享 CSV 失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(context, "导出台账 CSV 失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -364,23 +416,15 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             withContext(Dispatchers.Main) {
                 photos = loaded
                 latestThumbBitmap = firstThumb
-                if (loaded.isNotEmpty() && selectedGalleryPhoto == null) {
-                    selectedGalleryPhoto = loaded.first()
-                }
             }
         }
     }
 
     LaunchedEffect(photos.firstOrNull()?.id, photos.firstOrNull()?.watermarkedFile?.lastModified()) {
         val firstFile = photos.firstOrNull()?.watermarkedFile
-        if (firstFile != null) {
-            val bmp = withContext(Dispatchers.IO) {
-                BitmapCacheManager.loadThumbnail(firstFile, 160, 160)
-            }
-            latestThumbBitmap = bmp
-        } else {
-            latestThumbBitmap = null
-        }
+        latestThumbBitmap = if (firstFile != null) {
+            withContext(Dispatchers.IO) { BitmapCacheManager.loadThumbnail(firstFile, 160, 160) }
+        } else null
     }
 
     var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
@@ -401,7 +445,10 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            perms.add(Manifest.permission.READ_MEDIA_IMAGES)
+            perms.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             perms.add(Manifest.permission.READ_MEDIA_IMAGES)
         } else {
             perms.add(Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -415,32 +462,33 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         permissionLauncher.launch(perms.toTypedArray())
     }
 
-    val importPhotoLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                Toast.makeText(context, "正在提取照片EXIF地理位置并对齐高德...", Toast.LENGTH_SHORT).show()
-                val imported = withContext(Dispatchers.IO) {
-                    WatermarkRenderer.importExternalPhotoUri(context, uri, loc, coordSystem)
-                }
-                if (imported != null) {
-                    photos = listOf(imported) + photos
-                    selectedGalleryPhoto = imported
-                    Toast.makeText(context, "已生成经纬水印图并对齐高德GCJ-02坐标！", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "无法读取该图片，请重试", Toast.LENGTH_SHORT).show()
-                }
-            }
+    // Batch Photo Picker (up to 50 photos)
+    val batchPhotoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(maxItems = 50)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            pendingBatchUris = uris
         }
     }
 
-    // Bind CameraX with UseCaseGroup & ViewPort alignment so Optical Capture matches Viewfinder!
+    fun launchBatchPicker() {
+        batchPhotoPickerLauncher.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        )
+    }
+
+    // Bind CameraX with lifecycle check, zoom reset, and front-camera torch reset
     LaunchedEffect(hasCameraPermission, isFrontCamera, previewViewRef) {
         val pv = previewViewRef ?: return@LaunchedEffect
         if (!hasCameraPermission) return@LaunchedEffect
+        if (isFrontCamera && flashMode == 3) {
+            flashMode = 0
+        }
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
+            if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.INITIALIZED)) {
+                return@addListener
+            }
             try {
                 val cameraProvider = providerFuture.get()
                 val preview = Preview.Builder().build().also {
@@ -474,6 +522,9 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 val zoomState = cam.cameraInfo.zoomState.value
                 maxZoomRatio = (zoomState?.maxZoomRatio ?: 4.0f).coerceAtLeast(2.0f)
                 zoomRatio = 1.0f
+                try {
+                    cam.cameraControl.setZoomRatio(1.0f)
+                } catch (_: Exception) {}
 
                 val expState = cam.cameraInfo.exposureState
                 val range = expState.exposureCompensationRange
@@ -483,24 +534,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 Toast.makeText(context, "相机启动异常: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }, ContextCompat.getMainExecutor(context))
-    }
-
-    // Apply true ColorMatrix filter to live PreviewView!
-    LaunchedEffect(filterIndex, previewViewRef) {
-        val pv = previewViewRef ?: return@LaunchedEffect
-        val cm = WatermarkRenderer.getAndroidColorMatrix(filterIndex)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            pv.setRenderEffect(
-                if (cm != null) RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(cm)) else null
-            )
-        } else {
-            if (cm != null) {
-                val paint = Paint().apply { colorFilter = ColorMatrixColorFilter(cm) }
-                pv.setLayerType(View.LAYER_TYPE_HARDWARE, paint)
-            } else {
-                pv.setLayerType(View.LAYER_TYPE_NONE, null)
-            }
-        }
     }
 
     // Keep ImageCapture targetRotation aligned with physical deviceOrientation
@@ -515,7 +548,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     }
 
     // Sync Flash / Torch state
-    LaunchedEffect(flashMode, cameraRef, imageCaptureRef) {
+    LaunchedEffect(flashMode, isFrontCamera, cameraRef, imageCaptureRef) {
         val cam = cameraRef ?: return@LaunchedEffect
         val cap = imageCaptureRef ?: return@LaunchedEffect
         try {
@@ -533,7 +566,11 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     cap.flashMode = ImageCapture.FLASH_MODE_AUTO
                 }
                 3 -> {
-                    cam.cameraControl.enableTorch(true)
+                    if (!isFrontCamera) {
+                        cam.cameraControl.enableTorch(true)
+                    } else {
+                        cam.cameraControl.enableTorch(false)
+                    }
                     cap.flashMode = ImageCapture.FLASH_MODE_OFF
                 }
             }
@@ -547,7 +584,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         }
     }
 
-    // Dual-Mode Capture Execution (Mode 1: Hardware Optical ImageCapture; Mode 0: 0ms Viewfinder Screenshot)
+    // Dual-Mode Capture Execution
     fun performCapture() {
         if (countdownRemaining > 0) {
             countdownJob?.cancel()
@@ -568,6 +605,12 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         delay(1000L)
                     }
                     countdownRemaining = 0
+                }
+
+                val currentLoc = locationManager.locationState.value
+                if (antiTamperMode && !currentLoc.hasValidCoordinates()) {
+                    Toast.makeText(context, "防伪模式需等待真实 GPS 定位锁定后方可拍摄签发", Toast.LENGTH_LONG).show()
+                    return@launch
                 }
 
                 val captureOrientation = deviceOrientation
@@ -594,7 +637,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     if (hwBmp != null) {
                         hwBmp
                     } else {
-                        // Seamless fallback to viewfinder screenshot if hardware capture fails
                         val fallbackRaw = previewViewRef?.bitmap ?: createFallbackBitmap()
                         val rotDeg = when (captureOrientation) {
                             270 -> -90
@@ -609,7 +651,6 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         }
                     }
                 } else {
-                    // Mode 0: 0ms Viewfinder Screenshot Mode
                     val needRearTorchPulse = ((flashMode == 1 || flashMode == 2) && !isFrontCamera)
                     if (needRearTorchPulse) {
                         try {
@@ -639,75 +680,84 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     }
                 }
 
-                val finalLoc = if (asyncOptimal && (!loc.hasRealFix || loc.accuracyMeters > accuracyThreshold)) {
+                val finalLoc = if (asyncOptimal && (!currentLoc.hasRealFix || currentLoc.accuracyMeters > accuracyThreshold)) {
                     asyncSamplingBanner = "正在锁定高精高德坐标..."
                     val best = locationManager.awaitOptimalLocation(accuracyThreshold.toFloat(), 1100L)
                     asyncSamplingBanner = null
                     best
                 } else {
-                    loc
+                    currentLoc
                 }
 
                 val activeGcjLat = if (antiTamperMode) finalLoc.rawGcjLat else finalLoc.gcjLat
                 val activeGcjLon = if (antiTamperMode) finalLoc.rawGcjLon else finalLoc.gcjLon
                 val activeWgsLat = if (antiTamperMode) finalLoc.rawWgsLat else finalLoc.wgsLat
                 val activeWgsLon = if (antiTamperMode) finalLoc.rawWgsLon else finalLoc.wgsLon
-
-                val snapshotCfg = WatermarkConfig(
-                    styleTemplate = styleTemplate,
-                    customTitle = customTitle,
-                    coordSystem = coordSystem,
-                    useDms = useDms,
-                    gcjLat = activeGcjLat,
-                    gcjLon = activeGcjLon,
-                    wgsLat = activeWgsLat,
-                    wgsLon = activeWgsLon,
-                    origGcjLat = activeGcjLat,
-                    origGcjLon = activeGcjLon,
-                    accuracyMeters = finalLoc.accuracyMeters,
-                    altitudeMeters = finalLoc.altitudeMeters,
-                    azimuthDeg = finalLoc.azimuthDeg,
-                    azimuthText = finalLoc.azimuthText,
-                    shortPoi = finalLoc.shortPoi,
-                    address = finalLoc.fullAddress,
-                    timeHm = hm,
-                    dateWeek = dateWeek,
-                    timestamp = fullTs,
-                    note = customNote,
-                    showTime = showTime,
-                    showLocation = showLocation,
-                    showCoords = showCoords,
-                    showCoordTag = showCoordTag,
-                    showAccuracy = showAccuracy,
-                    showAltitude = showAltitude,
-                    showAzimuth = showAzimuth,
-                    showQrCode = showQrCode,
-                    showAddress = showAddress,
-                    showNote = showNote,
-                    showMiniMap = showMiniMap,
-                    miniMapPosition = miniMapPosition,
-                    antiTamperMode = antiTamperMode,
-                    ntpSynced = finalLoc.ntpSynced,
-                    antiTamperHash = if (antiTamperMode) QrCodeGenerator.computeAntiTamperHash(activeGcjLat, activeGcjLon, fullTs, finalLoc.shortPoi, customNote) else "",
-                    bottomRight = bottomRight,
-                    filterIndex = filterIndex,
-                    bgAlpha = bgAlpha,
-                    fontScale = fontScale,
-                    accentColorIndex = accentColorIndex
-                )
+                val effectiveNote = if (antiTamperMode) "" else customNote
 
                 val savedEntry = withContext(Dispatchers.IO) {
-                    WatermarkRenderer.saveNewPhotoEntry(
-                        context = context,
-                        cleanBitmap = uprightCleanBmp,
-                        cfg = snapshotCfg,
-                        alsoExportOriginal = keepCleanOriginal
-                    ).also {
+                    val imgHash = if (antiTamperMode && (activeGcjLat != 0.0 || activeGcjLon != 0.0)) {
+                        QrCodeGenerator.computeImagePerceptualHash(uprightCleanBmp)
+                    } else ""
+
+                    val snapshotCfg = WatermarkConfig(
+                        styleTemplate = styleTemplate,
+                        customTitle = customTitle,
+                        coordSystem = coordSystem,
+                        useDms = useDms,
+                        gcjLat = activeGcjLat,
+                        gcjLon = activeGcjLon,
+                        wgsLat = activeWgsLat,
+                        wgsLon = activeWgsLon,
+                        origGcjLat = activeGcjLat,
+                        origGcjLon = activeGcjLon,
+                        accuracyMeters = finalLoc.accuracyMeters,
+                        altitudeMeters = finalLoc.altitudeMeters,
+                        azimuthDeg = finalLoc.azimuthDeg,
+                        azimuthText = finalLoc.azimuthText,
+                        shortPoi = finalLoc.shortPoi,
+                        address = finalLoc.fullAddress,
+                        timeHm = hm,
+                        dateWeek = dateWeek,
+                        timestamp = fullTs,
+                        note = effectiveNote,
+                        showTime = showTime,
+                        showLocation = showLocation,
+                        showCoords = showCoords,
+                        showCoordTag = showCoordTag,
+                        showAccuracy = showAccuracy,
+                        showAltitude = showAltitude,
+                        showAzimuth = showAzimuth,
+                        showQrCode = showQrCode,
+                        showAddress = showAddress,
+                        showNote = showNote && !antiTamperMode,
+                        showMiniMap = showMiniMap,
+                        miniMapPosition = miniMapPosition,
+                        showBottomScrim = showBottomScrim,
+                        antiTamperMode = antiTamperMode && (activeGcjLat != 0.0 || activeGcjLon != 0.0),
+                        ntpSynced = finalLoc.ntpSynced,
+                        imageHash = imgHash,
+                        antiTamperHash = if (antiTamperMode && (activeGcjLat != 0.0 || activeGcjLon != 0.0)) {
+                            QrCodeGenerator.computeAntiTamperHash(activeGcjLat, activeGcjLon, fullTs, finalLoc.shortPoi, effectiveNote, imgHash)
+                        } else "",
+                        bottomRight = bottomRight,
+                        bgAlpha = bgAlpha,
+                        fontScale = fontScale,
+                        accentColorIndex = accentColorIndex
+                    )
+
+                    try {
+                        WatermarkRenderer.saveNewPhotoEntry(
+                            context = context,
+                            cleanBitmap = uprightCleanBmp,
+                            cfg = snapshotCfg,
+                            alsoExportOriginal = keepCleanOriginal
+                        )
+                    } finally {
                         if (!uprightCleanBmp.isRecycled) uprightCleanBmp.recycle()
                     }
                 }
                 photos = listOf(savedEntry) + photos
-                selectedGalleryPhoto = savedEntry
                 justCapturedPhoto = savedEntry
                 launch {
                     delay(4500L)
@@ -739,29 +789,14 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
     }
 
     if (showGalleryScreen) {
-        BackHandler { showGalleryScreen = false }
         GalleryAndSystemPhotosScreen(
             appPhotos = photos,
-            selectedPhoto = selectedGalleryPhoto ?: photos.firstOrNull(),
-            onSelectPhoto = { selectedGalleryPhoto = it },
             onBackToCamera = { showGalleryScreen = false },
-            onImportArbitraryPhoto = { importPhotoLauncher.launch("image/*") },
-            onImportSystemPhotoUri = { sysPhoto ->
-                scope.launch {
-                    Toast.makeText(context, "正在为原相机照片生成经纬水印...", Toast.LENGTH_SHORT).show()
-                    val imported = withContext(Dispatchers.IO) {
-                        WatermarkRenderer.importExternalPhotoUri(context, sysPhoto.contentUri, loc, coordSystem)
-                    }
-                    if (imported != null) {
-                        photos = listOf(imported) + photos
-                        selectedGalleryPhoto = imported
-                        Toast.makeText(context, "已生成带水印照片并存入DCIM/Camera！", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            },
+            onLaunchSystemBatchPicker = { launchBatchPicker() },
+            onBatchWatermarkUris = { uris -> pendingBatchUris = uris },
             onEditWatermark = { target ->
                 if (target.config.antiTamperMode) {
-                    Toast.makeText(context, "🛡 防篡改验真原片已由密码学签名锁定，禁止后期修改！", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "防篡改验真原片已由密码学签名锁定，禁止后期修改", Toast.LENGTH_LONG).show()
                 } else {
                     editingPhoto = target
                 }
@@ -770,13 +805,12 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 verifyPayload = payload
                 showVerifyDialog = true
             },
-            onDeletePhoto = { target ->
-                pendingDeletePhoto = target
-            }
+            onRequestDeletePhotos = { targets -> pendingDeletePhotos = targets },
+            onExportCsvLedger = { list -> exportAndShareCsv(list) }
         )
     } else {
         // ==================== MAIN CAMERA SCREEN ====================
-        BackHandler(enabled = activeTopInlineMenu != 0 || showFilterStrip || countdownRemaining > 0) {
+        BackHandler(enabled = activeTopInlineMenu != 0 || countdownRemaining > 0 || showWatermarkSheet) {
             when {
                 countdownRemaining > 0 -> {
                     countdownJob?.cancel()
@@ -785,23 +819,26 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     isCapturing = false
                     Toast.makeText(context, "已取消倒计时拍摄", Toast.LENGTH_SHORT).show()
                 }
+                showWatermarkSheet -> showWatermarkSheet = false
                 activeTopInlineMenu != 0 -> activeTopInlineMenu = 0
-                showFilterStrip -> showFilterStrip = false
             }
         }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black),
+                .background(Color.Black)
+                .statusBarsPadding()
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. TOP BLACK TOOLBAR
+            // 1. STREAMLINED TOP TOOLBAR (statusBarsPadding applied on root)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(84.dp)
+                    .height(68.dp)
                     .background(Color.Black)
-                    .padding(horizontal = 18.dp),
+                    .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center
             ) {
                 when (activeTopInlineMenu) {
@@ -809,25 +846,24 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(28.dp))
+                                .clip(RoundedCornerShape(24.dp))
                                 .background(Color(0xFF141D2E))
                                 .padding(horizontal = 14.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
-                                modifier = Modifier.size(40.dp).rotate(uiIconRotation),
+                                modifier = Modifier.size(36.dp).graphicsLayer { rotationZ = rotationProvider() },
                                 contentAlignment = Alignment.Center
                             ) {
                                 TimerVectorIcon(seconds = timerSeconds)
                             }
-                            val timerOptions = listOf(0 to "关", 3 to "3s", 5 to "5s", 10 to "10s")
-                            timerOptions.forEach { (sec, shortLbl) ->
+                            listOf(0 to "关", 3 to "3s", 5 to "5s", 10 to "10s").forEach { (sec, shortLbl) ->
                                 val isSel = (timerSeconds == sec)
                                 Box(
                                     modifier = Modifier
-                                        .size(42.dp)
-                                        .rotate(uiIconRotation)
+                                        .size(38.dp)
+                                        .graphicsLayer { rotationZ = rotationProvider() }
                                         .clip(CircleShape)
                                         .background(if (isSel) Color(0xFF0284C7) else Color(0xFF1E293B))
                                         .clickable {
@@ -836,12 +872,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = shortLbl,
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
-                                    )
+                                    Text(shortLbl, color = Color.White, fontSize = 11.5.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium)
                                 }
                             }
                         }
@@ -851,28 +882,28 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(28.dp))
+                                .clip(RoundedCornerShape(24.dp))
                                 .background(Color(0xFF141D2E))
                                 .padding(horizontal = 14.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
-                                modifier = Modifier.size(40.dp).rotate(uiIconRotation),
+                                modifier = Modifier.size(36.dp).graphicsLayer { rotationZ = rotationProvider() },
                                 contentAlignment = Alignment.Center
                             ) {
                                 FlashVectorIcon(statusText = "", active = flashMode != 0)
                             }
-                            val flashOptions = listOf(0 to "关", 1 to "开", 2 to "自动", 3 to "常亮")
-                            flashOptions.forEach { (mode, shortLbl) ->
+                            listOf(0 to "关", 1 to "开", 2 to "自动", 3 to "常亮").forEach { (mode, shortLbl) ->
                                 val isSel = (flashMode == mode)
+                                val enabled = !(isFrontCamera && mode == 3)
                                 Box(
                                     modifier = Modifier
-                                        .size(42.dp)
-                                        .rotate(uiIconRotation)
+                                        .size(38.dp)
+                                        .graphicsLayer { rotationZ = rotationProvider() }
                                         .clip(CircleShape)
-                                        .background(if (isSel) Color(0xFFF59E0B) else Color(0xFF1E293B))
-                                        .clickable {
+                                        .background(if (isSel) Color(0xFFF59E0B) else if (enabled) Color(0xFF1E293B) else Color(0xFF0F172A))
+                                        .clickable(enabled = enabled) {
                                             flashMode = mode
                                             activeTopInlineMenu = 0
                                         },
@@ -880,8 +911,8 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                 ) {
                                     Text(
                                         text = shortLbl,
-                                        color = if (isSel) Color.Black else Color.White,
-                                        fontSize = 11.5.sp,
+                                        color = if (isSel) Color.Black else if (enabled) Color.White else Color(0xFF475569),
+                                        fontSize = 11.sp,
                                         fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
                                     )
                                 }
@@ -895,107 +926,83 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            CameraTopBarItem(
-                                label = "设置",
-                                rotationDegrees = uiIconRotation,
-                                onClick = { showSettingsSheet = true }
-                            ) {
+                            CameraTopBarItem("设置", rotationProvider, onClick = { showSettingsSheet = true }) {
                                 GearVectorIcon()
                             }
 
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                CameraTopBarItem(
-                                    label = "识图验真",
-                                    rotationDegrees = uiIconRotation,
-                                    onClick = {
-                                        val latest = selectedGalleryPhoto ?: photos.firstOrNull()
-                                        if (latest != null && verifyPayload == null) {
-                                            val c = latest.config
-                                            val exp = QrCodeGenerator.computeAntiTamperHash(c.gcjLat, c.gcjLon, c.timestamp, c.shortPoi, c.note).take(12)
-                                            verifyPayload = QrCodeGenerator.VerifiedLocationPayload(
-                                                gcjLat = c.gcjLat,
-                                                gcjLon = c.gcjLon,
-                                                wgsLat = c.wgsLat,
-                                                wgsLon = c.wgsLon,
-                                                shortPoi = c.shortPoi,
-                                                timestamp = c.timestamp,
-                                                note = c.note,
-                                                signature = c.antiTamperHash.take(12),
-                                                expectedSignature = exp,
-                                                ntpSynced = c.ntpSynced,
-                                                hasAntiTamper = c.antiTamperMode,
-                                                verified = c.isSignatureValid(),
-                                                sourceLabel = "本机最近实拍原片"
-                                            )
-                                        }
-                                        showVerifyDialog = true
+                            CameraTopBarItem(
+                                label = "验真",
+                                rotationProvider = rotationProvider,
+                                onClick = {
+                                    // Always clear stale verifyPayload before opening fresh
+                                    verifyPayload = null
+                                    val latest = photos.firstOrNull()
+                                    if (latest != null) {
+                                        val c = latest.config
+                                        val exp = QrCodeGenerator.computeAntiTamperHash(c.gcjLat, c.gcjLon, c.timestamp, c.shortPoi, c.note, c.imageHash).take(12)
+                                        verifyPayload = QrCodeGenerator.VerifiedLocationPayload(
+                                            gcjLat = c.gcjLat,
+                                            gcjLon = c.gcjLon,
+                                            wgsLat = c.wgsLat,
+                                            wgsLon = c.wgsLon,
+                                            shortPoi = c.shortPoi,
+                                            timestamp = c.timestamp,
+                                            note = c.note,
+                                            imageHash = c.imageHash,
+                                            signature = c.antiTamperHash.take(12),
+                                            expectedSignature = exp,
+                                            ntpSynced = c.ntpSynced,
+                                            hasAntiTamper = c.antiTamperMode,
+                                            verified = c.isSignatureValid(),
+                                            sourceLabel = "本机最近实拍原片"
+                                        )
                                     }
-                                ) {
-                                    ShieldVerifyVectorIcon()
+                                    showVerifyDialog = true
                                 }
+                            ) { ShieldVerifyVectorIcon() }
 
-                                CameraTopBarItem(
-                                    label = if (captureMode == 1) "光学拍照" else "极速截屏",
-                                    rotationDegrees = uiIconRotation,
-                                    onClick = {
-                                        captureMode = if (captureMode == 1) 0 else 1
-                                        Toast.makeText(
-                                            context,
-                                            if (captureMode == 1) "已切换至：📷 光学拍照模式 (硬件ISP高清)" else "已切换至：⚡ 极速截屏模式 (0ms抓拍)",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                ) {
-                                    CaptureModeVectorIcon(isOptical = captureMode == 1)
+                            CameraTopBarItem(
+                                label = if (captureMode == 1) "光学" else "极速",
+                                rotationProvider = rotationProvider,
+                                onClick = {
+                                    captureMode = if (captureMode == 1) 0 else 1
+                                    Toast.makeText(
+                                        context,
+                                        if (captureMode == 1) "已切换至：光学拍照模式 (硬件ISP高清)" else "已切换至：极速截屏模式 (0ms抓拍)",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
+                            ) { CaptureModeVectorIcon(isOptical = captureMode == 1) }
 
-                                CameraTopBarItem(
-                                    label = if (showGridLines) "网格开" else "网格",
-                                    rotationDegrees = uiIconRotation,
-                                    onClick = { showGridLines = !showGridLines }
-                                ) {
-                                    GridLinesVectorIcon(active = showGridLines)
-                                }
+                            CameraTopBarItem(
+                                label = if (timerSeconds == 0) "倒计时" else "${timerSeconds}s",
+                                rotationProvider = rotationProvider,
+                                onClick = { activeTopInlineMenu = 1 }
+                            ) { TimerVectorIcon(seconds = timerSeconds) }
 
-                                CameraTopBarItem(
-                                    label = if (timerSeconds == 0) "倒计时" else "${timerSeconds}秒",
-                                    rotationDegrees = uiIconRotation,
-                                    onClick = { activeTopInlineMenu = 1 }
-                                ) {
-                                    TimerVectorIcon(seconds = timerSeconds)
-                                }
-
-                                val flashSubLabel = when (flashMode) {
-                                    0 -> "关"
-                                    1 -> "开"
-                                    2 -> "自动"
-                                    else -> "常亮"
-                                }
-                                CameraTopBarItem(
-                                    label = "闪光灯",
-                                    rotationDegrees = uiIconRotation,
-                                    onClick = { activeTopInlineMenu = 2 }
-                                ) {
-                                    FlashVectorIcon(statusText = flashSubLabel, active = flashMode != 0)
-                                }
-
-                                CameraTopBarItem(
-                                    label = "翻转",
-                                    rotationDegrees = uiIconRotation,
-                                    onClick = { isFrontCamera = !isFrontCamera }
-                                ) {
-                                    FlipCameraVectorIcon()
-                                }
+                            val flashSubLabel = when (flashMode) {
+                                0 -> "关"
+                                1 -> "开"
+                                2 -> "自动"
+                                else -> "常亮"
                             }
+                            CameraTopBarItem(
+                                label = "闪光灯",
+                                rotationProvider = rotationProvider,
+                                onClick = { activeTopInlineMenu = 2 }
+                            ) { FlashVectorIcon(statusText = flashSubLabel, active = flashMode != 0) }
+
+                            CameraTopBarItem(
+                                label = "翻转",
+                                rotationProvider = rotationProvider,
+                                onClick = { isFrontCamera = !isFrontCamera }
+                            ) { FlipCameraVectorIcon() }
                         }
                     }
                 }
             }
 
-            // 2. CENTER LIVE VIEWFINDER AREA
+            // 2. CENTER LIVE VIEWFINDER AREA (Full-frame tap-to-focus restored; no 42dp accidental swipe)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1017,20 +1024,14 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         },
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(deviceOrientation, maxZoomRatio) {
-                                val swipeThresholdPx = 42.dp.toPx()
+                            .pointerInput(maxZoomRatio) {
+                                // Pinch-to-zoom only (removed 42dp accidental horizontal template swipe)
                                 awaitEachGesture {
                                     awaitFirstDown(requireUnconsumed = false)
-                                    var totalPanX = 0f
-                                    var totalPanY = 0f
-                                    var isPinching = false
-                                    var swipeTriggered = false
-
                                     do {
                                         val event = awaitPointerEvent()
                                         val activePointers = event.changes.count { it.pressed }
                                         if (activePointers >= 2) {
-                                            isPinching = true
                                             val zoomChange = event.calculateZoom()
                                             if (zoomChange != 1.0f && event.calculateCentroidSize(useCurrent = false) > 0f) {
                                                 val nextZoom = (zoomRatio * zoomChange).coerceIn(1.0f, maxZoomRatio)
@@ -1040,21 +1041,11 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                                 } catch (_: Exception) {}
                                             }
                                             event.changes.forEach { if (it.positionChanged()) it.consume() }
-                                        } else if (!isPinching && !swipeTriggered && activePointers == 1) {
-                                            val pan = event.calculatePan()
-                                            totalPanX += pan.x
-                                            totalPanY += pan.y
-                                            if (abs(totalPanX) > swipeThresholdPx && abs(totalPanX) > abs(totalPanY) * 1.35f) {
-                                                swipeTriggered = true
-                                                val delta = if (totalPanX < 0f) 1 else -1
-                                                switchWatermarkTemplate(styleTemplate + delta)
-                                                event.changes.forEach { if (it.positionChanged()) it.consume() }
-                                            }
                                         }
                                     } while (event.changes.any { it.pressed })
                                 }
                             }
-                            .pointerInput(deviceOrientation, maxZoomRatio) {
+                            .pointerInput(maxZoomRatio) {
                                 detectTapGestures(
                                     onDoubleTap = {
                                         val nextZoom = if (zoomRatio < 1.8f) 2.0f.coerceAtMost(maxZoomRatio) else 1.0f
@@ -1069,20 +1060,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                             showWatermarkSheet = false
                                             return@detectTapGestures
                                         }
-                                        val w = size.width.toFloat()
-                                        val h = size.height.toFloat()
-
-                                        val tappedWatermarkZone = when (deviceOrientation) {
-                                            270 -> tapOffset.x < w * 0.28f
-                                            90 -> tapOffset.x > w * 0.72f
-                                            180 -> tapOffset.y < h * 0.25f
-                                            else -> tapOffset.y > h * 0.75f
-                                        }
-                                        if (tappedWatermarkZone) {
-                                            showWatermarkSheet = true
-                                            return@detectTapGestures
-                                        }
-
+                                        // Full-frame tap-to-focus (removed bottom 25% accidental hotzone)
                                         focusPoint = tapOffset
                                         focusTriggerId++
                                         val pv = previewViewRef
@@ -1102,24 +1080,34 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     )
                 } else {
                     Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
+                        modifier = Modifier.fillMaxSize().padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
                         Text("需要相机与定位权限以启用实景水印拍摄", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(onClick = {
-                            permissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.CAMERA,
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(onClick = {
+                                permissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.CAMERA,
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
                                 )
-                            )
-                        }) {
-                            Text("立即授权开启相机")
+                            }) {
+                                Text("申请权限")
+                            }
+                            OutlinedButton(onClick = {
+                                try {
+                                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                        data = Uri.fromParts("package", context.packageName, null)
+                                    }
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {}
+                            }) {
+                                Text("前往系统设置")
+                            }
                         }
                     }
                 }
@@ -1137,15 +1125,15 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     }
                 }
 
-                // 100% WYSIWYG LIVE WATERMARK OVERLAY
+                // 100% WYSIWYG LIVE WATERMARK OVERLAY (isolated loc subscription to avoid root recomposition)
                 WysiwygLiveWatermarkCanvas(
+                    locationManager = locationManager,
                     deviceOrientation = deviceOrientation,
                     styleTemplate = styleTemplate,
                     customTitle = customTitle,
                     coordSystem = coordSystem,
                     useDms = useDms,
-                    loc = loc,
-                    customNote = customNote,
+                    customNote = if (antiTamperMode) "" else customNote,
                     showTime = showTime,
                     showLocation = showLocation,
                     showCoords = showCoords,
@@ -1155,9 +1143,10 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     showAzimuth = showAzimuth,
                     showQrCode = showQrCode,
                     showAddress = showAddress,
-                    showNote = showNote,
+                    showNote = showNote && !antiTamperMode,
                     showMiniMap = showMiniMap,
                     miniMapPosition = miniMapPosition,
+                    showBottomScrim = showBottomScrim,
                     antiTamperMode = antiTamperMode,
                     bottomRight = bottomRight,
                     bgAlpha = bgAlpha,
@@ -1165,62 +1154,42 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     accentColorIndex = accentColorIndex
                 )
 
-                // Compact GPS & Capture Mode Status Pill
-                Row(
+                // Isolated GPS Status Pill (recomputes only this pill on GPS updates)
+                GpsStatusPill(
+                    locationManager = locationManager,
+                    deviceOrientation = deviceOrientation,
+                    coordSystem = coordSystem,
+                    antiTamperMode = antiTamperMode,
+                    captureMode = captureMode,
                     modifier = Modifier
                         .align(if (deviceOrientation == 270) Alignment.TopEnd else Alignment.TopStart)
-                        .padding(12.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xA60B132B))
-                        .border(0.8.dp, Color(0x4038BDF8), RoundedCornerShape(20.dp))
-                        .clickable { showLocationSheet = true }
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(if (loc.isManualCoord) Color(0xFFF59E0B) else if (loc.hasRealFix) Color(0xFF34D399) else Color(0xFFFBBF24))
-                    )
-                    val modeTag = when (deviceOrientation) {
-                        270 -> "左横屏"
-                        90 -> "右横屏"
-                        180 -> "倒置"
-                        else -> "竖屏"
-                    }
-                    val engineTag = if (antiTamperMode) (if (loc.ntpSynced) "🛡NTP真时防伪" else "🛡防伪锁定") else if (captureMode == 1) "光学高清" else "0ms截屏"
-                    val accOrManual = if (loc.isManualCoord) "📌手动选点" else "±${String.format(Locale.US, "%.1fm", loc.accuracyMeters)}"
-                    Text(
-                        text = if (loc.hasRealFix) "$coordSystem · $accOrManual · $engineTag · $modeTag" else "GPS锁定中 · $engineTag",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
+                        .padding(12.dp),
+                    onClick = { showLocationSheet = true }
+                )
 
                 justCapturedPhoto?.let { latest ->
-                    Row(
-                        modifier = Modifier
-                            .align(if (deviceOrientation == 270) Alignment.BottomEnd else Alignment.TopEnd)
-                            .padding(12.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xEE2563EB))
-                            .clickable {
-                                AmapLauncher.jumpToAmapMarker(
-                                    context = context,
-                                    gcjLat = latest.config.gcjLat,
-                                    gcjLon = latest.config.gcjLon,
-                                    poiName = latest.config.shortPoi.ifBlank { latest.config.address }
-                                )
-                            }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        RedPinVectorIcon(modifier = Modifier.size(14.dp))
-                        Text("已存DCIM · 一键跳高德 →", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    if (latest.config.hasValidCoords()) {
+                        Row(
+                            modifier = Modifier
+                                .align(if (deviceOrientation == 270) Alignment.BottomEnd else Alignment.TopEnd)
+                                .padding(12.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0xEE2563EB))
+                                .clickable {
+                                    AmapLauncher.jumpToAmapMarker(
+                                        context = context,
+                                        gcjLat = latest.config.gcjLat,
+                                        gcjLon = latest.config.gcjLon,
+                                        poiName = latest.config.shortPoi.ifBlank { latest.config.address }
+                                    )
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            RedPinVectorIcon(modifier = Modifier.size(14.dp))
+                            Text("已存DCIM · 跳高德 →", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
@@ -1234,18 +1203,13 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .rotate(uiIconRotation)
+                            .graphicsLayer { rotationZ = rotationProvider() }
                             .clip(RoundedCornerShape(20.dp))
                             .background(Color(0xD90F172A))
                             .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(20.dp))
                             .padding(horizontal = 16.dp, vertical = 7.dp)
                     ) {
-                        Text(
-                            text = templateSwitchBanner ?: "",
-                            color = Color(0xFF38BDF8),
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text(templateSwitchBanner ?: "", color = Color(0xFF38BDF8), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -1253,7 +1217,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .rotate(uiIconRotation)
+                            .graphicsLayer { rotationZ = rotationProvider() }
                             .clip(RoundedCornerShape(20.dp))
                             .background(Color(0xE6F59E0B))
                             .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -1274,7 +1238,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                     (pt.y - boxPx / 2f).roundToInt()
                                 )
                             }
-                            .rotate(uiIconRotation)
+                            .graphicsLayer { rotationZ = rotationProvider() }
                             .pointerInput(exposureRange) {
                                 detectVerticalDragGestures { _, dragAmount ->
                                     val step = if (dragAmount < -4f) 1 else if (dragAmount > 4f) -1 else 0
@@ -1297,12 +1261,13 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     }
                 }
 
+                // Zoom Ratio Pill
                 Box(
                     modifier = Modifier
                         .align(if (deviceOrientation == 90) Alignment.CenterStart else Alignment.CenterEnd)
                         .padding(horizontal = 14.dp)
-                        .size(46.dp)
-                        .rotate(uiIconRotation)
+                        .size(44.dp)
+                        .graphicsLayer { rotationZ = rotationProvider() }
                         .clip(CircleShape)
                         .background(Color(0x66000000))
                         .border(1.5.dp, Color.White, CircleShape)
@@ -1323,7 +1288,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     Text(
                         text = String.format(Locale.US, "%.1fX", zoomRatio),
                         color = Color.White,
-                        fontSize = 12.sp,
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -1335,7 +1300,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                             color = Color.White,
                             fontSize = 96.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.rotate(uiIconRotation),
+                            modifier = Modifier.graphicsLayer { rotationZ = rotationProvider() },
                             style = TextStyle(shadow = Shadow(Color.Black, Offset(0f, 4f), 12f))
                         )
                     }
@@ -1388,64 +1353,32 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                 }
             }
 
-            // Optional Live Filter Selector Bar
-            if (showFilterStrip) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF090D16))
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    WatermarkRenderer.FILTER_NAMES.forEachIndexed { idx, name ->
-                        val selected = (idx == filterIndex)
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .rotate(uiIconRotation)
-                                .clip(CircleShape)
-                                .background(if (selected) Color(0xFF0284C7) else Color(0xFF1E293B))
-                                .clickable { filterIndex = idx },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(name, color = Color.White, fontSize = 11.5.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
-                        }
-                    }
-                }
-            }
-
-            // 3. BOTTOM BLACK CONTROL BAR
+            // 3. BOTTOM BLACK CONTROL BAR (Symmetric 5-slot: 相册 | 地点校准 | 快门 | 批量水印 | 水印设置)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(128.dp)
+                    .height(114.dp)
                     .background(Color.Black)
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
-                        .rotate(uiIconRotation)
-                        .clickable {
-                            if (photos.isNotEmpty() && selectedGalleryPhoto == null) {
-                                selectedGalleryPhoto = photos.first()
-                            }
-                            showGalleryScreen = true
-                        }
+                        .graphicsLayer { rotationZ = rotationProvider() }
+                        .clickable { showGalleryScreen = true }
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF1E293B))
                             .border(1.5.dp, Color.White, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         val bmp = latestThumbBitmap
-                        if (bmp != null) {
+                        if (bmp != null && !bmp.isRecycled) {
                             Image(
                                 bitmap = bmp.asImageBitmap(),
                                 contentDescription = "相册",
@@ -1456,22 +1389,18 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                             GalleryPlaceholderIcon()
                         }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text("相册", color = Color.White, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Text("相册", color = Color.White, fontSize = 11.5.sp)
                 }
 
-                CameraBottomBarItem(
-                    label = "地点",
-                    rotationDegrees = uiIconRotation,
-                    onClick = { showLocationSheet = true }
-                ) {
+                CameraBottomBarItem("地点校准", rotationProvider = rotationProvider, onClick = { showLocationSheet = true }) {
                     PaperPlaneLocationIcon()
                 }
 
                 val isCountdownActive = countdownRemaining > 0
                 Box(
                     modifier = Modifier
-                        .size(76.dp)
+                        .size(74.dp)
                         .clip(CircleShape)
                         .border(
                             width = 4.dp,
@@ -1495,19 +1424,14 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     }
                 }
 
-                CameraBottomBarItem(
-                    label = "滤镜",
-                    active = showFilterStrip || filterIndex != 0,
-                    rotationDegrees = uiIconRotation,
-                    onClick = { showFilterStrip = !showFilterStrip }
-                ) {
-                    FilterRingsVectorIcon(active = filterIndex != 0)
+                CameraBottomBarItem("批量水印", rotationProvider = rotationProvider, onClick = { launchBatchPicker() }) {
+                    BatchWatermarkVectorIcon()
                 }
 
                 CameraBottomBarItem(
                     label = "水印设置",
                     active = showWatermarkSheet,
-                    rotationDegrees = uiIconRotation,
+                    rotationProvider = rotationProvider,
                     onClick = { showWatermarkSheet = !showWatermarkSheet }
                 ) {
                     WatermarkStampVectorIcon()
@@ -1516,176 +1440,8 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
         }
     }
 
-    // ==================== DIALOG 1: 地点与高德零偏差校准面板 ====================
-    if (showLocationSheet) {
-        var poiInput by remember(loc.shortPoi) { mutableStateOf(loc.shortPoi) }
-        var addrInput by remember(loc.fullAddress) { mutableStateOf(loc.fullAddress) }
-        var manualLatInput by remember(loc.gcjLat) { mutableStateOf(String.format(Locale.US, "%.6f", loc.gcjLat)) }
-        var manualLonInput by remember(loc.gcjLon) { mutableStateOf(String.format(Locale.US, "%.6f", loc.gcjLon)) }
-
-        AlertDialog(
-            onDismissRequest = { showLocationSheet = false },
-            containerColor = Color(0xFF0F172A),
-            title = {
-                Text("📍 地点与高德坐标校准", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-            },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    val offsetDist = CoordinateConverter.distanceMeters(loc.gcjLat, loc.gcjLon, loc.wgsLat, loc.wgsLon)
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    "高德 GCJ-02: ${String.format(Locale.US, "%.6f, %.6f", loc.gcjLat, loc.gcjLon)}",
-                                    color = Color(0xFF38BDF8),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.5.sp
-                                )
-                                Text(
-                                    text = "复制",
-                                    color = Color(0xFF38BDF8),
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.clickable {
-                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        val txt = String.format(Locale.US, "%.6f,%.6f", loc.gcjLon, loc.gcjLat)
-                                        cm.setPrimaryClip(ClipData.newPlainText("GCJ-02", txt))
-                                        Toast.makeText(context, "已复制高德坐标: $txt", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            }
-                            Text(
-                                "原始 WGS-84: ${String.format(Locale.US, "%.6f, %.6f", loc.wgsLat, loc.wgsLon)}",
-                                color = Color(0xFF94A3B8),
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.5.sp
-                            )
-                            Text(
-                                "已自动消除偏移 ${String.format(Locale.US, "%.1f", offsetDist)}m · 海拔 ${String.format(Locale.US, "%.1f", loc.altitudeMeters)}m · ${loc.azimuthText}",
-                                color = Color(0xFF34D399),
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-
-                    if (antiTamperMode) {
-                        Text(
-                            "🛡 当前处于「外业防篡改验真模式」，真实授时 (${loc.ntpSource}) 与实测坐标已硬件锁定禁止手改。",
-                            color = Color(0xFF34D399),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    OutlinedTextField(
-                        value = poiInput,
-                        onValueChange = { poiInput = it },
-                        label = { Text("地点简称 (点击下方周边点位一秒填入)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val combinedTags = (loc.nearbyPois + QUICK_POI_TAGS).distinct()
-                        combinedTags.forEach { tag ->
-                            SuggestionChip(
-                                onClick = { poiInput = tag },
-                                label = { Text("📍 $tag", fontSize = 11.sp) }
-                            )
-                        }
-                    }
-                    OutlinedTextField(
-                        value = addrInput,
-                        onValueChange = { addrInput = it },
-                        label = { Text("详细结构化地址") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = manualLatInput,
-                            onValueChange = { manualLatInput = it },
-                            enabled = !antiTamperMode,
-                            label = { Text("高德纬度 GCJ-02") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = manualLonInput,
-                            onValueChange = { manualLonInput = it },
-                            enabled = !antiTamperMode,
-                            label = { Text("高德经度 GCJ-02") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(
-                            onClick = {
-                                locationManager.setCustomLocationText(null, null)
-                                locationManager.restoreRealGpsCoordinates()
-                                locationManager.startHighFrequencyUpdates(forceRestart = true)
-                                manualLatInput = String.format(Locale.US, "%.6f", loc.rawGcjLat)
-                                manualLonInput = String.format(Locale.US, "%.6f", loc.rawGcjLon)
-                                Toast.makeText(context, "已恢复手机硬件真实GPS坐标与自动逆地理编码", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(if (loc.isManualCoord) "↺ 恢复真GPS" else "🛰 刷新真GPS", fontSize = 12.sp)
-                        }
-                        Button(
-                            onClick = {
-                                val targetLat = manualLatInput.toDoubleOrNull() ?: loc.gcjLat
-                                val targetLon = manualLonInput.toDoubleOrNull() ?: loc.gcjLon
-                                AmapLauncher.jumpToAmapMarker(context, targetLat, targetLon, poiInput)
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("📍 当前位置跳高德", fontSize = 12.sp)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    locationManager.setCustomLocationText(poiInput, addrInput)
-                    if (!antiTamperMode) {
-                        val newLat = manualLatInput.toDoubleOrNull()
-                        val newLon = manualLonInput.toDoubleOrNull()
-                        if (newLat != null && newLon != null &&
-                            (newLat != loc.gcjLat || newLon != loc.gcjLon)
-                        ) {
-                            locationManager.updateManualCoordinates(newLat, newLon)
-                        }
-                    }
-                    showLocationSheet = false
-                }) {
-                    Text("应用修改")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLocationSheet = false }) { Text("关闭") }
-            }
-        )
-    }
-
-    // ==================== DIALOG 2: 半屏非遮挡式水印快捷设置面板 ====================
+    // ==================== HALF-SCREEN WATERMARK SETTINGS SHEET ====================
     if (showWatermarkSheet) {
-        BackHandler { showWatermarkSheet = false }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1696,9 +1452,10 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 470.dp)
+                    .navigationBarsPadding()
+                    .heightIn(max = 480.dp)
                     .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                    .background(Color(0xF20B132B))
+                    .background(Color(0xF50B132B))
                     .border(1.dp, Color(0x3338BDF8), RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
                     .clickable(enabled = false) {}
                     .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -1709,21 +1466,10 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("🎨 水印快捷设置", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        Text("⇄ 左右滑取景框秒切模板", color = Color(0xFF38BDF8), fontSize = 11.sp)
-                    }
+                    Text("水印快捷设置", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.5.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         TextButton(
-                            onClick = {
-                                styleTemplate = 0; coordSystem = "GCJ-02"; useDms = false
-                                fontScale = 1.0f; accentColorIndex = 0; bgAlpha = 185
-                                showTime = true; showLocation = true; showCoords = true
-                                showCoordTag = true; showAccuracy = true; showAltitude = false
-                                showAzimuth = false; showQrCode = true; showAddress = false
-                                showNote = true; bottomRight = false
-                                Toast.makeText(context, "已恢复默认水印配置", Toast.LENGTH_SHORT).show()
-                            },
+                            onClick = { showResetConfirmDialog = true },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text("重置", color = Color(0xFF94A3B8), fontSize = 12.sp)
@@ -1746,8 +1492,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                         .padding(3.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    val tabs = listOf("⚡ 预设与开关", "🎨 外观与透明度", "✍️ 标题与常用词")
-                    tabs.forEachIndexed { idx, title ->
+                    listOf("预设与开关", "外观与暗影", "标题与备注").forEachIndexed { idx, title ->
                         val sel = (watermarkSheetTab == idx)
                         Box(
                             modifier = Modifier
@@ -1758,30 +1503,22 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                 .padding(vertical = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = title,
-                                color = if (sel) Color.White else Color(0xFF94A3B8),
-                                fontSize = 12.sp,
-                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium
-                            )
+                            Text(title, color = if (sel) Color.White else Color(0xFF94A3B8), fontSize = 12.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium)
                         }
                     }
                 }
 
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     when (watermarkSheetTab) {
                         0 -> {
-                            Text("一键场景方案 (1秒配齐模板与要素)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 QuickPresetButton("极简打卡", Modifier.weight(1f)) {
                                     styleTemplate = 0; showTime = true; showLocation = true; showCoords = true
                                     showCoordTag = true; showAccuracy = true; showAddress = false; showNote = false
-                                    showAltitude = false; showAzimuth = false; showQrCode = true
+                                    showAltitude = false; showAzimuth = false; showQrCode = true; showBottomScrim = false
                                 }
                                 QuickPresetButton("工程全要素", Modifier.weight(1f)) {
                                     styleTemplate = 1; showTime = true; showLocation = true; showCoords = true
@@ -1806,52 +1543,64 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                 CompactToggleChip("GCJ-02 高德", coordSystem == "GCJ-02", Modifier.weight(1f)) { coordSystem = "GCJ-02" }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                                CompactToggleChip("格式: 十进制 (39.9074°N)", !useDms, Modifier.weight(1f)) { useDms = false }
-                                CompactToggleChip("格式: 度分秒 (39°54'26\"N)", useDms, Modifier.weight(1f)) { useDms = true }
+                                CompactToggleChip("十进制坐标", !useDms, Modifier.weight(1f)) { useDms = false }
+                                CompactToggleChip("度分秒 (DMS)", useDms, Modifier.weight(1f)) { useDms = true }
                             }
 
-                            Text("显示要素开关 (双列矩阵，点击即切)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                CompactToggleChip("🗺 高德缩略图(160px)", showMiniMap, Modifier.weight(1f)) { showMiniMap = !showMiniMap }
-                                CompactToggleChip("🛡 防篡改SHA256验真", antiTamperMode, Modifier.weight(1f)) {
+                                val supportsMiniMap = styleTemplate in listOf(1, 2)
+                                CompactToggleChip(
+                                    label = if (supportsMiniMap) "高德缩略图(160px)" else "缩略图(仅模板2/3)",
+                                    selected = showMiniMap && supportsMiniMap,
+                                    enabled = supportsMiniMap,
+                                    modifier = Modifier.weight(1f)
+                                ) { showMiniMap = !showMiniMap }
+                                CompactToggleChip("防篡改SHA256验真", antiTamperMode, Modifier.weight(1f)) {
                                     antiTamperMode = !antiTamperMode
                                     if (antiTamperMode) {
-                                        locationManager.restoreRealGpsCoordinates()
+                                        locationManager.restoreRealGpsCoordinates(clearCustomText = true)
                                         locationManager.syncTrustedNetworkTime()
-                                        Toast.makeText(context, "🛡 已开启防伪验真，坐标已强制锁定为硬件真实GPS", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "已开启防伪验真，坐标、地点与备注已锁定", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
                             if (showMiniMap && styleTemplate in listOf(1, 2)) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                    CompactToggleChip("缩略图: 卡片左侧内嵌", miniMapPosition == 0, Modifier.weight(1f)) { miniMapPosition = 0 }
-                                    CompactToggleChip("缩略图: 左上角独立悬浮", miniMapPosition == 1, Modifier.weight(1f)) { miniMapPosition = 1 }
+                                    CompactToggleChip("缩略图: 卡片左侧", miniMapPosition == 0, Modifier.weight(1f)) { miniMapPosition = 0 }
+                                    CompactToggleChip("缩略图: 左上角悬浮", miniMapPosition == 1, Modifier.weight(1f)) { miniMapPosition = 1 }
                                 }
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                CompactToggleChip("✓ 扫码跳高德角标", showQrCode, Modifier.weight(1f)) { showQrCode = !showQrCode }
-                                CompactToggleChip("✓ 地点名称(📍)", showLocation, Modifier.weight(1f)) { showLocation = !showLocation }
+                            if (styleTemplate == 0) {
+                                CompactToggleChip(
+                                    label = if (showBottomScrim) "底部托底暗影：开（柔和渐变）" else "底部托底暗影：关（不压暗画面）",
+                                    selected = showBottomScrim,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { showBottomScrim = !showBottomScrim }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                CompactToggleChip("✓ 时间与星期", showTime, Modifier.weight(1f)) { showTime = !showTime }
-                                CompactToggleChip("✓ 经纬度坐标", showCoords, Modifier.weight(1f)) { showCoords = !showCoords }
+                                CompactToggleChip("扫码跳高德角标", showQrCode, Modifier.weight(1f)) { showQrCode = !showQrCode }
+                                CompactToggleChip("地点名称", showLocation, Modifier.weight(1f)) { showLocation = !showLocation }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                CompactToggleChip("✓ 海拔高程(m)", showAltitude, Modifier.weight(1f)) { showAltitude = !showAltitude }
-                                CompactToggleChip("✓ 罗盘方位角", showAzimuth, Modifier.weight(1f)) { showAzimuth = !showAzimuth }
+                                CompactToggleChip("时间与星期", showTime, Modifier.weight(1f)) { showTime = !showTime }
+                                CompactToggleChip("经纬度坐标", showCoords, Modifier.weight(1f)) { showCoords = !showCoords }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                CompactToggleChip("✓ 坐标系标签", showCoordTag, Modifier.weight(1f)) { showCoordTag = !showCoordTag }
-                                CompactToggleChip("✓ 精度误差(±m)", showAccuracy, Modifier.weight(1f)) { showAccuracy = !showAccuracy }
+                                CompactToggleChip("海拔高程(m)", showAltitude, Modifier.weight(1f)) { showAltitude = !showAltitude }
+                                CompactToggleChip("罗盘方位角", showAzimuth, Modifier.weight(1f)) { showAzimuth = !showAzimuth }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                CompactToggleChip("✓ 完整街道地址", showAddress, Modifier.weight(1f)) { showAddress = !showAddress }
-                                CompactToggleChip("✓ 自定义备注", showNote, Modifier.weight(1f)) { showNote = !showNote }
+                                CompactToggleChip("坐标系标签", showCoordTag, Modifier.weight(1f)) { showCoordTag = !showCoordTag }
+                                CompactToggleChip("精度误差(±m)", showAccuracy, Modifier.weight(1f)) { showAccuracy = !showAccuracy }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                CompactToggleChip("完整街道地址", showAddress, Modifier.weight(1f)) { showAddress = !showAddress }
+                                CompactToggleChip("自定义备注", showNote && !antiTamperMode, Modifier.weight(1f), enabled = !antiTamperMode) { showNote = !showNote }
                             }
                         }
 
                         1 -> {
-                            Text("5款专业水印模板", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Text("5 款专业水印模板", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                             Row(
                                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1865,6 +1614,13 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                 }
                             }
 
+                            WatermarkToggleRow(
+                                label = "底部托底暗影（仅模板 1 大字时间生效，默认关闭）",
+                                checked = showBottomScrim,
+                                enabled = styleTemplate == 0,
+                                onCheckedChange = { showBottomScrim = it }
+                            )
+
                             Text("点缀主题色与字号缩放", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1872,8 +1628,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    val colors = listOf(Color(0xFF38BDF8), Color(0xFF34D399), Color(0xFFFBBF24), Color(0xFFF87171))
-                                    colors.forEachIndexed { idx, c ->
+                                    listOf(Color(0xFF38BDF8), Color(0xFF34D399), Color(0xFFFBBF24), Color(0xFFF87171)).forEachIndexed { idx, c ->
                                         Box(
                                             modifier = Modifier
                                                 .size(30.dp)
@@ -1917,7 +1672,7 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("卡片标题 (点击标签一秒填入)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                                Text("卡片标题", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                                 if (customTitle.isNotEmpty()) {
                                     Text("清空", color = Color(0xFF38BDF8), fontSize = 11.5.sp, modifier = Modifier.clickable { customTitle = "" })
                                 }
@@ -1943,654 +1698,246 @@ fun ProWatermarkCameraScreen(locationManager: FastLocationManager) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("现场备注 (点击标签快捷追加)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
-                                if (customNote.isNotEmpty()) {
+                                Text(
+                                    if (antiTamperMode) "现场备注（防伪模式下已锁定禁止自定义）" else "现场备注",
+                                    color = if (antiTamperMode) Color(0xFF34D399) else Color(0xFF94A3B8),
+                                    fontSize = 11.5.sp
+                                )
+                                if (customNote.isNotEmpty() && !antiTamperMode) {
                                     Text("清空", color = Color(0xFF38BDF8), fontSize = 11.5.sp, modifier = Modifier.clickable { customNote = "" })
                                 }
                             }
                             OutlinedTextField(
-                                value = customNote,
+                                value = if (antiTamperMode) "" else customNote,
                                 onValueChange = { customNote = it },
-                                placeholder = { Text("例如：1号点位核验完成") },
+                                enabled = !antiTamperMode,
+                                placeholder = { Text(if (antiTamperMode) "防伪模式下备注已锁定" else "例如：1号点位核验完成") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            Row(
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                QUICK_NOTE_TAGS.forEach { tag ->
-                                    SuggestionChip(
-                                        onClick = {
-                                            customNote = if (customNote.isBlank()) tag else "$customNote · $tag"
-                                            showNote = true
-                                        },
-                                        label = { Text("+ $tag", fontSize = 11.sp) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ==================== DIALOG 3: 顶部设置面板 (含截屏模式 vs 光学拍照模式切换) ====================
-    if (showSettingsSheet) {
-        AlertDialog(
-            onDismissRequest = { showSettingsSheet = false },
-            containerColor = Color(0xFF0F172A),
-            title = {
-                Text("⚙ 相机引擎与高德定位设置", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("核心拍摄引擎模式 (随时切换)", color = Color(0xFF38BDF8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        CompactToggleChip(
-                            label = "📷 光学拍照 (硬件ISP)",
-                            selected = captureMode == 1,
-                            modifier = Modifier.weight(1f)
-                        ) { captureMode = 1 }
-                        CompactToggleChip(
-                            label = "⚡ 极速截屏 (0ms抓拍)",
-                            selected = captureMode == 0,
-                            modifier = Modifier.weight(1f)
-                        ) { captureMode = 0 }
-                    }
-                    Text(
-                        text = if (captureMode == 1) {
-                            "当前：调用摄像头硬件 ImageCapture 拍照（2560px高清、支持自动闪光测光与多帧降噪）"
-                        } else {
-                            "当前：直接定格取景框画面（0ms零快门延迟、文件轻量，适合移动抓拍）"
-                        },
-                        color = Color(0xFF94A3B8),
-                        fontSize = 11.sp
-                    )
-
-                    WatermarkToggleRow("🗺 160×160 高德矢量缩略地图 (Mini-Map画中画)", showMiniMap) {
-                        showMiniMap = it
-                    }
-                    WatermarkToggleRow("🛡 外业防篡改验真模式 (NTP真时锁定 + SHA-256签名)", antiTamperMode) {
-                        antiTamperMode = it
-                        if (it) {
-                            locationManager.restoreRealGpsCoordinates()
-                            locationManager.syncTrustedNetworkTime()
-                        }
-                    }
-                    WatermarkToggleRow("水印内嵌高德定位二维码 (微信发图长按可识)", showQrCode) {
-                        showQrCode = it
-                    }
-                    Text("水印显示坐标系 (扫码跳高德恒定零偏差)", color = Color(0xFF38BDF8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                        CompactToggleChip("WGS-84", coordSystem == "WGS-84", Modifier.weight(1f)) { coordSystem = "WGS-84" }
-                        CompactToggleChip("CGCS2000", coordSystem == "CGCS2000", Modifier.weight(1f)) { coordSystem = "CGCS2000" }
-                        CompactToggleChip("GCJ-02", coordSystem == "GCJ-02", Modifier.weight(1f)) { coordSystem = "GCJ-02" }
-                    }
-                    WatermarkToggleRow("弱信号后台异步寻优 (1.1s锁星收敛)", asyncOptimal) {
-                        asyncOptimal = it
-                    }
-                    if (asyncOptimal) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("异步收敛精度阈值", color = Color(0xFF94A3B8), fontSize = 12.5.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf(5, 10, 20).forEach { th ->
-                                    CompactToggleChip("≤${th}m", accuracyThreshold == th) { accuracyThreshold = th }
-                                }
-                            }
-                        }
-                    }
-                    WatermarkToggleRow("同时保存无水印纯净原图到系统相册", keepCleanOriginal) {
-                        keepCleanOriginal = it
-                    }
-                    WatermarkToggleRow("取景框显示九宫格构图辅助线", showGridLines) {
-                        showGridLines = it
-                    }
-                    if (styleTemplate in listOf(1, 2, 4)) {
-                        WatermarkToggleRow("卡片水印靠右下角对齐", bottomRight) {
-                            bottomRight = it
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(onClick = { showSettingsSheet = false }) { Text("确定") }
-            }
-        )
-    }
-
-    // ==================== DIALOG 4: 已拍照片图层分离全要素无损改水印 (防篡改硬锁定 + 非防篡改全量自由编辑) ====================
-    editingPhoto?.let { target ->
-        if (target.config.antiTamperMode) {
-            AlertDialog(
-                onDismissRequest = { editingPhoto = null },
-                containerColor = Color(0xFF0F172A),
-                title = { Text("🔒 防篡改原片禁止修改", color = Color(0xFF34D399), fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-                text = {
-                    Text(
-                        "该照片在拍摄时已开启「外业防篡改验真模式」，其硬件真实 GPS 坐标、NTP 权威授时时间与 SHA-256 密码学签名已锁定，禁止在相册中进行任何后期修改。",
-                        color = Color.White,
-                        fontSize = 13.sp
-                    )
-                },
-                confirmButton = {
-                    Button(onClick = { editingPhoto = null }) { Text("我知道了") }
-                }
-            )
-            return@let
-        }
-
-        var editTemplate by remember(target) { mutableStateOf(target.config.styleTemplate) }
-        var editTitle by remember(target) { mutableStateOf(target.config.customTitle) }
-        var editSys by remember(target) { mutableStateOf(target.config.coordSystem) }
-        var editDms by remember(target) { mutableStateOf(target.config.useDms) }
-        var editPoi by remember(target) { mutableStateOf(target.config.shortPoi) }
-        var editAddr by remember(target) { mutableStateOf(target.config.address) }
-        var editNote by remember(target) { mutableStateOf(target.config.note) }
-        var editDatePart by remember(target) {
-            mutableStateOf(target.config.dateWeek.substringBefore(" ").ifBlank { target.config.timestamp.substringBefore(" ") })
-        }
-        var editTimeHm by remember(target) { mutableStateOf(target.config.timeHm) }
-        var editTimeSec by remember(target) {
-            mutableStateOf(target.config.timestamp.substringAfterLast(":", "00").take(2).ifBlank { "00" })
-        }
-        var editLat by remember(target) { mutableStateOf(String.format(Locale.US, "%.6f", target.config.gcjLat)) }
-        var editLon by remember(target) { mutableStateOf(String.format(Locale.US, "%.6f", target.config.gcjLon)) }
-        var editAltitude by remember(target) { mutableStateOf(String.format(Locale.US, "%.1f", target.config.altitudeMeters)) }
-        var editAzimuthDeg by remember(target) { mutableStateOf(target.config.azimuthDeg.toString()) }
-        var editAccuracy by remember(target) { mutableStateOf(String.format(Locale.US, "%.1f", target.config.accuracyMeters)) }
-        var editFilterIndex by remember(target) { mutableStateOf(target.config.filterIndex) }
-        var editAccentColorIndex by remember(target) { mutableStateOf(target.config.accentColorIndex) }
-        var editFontScale by remember(target) { mutableStateOf(target.config.fontScale) }
-        var editBgAlpha by remember(target) { mutableStateOf(target.config.bgAlpha) }
-        var editShowTime by remember(target) { mutableStateOf(target.config.showTime) }
-        var editShowLoc by remember(target) { mutableStateOf(target.config.showLocation) }
-        var editShowCoords by remember(target) { mutableStateOf(target.config.showCoords) }
-        var editShowCoordTag by remember(target) { mutableStateOf(target.config.showCoordTag) }
-        var editShowAccuracy by remember(target) { mutableStateOf(target.config.showAccuracy) }
-        var editShowAltitude by remember(target) { mutableStateOf(target.config.showAltitude) }
-        var editShowAzimuth by remember(target) { mutableStateOf(target.config.showAzimuth) }
-        var editShowQr by remember(target) { mutableStateOf(target.config.showQrCode) }
-        var editShowAddr by remember(target) { mutableStateOf(target.config.showAddress) }
-        var editShowNote by remember(target) { mutableStateOf(target.config.showNote) }
-        var editShowMiniMap by remember(target) { mutableStateOf(target.config.showMiniMap) }
-        var editMiniMapPos by remember(target) { mutableStateOf(target.config.miniMapPosition) }
-        var editBottomRight by remember(target) { mutableStateOf(target.config.bottomRight) }
-
-        AlertDialog(
-            onDismissRequest = { editingPhoto = null },
-            containerColor = Color(0xFF0F172A),
-            title = {
-                Text("✎ 全要素无损修改照片水印 (0画质损失)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "🔓 非防篡改照片支持修改时间、日期、坐标、高程方位、滤镜及全部样式，基于底层纯净原图全尺寸重绘。",
-                        color = Color(0xFF34D399),
-                        fontSize = 11.5.sp
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        WatermarkRenderer.STYLE_NAMES.forEachIndexed { idx, name ->
-                            FilterChip(
-                                selected = editTemplate == idx,
-                                onClick = { editTemplate = idx },
-                                label = { Text(name, fontSize = 11.5.sp) }
-                            )
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        CompactToggleChip("WGS-84", editSys == "WGS-84", Modifier.weight(1f)) { editSys = "WGS-84" }
-                        CompactToggleChip("CGCS2000", editSys == "CGCS2000", Modifier.weight(1f)) { editSys = "CGCS2000" }
-                        CompactToggleChip("GCJ-02", editSys == "GCJ-02", Modifier.weight(1f)) { editSys = "GCJ-02" }
-                        CompactToggleChip(if (editDms) "度分秒" else "十进制", editDms, Modifier.weight(1f)) { editDms = !editDms }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = editLat,
-                            onValueChange = { editLat = it },
-                            label = { Text("高德纬度 GCJ-02") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = editLon,
-                            onValueChange = { editLon = it },
-                            label = { Text("高德经度 GCJ-02") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    TextButton(
-                        onClick = {
-                            editLat = String.format(Locale.US, "%.6f", target.config.origGcjLat)
-                            editLon = String.format(Locale.US, "%.6f", target.config.origGcjLon)
-                        }
-                    ) {
-                        Text("↺ 恢复拍摄瞬间原始坐标 (${target.config.origGcjLat}, ${target.config.origGcjLon})", color = Color(0xFF38BDF8), fontSize = 12.sp)
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedTextField(
-                            value = editDatePart,
-                            onValueChange = { editDatePart = it },
-                            label = { Text("日期 (yyyy-MM-dd)") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1.3f)
-                        )
-                        OutlinedTextField(
-                            value = editTimeHm,
-                            onValueChange = { editTimeHm = it },
-                            label = { Text("时分 (HH:mm)") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = editTimeSec,
-                            onValueChange = { editTimeSec = it },
-                            label = { Text("秒(ss)") },
-                            singleLine = true,
-                            modifier = Modifier.weight(0.7f)
-                        )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedTextField(
-                            value = editAltitude,
-                            onValueChange = { editAltitude = it },
-                            label = { Text("海拔(m)") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = editAzimuthDeg,
-                            onValueChange = { editAzimuthDeg = it },
-                            label = { Text("方位角(°)") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = editAccuracy,
-                            onValueChange = { editAccuracy = it },
-                            label = { Text("精度(±m)") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = editTitle,
-                        onValueChange = { editTitle = it },
-                        label = { Text("卡片标题") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = editPoi,
-                        onValueChange = { editPoi = it },
-                        label = { Text("地点名称 (📍后文字)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = editAddr,
-                        onValueChange = { editAddr = it },
-                        label = { Text("完整地址描述") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = editNote,
-                        onValueChange = { editNote = it },
-                        label = { Text("现场备注内容") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Text("画面滤镜、点缀色与字号透明度", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                        WatermarkRenderer.FILTER_NAMES.forEachIndexed { idx, fName ->
-                            CompactToggleChip(fName, editFilterIndex == idx, Modifier.weight(1f)) { editFilterIndex = idx }
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            val colors = listOf(Color(0xFF38BDF8), Color(0xFF34D399), Color(0xFFFBBF24), Color(0xFFF87171))
-                            colors.forEachIndexed { idx, c ->
-                                Box(
-                                    modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .background(c)
-                                        .border(if (editAccentColorIndex == idx) 2.5.dp else 0.dp, Color.White, CircleShape)
-                                        .clickable { editAccentColorIndex = idx }
-                                )
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(0.85f to "小字", 1.0f to "标准", 1.15f to "大字").forEach { (sc, lbl) ->
-                                CompactToggleChip(lbl, abs(editFontScale - sc) < 0.05f) { editFontScale = sc }
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(120 to "通透", 185 to "标准", 230 to "深邃").forEach { (al, lbl) ->
-                                CompactToggleChip(lbl, abs(editBgAlpha - al) < 20) { editBgAlpha = al }
-                            }
-                        }
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                        CompactToggleChip("✓ 时间", editShowTime, Modifier.weight(1f)) { editShowTime = !editShowTime }
-                        CompactToggleChip("✓ 地点", editShowLoc, Modifier.weight(1f)) { editShowLoc = !editShowLoc }
-                        CompactToggleChip("✓ 经纬", editShowCoords, Modifier.weight(1f)) { editShowCoords = !editShowCoords }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                        CompactToggleChip("✓ 海拔", editShowAltitude, Modifier.weight(1f)) { editShowAltitude = !editShowAltitude }
-                        CompactToggleChip("✓ 方位", editShowAzimuth, Modifier.weight(1f)) { editShowAzimuth = !editShowAzimuth }
-                        CompactToggleChip("✓ 标签", editShowCoordTag, Modifier.weight(1f)) { editShowCoordTag = !editShowCoordTag }
-                        CompactToggleChip("✓ 精度", editShowAccuracy, Modifier.weight(1f)) { editShowAccuracy = !editShowAccuracy }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                        CompactToggleChip("🗺 高德小图", editShowMiniMap, Modifier.weight(1f)) { editShowMiniMap = !editShowMiniMap }
-                        CompactToggleChip(if (editMiniMapPos == 0) "小图:卡片内" else "小图:左上角", editShowMiniMap, Modifier.weight(1f)) {
-                            editMiniMapPos = if (editMiniMapPos == 0) 1 else 0
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                        CompactToggleChip("✓ 定位码", editShowQr, Modifier.weight(1f)) { editShowQr = !editShowQr }
-                        CompactToggleChip("✓ 地址", editShowAddr, Modifier.weight(1f)) { editShowAddr = !editShowAddr }
-                        CompactToggleChip("✓ 备注", editShowNote, Modifier.weight(1f)) { editShowNote = !editShowNote }
-                        CompactToggleChip("✓ 右下", editBottomRight, Modifier.weight(1f)) { editBottomRight = !editBottomRight }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    val newGcjLat = editLat.toDoubleOrNull() ?: target.config.origGcjLat
-                    val newGcjLon = editLon.toDoubleOrNull() ?: target.config.origGcjLon
-                    val newWgs = CoordinateConverter.gcj02ToWgs84(newGcjLat, newGcjLon)
-                    val (syncedHm, syncedDateWeek, syncedFullTs) = WatermarkConfig.customTimeStrings(
-                        editDatePart,
-                        editTimeHm,
-                        editTimeSec
-                    )
-                    val newAlt = editAltitude.toDoubleOrNull() ?: target.config.altitudeMeters
-                    val newAzDeg = ((editAzimuthDeg.toIntOrNull() ?: target.config.azimuthDeg) % 360 + 360) % 360
-                    val newAzText = locationManager.formatAzimuthText(newAzDeg)
-                    val newAcc = editAccuracy.toFloatOrNull() ?: target.config.accuracyMeters
-
-                    val updatedCfg = target.config.copy(
-                        styleTemplate = editTemplate,
-                        customTitle = editTitle,
-                        coordSystem = editSys,
-                        useDms = editDms,
-                        gcjLat = newGcjLat,
-                        gcjLon = newGcjLon,
-                        wgsLat = newWgs.lat,
-                        wgsLon = newWgs.lon,
-                        altitudeMeters = newAlt,
-                        azimuthDeg = newAzDeg,
-                        azimuthText = newAzText,
-                        accuracyMeters = newAcc,
-                        shortPoi = editPoi,
-                        address = editAddr,
-                        timeHm = syncedHm,
-                        dateWeek = syncedDateWeek,
-                        timestamp = syncedFullTs,
-                        note = editNote,
-                        filterIndex = editFilterIndex,
-                        accentColorIndex = editAccentColorIndex,
-                        fontScale = editFontScale,
-                        bgAlpha = editBgAlpha,
-                        showTime = editShowTime,
-                        showLocation = editShowLoc,
-                        showCoords = editShowCoords,
-                        showCoordTag = editShowCoordTag,
-                        showAccuracy = editShowAccuracy,
-                        showAltitude = editShowAltitude,
-                        showAzimuth = editShowAzimuth,
-                        showQrCode = editShowQr,
-                        showAddress = editShowAddr,
-                        showNote = editShowNote,
-                        showMiniMap = editShowMiniMap,
-                        miniMapPosition = editMiniMapPos,
-                        antiTamperMode = false,
-                        antiTamperHash = "",
-                        bottomRight = editBottomRight
-                    )
-                    scope.launch {
-                        val reloaded = withContext(Dispatchers.IO) {
-                            val cleanBmp = BitmapCacheManager.decodeFullResolutionCleanBitmap(target.cleanFile, 3200)
-                            if (cleanBmp != null) {
-                                val recomposited = WatermarkRenderer.renderWatermarkedBitmap(cleanBmp, updatedCfg)
-                                WatermarkRenderer.saveJpegWithDualTrackExif(recomposited, target.watermarkedFile, updatedCfg)
-                                if (recomposited !== cleanBmp && !recomposited.isRecycled) {
-                                    recomposited.recycle()
-                                }
-                                if (!cleanBmp.isRecycled) {
-                                    cleanBmp.recycle()
-                                }
-                                val newUri = WatermarkRenderer.exportOrUpdateSystemCameraGallery(context, target.watermarkedFile, updatedCfg)
-                                updatedCfg.mediaStoreUri = newUri
-                                target.metaFile.writeText(updatedCfg.toJson())
-                                BitmapCacheManager.invalidate(target.watermarkedFile)
-                            }
-                            WatermarkRenderer.loadSavedPhotos(context)
-                        }
-                        target.config = updatedCfg
-                        photos = reloaded
-                        selectedGalleryPhoto = reloaded.find { it.id == target.id } ?: reloaded.firstOrNull()
-                        editingPhoto = null
-                        Toast.makeText(context, "水印已全尺寸无损重绘并同步更新至系统相册 DCIM/Camera！", Toast.LENGTH_SHORT).show()
-                    }
-                }) {
-                    Text("保存并无损重绘")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingPhoto = null }) { Text("取消") }
-            }
-        )
-    }
-
-    // ==================== DIALOG 5: 删除照片二次确认防误触弹窗 ====================
-    pendingDeletePhoto?.let { target ->
-        AlertDialog(
-            onDismissRequest = { pendingDeletePhoto = null },
-            containerColor = Color(0xFF0F172A),
-            title = { Text("确认删除照片", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-            text = {
-                Text("删除后将从应用相册与系统相册 (DCIM/Camera) 中同步移除该照片且不可恢复，是否确认删除？", color = Color(0xFFCBD5E1), fontSize = 13.sp)
-            },
-            confirmButton = {
-                Button(
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                    onClick = {
-                        pendingDeletePhoto = null
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                WatermarkRenderer.deletePhotoEntryAndMediaStore(context, target)
-                            }
-                            val remaining = photos.filterNot { it.id == target.id }
-                            photos = remaining
-                            selectedGalleryPhoto = remaining.firstOrNull()
-                            if (justCapturedPhoto?.id == target.id) justCapturedPhoto = null
-                            Toast.makeText(context, "已从本机与系统相册同步删除", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                ) {
-                    Text("确认删除", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDeletePhoto = null }) { Text("取消") }
-            }
-        )
-    }
-
-    // ==================== DIALOG 6: 问题6实装 · 独立《高德水印识图验真核验中心》弹窗 ====================
-    if (showVerifyDialog) {
-        var manualVerifyText by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showVerifyDialog = false },
-            containerColor = Color(0xFF0F172A),
-            title = {
-                Text("🛡 高德水印识图验真核验中心", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.5.sp)
-            },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(
-                            onClick = {
-                                showVerifyDialog = false
-                                showGalleryScreen = true
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("🖼 相册选图验真", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clipTxt = cm.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
-                                if (clipTxt.isNotBlank()) {
-                                    manualVerifyText = clipTxt
-                                    val parsed = QrCodeGenerator.parseAndVerifyPayload(clipTxt, "剪贴板链接核验")
-                                    if (parsed != null) {
-                                        verifyPayload = parsed
-                                    } else {
-                                        Toast.makeText(context, "剪贴板内容未包含有效定位码参数", Toast.LENGTH_SHORT).show()
+                            if (!antiTamperMode) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    QUICK_NOTE_TAGS.forEach { tag ->
+                                        SuggestionChip(
+                                            onClick = {
+                                                customNote = if (customNote.isBlank()) tag else "$customNote · $tag"
+                                                showNote = true
+                                            },
+                                            label = { Text("+ $tag", fontSize = 11.sp) }
+                                        )
                                     }
-                                } else {
-                                    Toast.makeText(context, "剪贴板为空", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("📋 粘贴剪贴板核验", fontSize = 12.sp)
-                        }
-                    }
-
-                    val rep = verifyPayload
-                    if (rep != null) {
-                        val borderCol = when {
-                            rep.hasAntiTamper && rep.verified -> Color(0xFF34D399)
-                            rep.hasAntiTamper && !rep.verified -> Color(0xFFF87171)
-                            else -> Color(0xFF38BDF8)
-                        }
-                        val statusBadge = when {
-                            rep.hasAntiTamper && rep.verified -> "🛡 SHA-256 防篡改核验通过 · 真实原片"
-                            rep.hasAntiTamper && !rep.verified -> "⚠️ 警告：签名不匹配 · 疑似被篡改"
-                            else -> "ℹ️ 普通高德定位照片 (未开启防伪签名)"
-                        }
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF090D16)),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().border(1.5.dp, borderCol, RoundedCornerShape(12.dp))
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Text(statusBadge, color = borderCol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("核验来源: ${rep.sourceLabel}", color = Color(0xFF94A3B8), fontSize = 11.sp)
-                                Text("📍 实拍点位: ${rep.shortPoi}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text(
-                                    "高德 GCJ-02: ${String.format(Locale.US, "%.6f°N, %.6f°E", rep.gcjLat, rep.gcjLon)}",
-                                    color = Color(0xFF38BDF8),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.5.sp
-                                )
-                                Text(
-                                    "大地 WGS-84: ${String.format(Locale.US, "%.6f°N, %.6f°E", rep.wgsLat, rep.wgsLon)}",
-                                    color = Color(0xFFCBD5E1),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.5.sp
-                                )
-                                if (rep.timestamp.isNotBlank()) {
-                                    Text("🕒 记录时间: ${rep.timestamp} (${if (rep.ntpSynced) "NTP真时已锁" else "标准授时"})", color = Color.White, fontSize = 11.5.sp)
-                                }
-                                if (rep.note.isNotBlank()) {
-                                    Text("📝 内嵌备注: ${rep.note}", color = Color(0xFFFDE68A), fontSize = 11.5.sp)
-                                }
-                                if (rep.hasAntiTamper) {
-                                    Text("内嵌签名: ${rep.signature}", color = Color(0xFF94A3B8), fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                                    Text("重算签名: ${rep.expectedSignature}", color = borderCol, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
                                 }
                             }
                         }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            Button(
-                                onClick = {
-                                    AmapLauncher.jumpToAmapMarker(context, rep.gcjLat, rep.gcjLon, rep.shortPoi)
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("🧭 跳高德导航", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val reportStr = "【高德水印相机v8.0·验真报告】\n结论：$statusBadge\n点位：${rep.shortPoi}\n高德GCJ-02：${rep.gcjLat},${rep.gcjLon}\n时间：${rep.timestamp}\n签名：${rep.signature}"
-                                    cm.setPrimaryClip(ClipData.newPlainText("VerifyReport", reportStr))
-                                    Toast.makeText(context, "已复制完整验真报告", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("📋 复制验真报告", fontSize = 12.sp)
-                            }
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = manualVerifyText,
-                        onValueChange = { manualVerifyText = it },
-                        label = { Text("粘贴二维码跳转链接或含 sig= 的防伪串核验") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Button(
-                        onClick = {
-                            val parsed = QrCodeGenerator.parseAndVerifyPayload(manualVerifyText, "手动输入链接核验")
-                            if (parsed != null) {
-                                verifyPayload = parsed
-                            } else {
-                                Toast.makeText(context, "未能从文本中解析出高德坐标或防伪签名", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("立即解析并核验真伪")
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showVerifyDialog = false }) { Text("关闭") }
             }
+        }
+    }
+
+    // ==================== MODULAR DIALOGS & SHEETS ====================
+    if (showLocationSheet) {
+        LocationCalibrationDialog(
+            loc = locationManager.locationState.value,
+            antiTamperMode = antiTamperMode,
+            locationManager = locationManager,
+            onDismiss = { showLocationSheet = false }
+        )
+    }
+
+    if (showSettingsSheet) {
+        CameraSettingsDialog(
+            captureMode = captureMode,
+            onCaptureModeChange = { captureMode = it },
+            styleTemplate = styleTemplate,
+            showMiniMap = showMiniMap,
+            onShowMiniMapChange = { showMiniMap = it },
+            antiTamperMode = antiTamperMode,
+            onAntiTamperModeChange = { enabled ->
+                antiTamperMode = enabled
+                if (enabled) {
+                    locationManager.restoreRealGpsCoordinates(clearCustomText = true)
+                    locationManager.syncTrustedNetworkTime()
+                }
+            },
+            showQrCode = showQrCode,
+            onShowQrCodeChange = { showQrCode = it },
+            coordSystem = coordSystem,
+            onCoordSystemChange = { coordSystem = it },
+            asyncOptimal = asyncOptimal,
+            onAsyncOptimalChange = { asyncOptimal = it },
+            accuracyThreshold = accuracyThreshold,
+            onAccuracyThresholdChange = { accuracyThreshold = it },
+            keepCleanOriginal = keepCleanOriginal,
+            onKeepCleanOriginalChange = { keepCleanOriginal = it },
+            showGridLines = showGridLines,
+            onShowGridLinesChange = { showGridLines = it },
+            bottomRight = bottomRight,
+            onBottomRightChange = { bottomRight = it },
+            photoCount = photos.size,
+            onExportCsvLedger = {
+                showSettingsSheet = false
+                exportAndShareCsv(photos)
+            },
+            onDismiss = { showSettingsSheet = false }
+        )
+    }
+
+    editingPhoto?.let { target ->
+        WatermarkEditorBottomSheet(
+            target = target,
+            locationManager = locationManager,
+            onDismiss = { editingPhoto = null },
+            onSaved = { reloaded, _ ->
+                photos = reloaded
+                editingPhoto = null
+            }
+        )
+    }
+
+    if (pendingDeletePhotos.isNotEmpty()) {
+        val targets = pendingDeletePhotos
+        DeletePhotosConfirmDialog(
+            count = targets.size,
+            onDismiss = { pendingDeletePhotos = emptyList() },
+            onConfirm = {
+                pendingDeletePhotos = emptyList()
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        for (t in targets) {
+                            WatermarkRenderer.deletePhotoEntryAndMediaStore(context, t)
+                        }
+                    }
+                    val deletedIds = targets.map { it.id }.toSet()
+                    photos = photos.filterNot { deletedIds.contains(it.id) }
+                    if (justCapturedPhoto != null && deletedIds.contains(justCapturedPhoto?.id)) {
+                        justCapturedPhoto = null
+                    }
+                    Toast.makeText(context, "已同步删除 ${targets.size} 张照片", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    if (showResetConfirmDialog) {
+        ResetWatermarkConfirmDialog(
+            onDismiss = { showResetConfirmDialog = false },
+            onConfirm = {
+                showResetConfirmDialog = false
+                styleTemplate = 0; coordSystem = "GCJ-02"; useDms = false
+                fontScale = 1.0f; accentColorIndex = 0; bgAlpha = 185
+                showTime = true; showLocation = true; showCoords = true
+                showCoordTag = true; showAccuracy = true; showAltitude = false
+                showAzimuth = false; showQrCode = true; showAddress = false
+                showNote = true; showBottomScrim = false; bottomRight = false
+                Toast.makeText(context, "已恢复默认水印配置", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (showVerifyDialog) {
+        VerifyCenterDialog(
+            verifyPayload = verifyPayload,
+            onUpdatePayload = { verifyPayload = it },
+            onOpenGallery = { showGalleryScreen = true },
+            onDismiss = { showVerifyDialog = false }
+        )
+    }
+
+    if (pendingBatchUris.isNotEmpty()) {
+        val urisToProcess = pendingBatchUris
+        BatchWatermarkConfigDialog(
+            selectedCount = urisToProcess.size,
+            currentLoc = locationManager.locationState.value,
+            onDismiss = { pendingBatchUris = emptyList() },
+            onConfirm = { options ->
+                pendingBatchUris = emptyList()
+                val baseCfg = buildCurrentTemplateBaseConfig()
+                val locSnap = locationManager.locationState.value
+                batchJob?.cancel()
+                batchJob = scope.launch {
+                    runBatchWatermarkPipeline(
+                        context = context,
+                        uris = urisToProcess,
+                        locationManager = locationManager,
+                        fallbackLoc = locSnap,
+                        defaultCoordSystem = coordSystem,
+                        templateBase = baseCfg,
+                        options = options,
+                        onProgress = { state -> batchProgressState = state },
+                        onItemCreated = { newEntry ->
+                            photos = listOf(newEntry) + photos
+                        }
+                    )
+                }
+            }
+        )
+    }
+
+    batchProgressState?.let { prog ->
+        BatchWatermarkProgressDialog(
+            state = prog,
+            onCancel = { batchJob?.cancel() },
+            onDismissFinished = { batchProgressState = null }
+        )
+    }
+}
+
+@Composable
+private fun GpsStatusPill(
+    locationManager: FastLocationManager,
+    deviceOrientation: Int,
+    coordSystem: String,
+    antiTamperMode: Boolean,
+    captureMode: Int,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val loc by locationManager.locationState
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xA60B132B))
+            .border(0.8.dp, Color(0x4038BDF8), RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(
+                    when {
+                        loc.isManualCoord -> Color(0xFFF59E0B)
+                        loc.hasValidCoordinates() -> Color(0xFF34D399)
+                        else -> Color(0xFFFBBF24)
+                    }
+                )
+        )
+        val modeTag = when (deviceOrientation) {
+            270 -> "左横"
+            90 -> "右横"
+            180 -> "倒置"
+            else -> "竖屏"
+        }
+        val engineTag = if (antiTamperMode) (if (loc.ntpSynced) "NTP防伪" else "防伪锁") else if (captureMode == 1) "光学" else "极速"
+        val accOrManual = if (loc.isManualCoord) "手动选点" else "±${String.format(Locale.US, "%.1fm", loc.accuracyMeters)}"
+        Text(
+            text = if (loc.hasValidCoordinates()) "$coordSystem · $accOrManual · $engineTag · $modeTag" else "定位中... · $engineTag",
+            color = Color.White,
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace
         )
     }
 }
 
 /**
- * Hardware Optical Capture via CameraX ImageCapture with EXIF rotation alignment and 2560px smart cap.
+ * Hardware Optical Capture via CameraX ImageCapture with cancellation cleanup, EXIF rotation alignment, and 2560px cap.
  */
 private suspend fun captureHardwareOpticalBitmap(
     context: Context,
@@ -2599,6 +1946,9 @@ private suspend fun captureHardwareOpticalBitmap(
 ): Bitmap? = withContext(Dispatchers.IO) {
     val tempFile = File(context.cacheDir, "opt_cap_${System.currentTimeMillis()}.jpg")
     val savedOk = suspendCancellableCoroutine<Boolean> { cont ->
+        cont.invokeOnCancellation {
+            if (tempFile.exists()) tempFile.delete()
+        }
         val outputOptions = ImageCapture.OutputFileOptions.Builder(tempFile).build()
         imageCapture.takePicture(
             outputOptions,
@@ -2630,7 +1980,6 @@ private suspend fun captureHardwareOpticalBitmap(
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         val rawBmp = BitmapFactory.decodeFile(tempFile.absolutePath, decodeOpts)
-        tempFile.delete()
         if (rawBmp == null) return@withContext null
 
         val uprightBmp = WatermarkRenderer.rotateBitmapIfNeeded(rawBmp, exifRot)
@@ -2649,19 +1998,20 @@ private suspend fun captureHardwareOpticalBitmap(
             uprightBmp
         }
     } catch (_: Exception) {
-        tempFile.delete()
         null
+    } finally {
+        if (tempFile.exists()) tempFile.delete()
     }
 }
 
 @Composable
 fun WysiwygLiveWatermarkCanvas(
+    locationManager: FastLocationManager,
     deviceOrientation: Int,
     styleTemplate: Int,
     customTitle: String,
     coordSystem: String,
     useDms: Boolean,
-    loc: LocationSnapshot,
     customNote: String,
     showTime: Boolean,
     showLocation: Boolean,
@@ -2675,17 +2025,19 @@ fun WysiwygLiveWatermarkCanvas(
     showNote: Boolean,
     showMiniMap: Boolean,
     miniMapPosition: Int,
+    showBottomScrim: Boolean,
     antiTamperMode: Boolean,
     bottomRight: Boolean,
     bgAlpha: Int,
     fontScale: Float,
     accentColorIndex: Int
 ) {
-    var timeTick by remember { mutableStateOf(WatermarkConfig.currentTimeStrings(java.util.Date(loc.trustedCurrentTimeMillis()))) }
+    val loc by locationManager.locationState
+    var timeTick by remember { mutableStateOf(WatermarkConfig.currentTimeStrings(Date(loc.trustedCurrentTimeMillis()))) }
     LaunchedEffect(styleTemplate, showTime, antiTamperMode, loc.ntpOffsetMs) {
         if (!showTime && !antiTamperMode) return@LaunchedEffect
         while (true) {
-            val next = WatermarkConfig.currentTimeStrings(java.util.Date(loc.trustedCurrentTimeMillis()))
+            val next = WatermarkConfig.currentTimeStrings(Date(loc.trustedCurrentTimeMillis()))
             if (styleTemplate != 0 || antiTamperMode || next.first != timeTick.first || next.second != timeTick.second) {
                 timeTick = next
             }
@@ -2699,20 +2051,25 @@ fun WysiwygLiveWatermarkCanvas(
         loc, customNote, liveHm, liveDateWeek, liveFullTs,
         showTime, showLocation, showCoords, showCoordTag,
         showAccuracy, showAltitude, showAzimuth, showQrCode,
-        showAddress, showNote, showMiniMap, miniMapPosition, antiTamperMode,
-        bottomRight, bgAlpha, fontScale, accentColorIndex
+        showAddress, showNote, showMiniMap, miniMapPosition, showBottomScrim,
+        antiTamperMode, bottomRight, bgAlpha, fontScale, accentColorIndex
     ) {
+        val activeGcjLat = if (antiTamperMode) loc.rawGcjLat else loc.gcjLat
+        val activeGcjLon = if (antiTamperMode) loc.rawGcjLon else loc.gcjLon
+        val activeWgsLat = if (antiTamperMode) loc.rawWgsLat else loc.wgsLat
+        val activeWgsLon = if (antiTamperMode) loc.rawWgsLon else loc.wgsLon
+        val hasFix = (activeGcjLat != 0.0 || activeGcjLon != 0.0)
         WatermarkConfig(
             styleTemplate = styleTemplate,
             customTitle = customTitle,
             coordSystem = coordSystem,
             useDms = useDms,
-            gcjLat = loc.gcjLat,
-            gcjLon = loc.gcjLon,
-            wgsLat = loc.wgsLat,
-            wgsLon = loc.wgsLon,
-            origGcjLat = loc.gcjLat,
-            origGcjLon = loc.gcjLon,
+            gcjLat = activeGcjLat,
+            gcjLon = activeGcjLon,
+            wgsLat = activeWgsLat,
+            wgsLon = activeWgsLon,
+            origGcjLat = activeGcjLat,
+            origGcjLon = activeGcjLon,
             accuracyMeters = loc.accuracyMeters,
             altitudeMeters = loc.altitudeMeters,
             azimuthDeg = loc.azimuthDeg,
@@ -2735,9 +2092,12 @@ fun WysiwygLiveWatermarkCanvas(
             showNote = showNote,
             showMiniMap = showMiniMap,
             miniMapPosition = miniMapPosition,
+            showBottomScrim = showBottomScrim,
             antiTamperMode = antiTamperMode,
             ntpSynced = loc.ntpSynced,
-            antiTamperHash = if (antiTamperMode) QrCodeGenerator.computeAntiTamperHash(loc.gcjLat, loc.gcjLon, liveFullTs, loc.shortPoi) else "",
+            antiTamperHash = if (antiTamperMode && hasFix) {
+                QrCodeGenerator.computeAntiTamperHash(activeGcjLat, activeGcjLon, liveFullTs, loc.shortPoi, customNote)
+            } else "",
             bottomRight = bottomRight,
             bgAlpha = bgAlpha,
             fontScale = fontScale,
@@ -2775,912 +2135,6 @@ fun WysiwygLiveWatermarkCanvas(
             }
             nativeCanvas.restore()
         }
-    }
-}
-
-@Composable
-fun GalleryAndSystemPhotosScreen(
-    appPhotos: List<PhotoEntry>,
-    selectedPhoto: PhotoEntry?,
-    onSelectPhoto: (PhotoEntry) -> Unit,
-    onBackToCamera: () -> Unit,
-    onImportArbitraryPhoto: () -> Unit,
-    onImportSystemPhotoUri: (SystemCameraPhoto) -> Unit,
-    onEditWatermark: (PhotoEntry) -> Unit,
-    onVerifyPhoto: (QrCodeGenerator.VerifiedLocationPayload) -> Unit,
-    onDeletePhoto: (PhotoEntry) -> Unit
-) {
-    val context = LocalContext.current
-    var galleryTab by remember { mutableStateOf(0) }
-    var systemPhotos by remember { mutableStateOf<List<SystemCameraPhoto>>(emptyList()) }
-    var selectedSysPhoto by remember { mutableStateOf<SystemCameraPhoto?>(null) }
-    var isScanningSys by remember { mutableStateOf(false) }
-
-    LaunchedEffect(galleryTab) {
-        if (galleryTab == 1 && systemPhotos.isEmpty()) {
-            isScanningSys = true
-            val scanned = withContext(Dispatchers.IO) {
-                WatermarkRenderer.scanSystemCameraPhotos(context, maxCount = 40)
-            }
-            systemPhotos = scanned
-            if (selectedSysPhoto == null && scanned.isNotEmpty()) {
-                selectedSysPhoto = scanned.firstOrNull { it.hasGps } ?: scanned.first()
-            }
-            isScanningSys = false
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF090D16))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color.Black)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(onClick = onBackToCamera) {
-                Text("← 返回相机", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0xFF1E293B))
-                    .padding(2.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if (galleryTab == 0) Color(0xFF0284C7) else Color.Transparent)
-                        .clickable { galleryTab = 0 }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text("水印相册(${appPhotos.size})", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if (galleryTab == 1) Color(0xFF0284C7) else Color.Transparent)
-                        .clickable { galleryTab = 1 }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text("系统原相机识别", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-            TextButton(onClick = onImportArbitraryPhoto) {
-                Text("+选图", color = Color(0xFF38BDF8), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        if (galleryTab == 0) {
-            if (appPhotos.isEmpty() || selectedPhoto == null) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text("暂无水印实拍照片", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "你可以返回相机实拍，或切换到顶部「系统原相机识别」直接读取手机自带相机拍过的照片并一键跳高德地图。",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = onBackToCamera) { Text("返回拍摄") }
-                        OutlinedButton(onClick = { galleryTab = 1 }) { Text("扫描系统原相机照片") }
-                    }
-                }
-                return@Column
-            }
-
-            var mainBitmap by remember { mutableStateOf<Bitmap?>(null) }
-            LaunchedEffect(selectedPhoto.id, selectedPhoto.watermarkedFile.lastModified()) {
-                mainBitmap = withContext(Dispatchers.IO) {
-                    BitmapCacheManager.loadDisplayBitmap(selectedPhoto.watermarkedFile, 1440)
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .background(Color.Black)
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                mainBitmap?.let { bmp ->
-                    Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = "已拍水印照片预览",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            }
-
-            val cfg = selectedPhoto.config
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF0F172A))
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "📍 ${cfg.shortPoi.ifBlank { "实拍点位" }} (已存 DCIM/Camera)",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.5.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "高德 GCJ-02: ${String.format(Locale.US, "%.6f°N, %.6f°E", cfg.gcjLat, cfg.gcjLon)}",
-                            color = Color(0xFF38BDF8),
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
-                        )
-                        if (cfg.antiTamperMode && cfg.antiTamperHash.isNotBlank()) {
-                            val verified = cfg.isSignatureValid()
-                            Text(
-                                text = if (verified) "🛡 防伪验真通过 · SHA256:${cfg.antiTamperHash} (${if (cfg.ntpSynced) "NTP真时" else "已锁"})"
-                                       else "⚠️ 防伪签名异常 · 坐标或时间可能被改动",
-                                color = if (verified) Color(0xFF34D399) else Color(0xFFFBBF24),
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
-                        } else {
-                            Text(
-                                text = "原始 WGS-84: ${String.format(Locale.US, "%.6f°N, %.6f°E", cfg.wgsLat, cfg.wgsLon)}",
-                                color = Color(0xFF94A3B8),
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val text = String.format(Locale.US, "%.6f,%.6f", cfg.gcjLon, cfg.gcjLat)
-                            cm.setPrimaryClip(ClipData.newPlainText("GCJ-02", text))
-                            Toast.makeText(context, "已复制高德坐标: $text", Toast.LENGTH_SHORT).show()
-                        },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text("复制坐标", fontSize = 11.5.sp)
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            AmapLauncher.jumpToAmapMarker(
-                                context = context,
-                                gcjLat = cfg.gcjLat,
-                                gcjLon = cfg.gcjLon,
-                                poiName = cfg.shortPoi.ifBlank { cfg.address }
-                            )
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                        modifier = Modifier.weight(1.4f)
-                    ) {
-                        Text("📍 一键跳高德地图 (丝毫不差)", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-
-                    Button(
-                        onClick = {
-                            AmapLauncher.jumpToAmapNavigation(
-                                context = context,
-                                gcjLat = cfg.gcjLat,
-                                gcjLon = cfg.gcjLon,
-                                poiName = cfg.shortPoi.ifBlank { cfg.address }
-                            )
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                        modifier = Modifier.weight(0.9f)
-                    ) {
-                        Text("🧭 导航去这里", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { onEditWatermark(selectedPhoto) },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            text = if (cfg.antiTamperMode) "🔒 防伪已锁 (禁改)" else "✎ 全要素改水印",
-                            color = if (cfg.antiTamperMode) Color(0xFF64748B) else Color(0xFFFDE68A),
-                            fontSize = 12.sp
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            val exp = QrCodeGenerator.computeAntiTamperHash(cfg.gcjLat, cfg.gcjLon, cfg.timestamp, cfg.shortPoi, cfg.note).take(12)
-                            onVerifyPhoto(
-                                QrCodeGenerator.VerifiedLocationPayload(
-                                    gcjLat = cfg.gcjLat,
-                                    gcjLon = cfg.gcjLon,
-                                    wgsLat = cfg.wgsLat,
-                                    wgsLon = cfg.wgsLon,
-                                    shortPoi = cfg.shortPoi,
-                                    timestamp = cfg.timestamp,
-                                    note = cfg.note,
-                                    signature = cfg.antiTamperHash.take(12),
-                                    expectedSignature = exp,
-                                    ntpSynced = cfg.ntpSynced,
-                                    hasAntiTamper = cfg.antiTamperMode,
-                                    verified = cfg.isSignatureValid(),
-                                    sourceLabel = "水印相册原片核验"
-                                )
-                            )
-                        }
-                    ) {
-                        Text("🛡 验真报告", color = Color(0xFF34D399), fontSize = 12.sp)
-                    }
-                    OutlinedButton(
-                        onClick = { onDeletePhoto(selectedPhoto) }
-                    ) {
-                        Text("🗑 删除", color = Color(0xFFF87171), fontSize = 12.sp)
-                    }
-                }
-            }
-
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(appPhotos, key = { it.id }) { item ->
-                    val isSelected = item.id == selectedPhoto.id
-                    var thumb by remember(item.id) { mutableStateOf<Bitmap?>(null) }
-                    LaunchedEffect(item.id, item.watermarkedFile.lastModified()) {
-                        thumb = withContext(Dispatchers.IO) {
-                            BitmapCacheManager.loadThumbnail(item.watermarkedFile, 160, 160)
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .border(
-                                width = if (isSelected) 2.5.dp else 1.dp,
-                                color = if (isSelected) Color(0xFF38BDF8) else Color(0xFF334155),
-                                shape = RoundedCornerShape(10.dp)
-                            )
-                            .clickable { onSelectPhoto(item) }
-                    ) {
-                        thumb?.let { bmp ->
-                            Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            if (isScanningSys) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("正在扫描手机系统相册照片并提取EXIF经纬度...", color = Color.White, fontSize = 14.sp)
-                }
-                return@Column
-            }
-
-            if (systemPhotos.isEmpty() || selectedSysPhoto == null) {
-                Column(
-                    modifier = Modifier.fillMaxSize().padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text("未扫描到系统相册照片或未授予相册读取权限", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(onClick = onImportArbitraryPhoto) {
-                        Text("手动选择系统相册图片")
-                    }
-                }
-                return@Column
-            }
-
-            val curSys = selectedSysPhoto!!
-            var sysDisplayBmp by remember(curSys.contentUri) { mutableStateOf<Bitmap?>(null) }
-            LaunchedEffect(curSys.contentUri) {
-                sysDisplayBmp = withContext(Dispatchers.IO) {
-                    BitmapCacheManager.loadUriThumbnail(context, curSys.contentUri, 1080)
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .background(Color.Black)
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                sysDisplayBmp?.let { bmp ->
-                    Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF0F172A))
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "${curSys.displayName} · ${curSys.dateTakenStr}",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-                if (curSys.hasGps) {
-                    val verifyText = if (curSys.antiTamperHash.isNotBlank()) {
-                        if (curSys.antiTamperVerified) "🛡 EXIF防篡改签名核验通过 (${curSys.antiTamperHash.take(12)})"
-                        else "⚠️ EXIF防伪签名异常"
-                    } else "✅ 已识别照片地理位置 (已自动由 WGS-84 纠偏为高德 GCJ-02)"
-                    Text(
-                        text = verifyText,
-                        color = if (curSys.antiTamperHash.isNotBlank() && !curSys.antiTamperVerified) Color(0xFFF87171) else Color(0xFF34D399),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "高德 GCJ-02: ${String.format(Locale.US, "%.6f°N, %.6f°E", curSys.gcjLat, curSys.gcjLon)}",
-                        color = Color(0xFF38BDF8),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "原始 EXIF (WGS-84): ${String.format(Locale.US, "%.6f°N, %.6f°E", curSys.wgsLat, curSys.wgsLon)}",
-                        color = Color(0xFF94A3B8),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp
-                    )
-                } else {
-                    Text(
-                        text = "⚠️ 该照片拍摄时未开启系统相机“保存地理位置”开关 (无EXIF GPS标签)",
-                        color = Color(0xFFFBBF24),
-                        fontSize = 12.sp
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        enabled = curSys.hasGps,
-                        onClick = {
-                            AmapLauncher.jumpToAmapMarker(
-                                context = context,
-                                gcjLat = curSys.gcjLat,
-                                gcjLon = curSys.gcjLon,
-                                poiName = curSys.displayName
-                            )
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                        modifier = Modifier.weight(1.3f)
-                    ) {
-                        Text("📍 一键跳高德地图", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-
-                    Button(
-                        enabled = curSys.hasGps,
-                        onClick = {
-                            AmapLauncher.jumpToAmapNavigation(
-                                context = context,
-                                gcjLat = curSys.gcjLat,
-                                gcjLon = curSys.gcjLon,
-                                poiName = curSys.displayName
-                            )
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("🧭 高德导航", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = { onImportSystemPhotoUri(curSys) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("✨ 为这张原相机照片加装高德经纬水印 (自动纠正竖屏方向)", color = Color(0xFF38BDF8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(systemPhotos, key = { it.mediaId }) { item ->
-                    val isSel = (item.mediaId == curSys.mediaId)
-                    var thumb by remember(item.mediaId) { mutableStateOf<Bitmap?>(null) }
-                    LaunchedEffect(item.contentUri) {
-                        thumb = withContext(Dispatchers.IO) {
-                            BitmapCacheManager.loadUriThumbnail(context, item.contentUri, 160)
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .border(
-                                width = if (isSel) 2.5.dp else 1.dp,
-                                color = if (isSel) Color(0xFF38BDF8) else if (item.hasGps) Color(0xFF34D399) else Color(0xFF334155),
-                                shape = RoundedCornerShape(10.dp)
-                            )
-                            .clickable { selectedSysPhoto = item }
-                    ) {
-                        thumb?.let { bmp ->
-                            Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                        if (item.hasGps) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(3.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xCC059669))
-                                    .padding(horizontal = 3.dp, vertical = 1.dp)
-                            ) {
-                                Text("GPS", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ============================================================================
-// CUSTOM VECTOR ICONS & REUSABLE UI COMPONENTS
-// ============================================================================
-@Composable
-fun ShieldVerifyVectorIcon() {
-    Canvas(modifier = Modifier.size(24.dp)) {
-        val w = size.width
-        val h = size.height
-        val stroke = 1.9.dp.toPx()
-        val path = Path().apply {
-            moveTo(w * 0.50f, h * 0.10f)
-            lineTo(w * 0.84f, h * 0.25f)
-            lineTo(w * 0.84f, h * 0.52f)
-            quadraticBezierTo(w * 0.84f, h * 0.80f, w * 0.50f, h * 0.92f)
-            quadraticBezierTo(w * 0.16f, h * 0.80f, w * 0.16f, h * 0.52f)
-            lineTo(w * 0.16f, h * 0.25f)
-            close()
-        }
-        drawPath(path = path, color = Color(0xFF34D399), style = Stroke(width = stroke, join = StrokeJoin.Round))
-        drawLine(Color(0xFF34D399), Offset(w * 0.36f, h * 0.52f), Offset(w * 0.47f, h * 0.63f), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawLine(Color(0xFF34D399), Offset(w * 0.47f, h * 0.63f), Offset(w * 0.66f, h * 0.40f), strokeWidth = stroke, cap = StrokeCap.Round)
-    }
-}
-
-@Composable
-fun CaptureModeVectorIcon(isOptical: Boolean) {
-    val tint = if (isOptical) Color(0xFF38BDF8) else Color(0xFFFBBF24)
-    Canvas(modifier = Modifier.size(24.dp)) {
-        val w = size.width
-        val h = size.height
-        val stroke = 1.9.dp.toPx()
-        drawRoundRect(
-            color = tint,
-            topLeft = Offset(w * 0.10f, h * 0.22f),
-            size = Size(w * 0.80f, h * 0.58f),
-            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
-            style = Stroke(width = stroke)
-        )
-        drawCircle(
-            color = tint,
-            radius = w * 0.18f,
-            center = Offset(w * 0.5f, h * 0.51f),
-            style = Stroke(width = stroke)
-        )
-        if (isOptical) {
-            drawCircle(color = tint, radius = w * 0.06f, center = Offset(w * 0.5f, h * 0.51f))
-        }
-    }
-}
-
-@Composable
-fun CompactToggleChip(
-    label: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) Color(0xFF0369A1) else Color(0xFF1E293B))
-            .border(1.dp, if (selected) Color(0xFF38BDF8) else Color(0xFF334155), RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 7.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            color = if (selected) Color.White else Color(0xFF94A3B8),
-            fontSize = 11.5.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-fun QuickPresetButton(
-    label: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF1E293B))
-            .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(label, color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-    }
-}
-
-@Composable
-fun GridLinesVectorIcon(active: Boolean) {
-    val tint = if (active) Color(0xFF38BDF8) else Color.White
-    Canvas(modifier = Modifier.size(24.dp)) {
-        val w = size.width
-        val h = size.height
-        val stroke = 1.8.dp.toPx()
-        drawRoundRect(
-            color = tint,
-            topLeft = Offset(w * 0.1f, h * 0.1f),
-            size = Size(w * 0.8f, h * 0.8f),
-            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
-            style = Stroke(width = stroke)
-        )
-        drawLine(tint, Offset(w * 0.37f, h * 0.1f), Offset(w * 0.37f, h * 0.9f), strokeWidth = stroke)
-        drawLine(tint, Offset(w * 0.63f, h * 0.1f), Offset(w * 0.63f, h * 0.9f), strokeWidth = stroke)
-        drawLine(tint, Offset(w * 0.1f, h * 0.37f), Offset(w * 0.9f, h * 0.37f), strokeWidth = stroke)
-        drawLine(tint, Offset(w * 0.1f, h * 0.63f), Offset(w * 0.9f, h * 0.63f), strokeWidth = stroke)
-    }
-}
-
-@Composable
-fun CameraTopBarItem(
-    label: String,
-    rotationDegrees: Float = 0f,
-    onClick: () -> Unit,
-    iconContent: @Composable () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .rotate(rotationDegrees)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 4.dp)
-    ) {
-        Box(modifier = Modifier.size(28.dp), contentAlignment = Alignment.Center) {
-            iconContent()
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(text = label, color = Color.White, fontSize = 11.sp)
-    }
-}
-
-@Composable
-fun CameraBottomBarItem(
-    label: String,
-    active: Boolean = false,
-    rotationDegrees: Float = 0f,
-    onClick: () -> Unit,
-    iconContent: @Composable () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .rotate(rotationDegrees)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp)
-    ) {
-        Box(modifier = Modifier.size(34.dp), contentAlignment = Alignment.Center) {
-            iconContent()
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = label,
-            color = if (active) Color(0xFF38BDF8) else Color.White,
-            fontSize = 12.sp,
-            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
-        )
-    }
-}
-
-@Composable
-fun WatermarkToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, color = Color.White, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@Composable
-fun GearVectorIcon() {
-    Canvas(modifier = Modifier.size(26.dp)) {
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val outerR = size.minDimension * 0.42f
-        val innerR = size.minDimension * 0.20f
-        drawCircle(color = Color.White, radius = outerR, center = Offset(cx, cy), style = Stroke(width = 2.2.dp.toPx()))
-        drawCircle(color = Color.White, radius = innerR, center = Offset(cx, cy), style = Stroke(width = 2.dp.toPx()))
-        for (i in 0 until 8) {
-            val angle = Math.toRadians((i * 45).toDouble())
-            val x1 = cx + (outerR - 1.dp.toPx()) * cos(angle).toFloat()
-            val y1 = cy + (outerR - 1.dp.toPx()) * sin(angle).toFloat()
-            val x2 = cx + (outerR + 3.2.dp.toPx()) * cos(angle).toFloat()
-            val y2 = cy + (outerR + 3.2.dp.toPx()) * sin(angle).toFloat()
-            drawLine(color = Color.White, start = Offset(x1, y1), end = Offset(x2, y2), strokeWidth = 2.6.dp.toPx(), cap = StrokeCap.Round)
-        }
-    }
-}
-
-@Composable
-fun TimerVectorIcon(seconds: Int) {
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(28.dp)) {
-        Canvas(modifier = Modifier.size(25.dp)) {
-            val cx = size.width / 2f
-            val cy = size.height / 2f
-            val r = size.minDimension * 0.42f
-            drawArc(
-                color = if (seconds > 0) Color(0xFF38BDF8) else Color.White,
-                startAngle = -60f,
-                sweepAngle = 300f,
-                useCenter = false,
-                style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
-            )
-            drawLine(
-                color = if (seconds > 0) Color(0xFF38BDF8) else Color.White,
-                start = Offset(cx, cy),
-                end = Offset(cx + r * 0.55f, cy - r * 0.45f),
-                strokeWidth = 2.2.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-        }
-        if (seconds > 0) {
-            Text(
-                text = seconds.toString(),
-                color = Color(0xFF38BDF8),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.BottomEnd)
-            )
-        }
-    }
-}
-
-@Composable
-fun FlashVectorIcon(statusText: String, active: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Canvas(modifier = Modifier.size(22.dp)) {
-            val w = size.width
-            val h = size.height
-            val path = Path().apply {
-                moveTo(w * 0.58f, h * 0.08f)
-                lineTo(w * 0.22f, h * 0.54f)
-                lineTo(w * 0.50f, h * 0.54f)
-                lineTo(w * 0.38f, h * 0.92f)
-                lineTo(w * 0.78f, h * 0.44f)
-                lineTo(w * 0.52f, h * 0.44f)
-                close()
-            }
-            drawPath(
-                path = path,
-                color = if (active) Color(0xFFFACC15) else Color.White,
-                style = Stroke(width = 2.dp.toPx(), join = StrokeJoin.Round)
-            )
-        }
-        if (statusText.isNotEmpty()) {
-            Text(
-                text = statusText,
-                color = if (active) Color(0xFFFACC15) else Color.White,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-    }
-}
-
-@Composable
-fun FlipCameraVectorIcon() {
-    Canvas(modifier = Modifier.size(25.dp)) {
-        val w = size.width
-        val h = size.height
-        val stroke = 2.1.dp.toPx()
-        drawRoundRect(
-            color = Color.White,
-            topLeft = Offset(w * 0.12f, h * 0.22f),
-            size = Size(w * 0.76f, h * 0.58f),
-            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
-            style = Stroke(width = stroke)
-        )
-        drawLine(Color.White, Offset(w * 0.62f, h * 0.12f), Offset(w * 0.74f, h * 0.22f), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawLine(Color.White, Offset(w * 0.38f, h * 0.90f), Offset(w * 0.26f, h * 0.80f), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawCircle(color = Color.White, radius = 2.2.dp.toPx(), center = Offset(w * 0.34f, h * 0.51f))
-        drawCircle(color = Color.White, radius = 2.2.dp.toPx(), center = Offset(w * 0.66f, h * 0.51f))
-    }
-}
-
-@Composable
-fun FocusReticleBox(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val stroke = 1.8.dp.toPx()
-        val tick = 8.dp.toPx()
-        drawRect(color = Color.White, style = Stroke(width = stroke))
-        drawLine(Color.White, Offset(w / 2f, 0f), Offset(w / 2f, tick), strokeWidth = stroke)
-        drawLine(Color.White, Offset(w / 2f, h - tick), Offset(w / 2f, h), strokeWidth = stroke)
-        drawLine(Color.White, Offset(0f, h / 2f), Offset(tick, h / 2f), strokeWidth = stroke)
-        drawLine(Color.White, Offset(w - tick, h / 2f), Offset(w, h / 2f), strokeWidth = stroke)
-    }
-}
-
-@Composable
-fun SunExposureIcon(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val r = size.minDimension * 0.22f
-        drawCircle(color = Color.White, radius = r, center = Offset(cx, cy), style = Stroke(width = 1.8.dp.toPx()))
-        for (i in 0 until 8) {
-            val angle = Math.toRadians((i * 45).toDouble())
-            val x1 = cx + (r + 3.dp.toPx()) * cos(angle).toFloat()
-            val y1 = cy + (r + 3.dp.toPx()) * sin(angle).toFloat()
-            val x2 = cx + (r + 6.5.dp.toPx()) * cos(angle).toFloat()
-            val y2 = cy + (r + 6.5.dp.toPx()) * sin(angle).toFloat()
-            drawLine(Color.White, Offset(x1, y1), Offset(x2, y2), strokeWidth = 1.8.dp.toPx(), cap = StrokeCap.Round)
-        }
-    }
-}
-
-@Composable
-fun RedPinVectorIcon(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val cx = size.width / 2f
-        val headY = size.height * 0.36f
-        val headR = size.minDimension * 0.30f
-        drawLine(
-            color = Color(0xFFDC2626),
-            start = Offset(cx, headY + headR * 0.6f),
-            end = Offset(cx, size.height * 0.92f),
-            strokeWidth = 2.2.dp.toPx(),
-            cap = StrokeCap.Round
-        )
-        drawCircle(color = Color(0xFFEF4444), radius = headR, center = Offset(cx, headY))
-        drawCircle(color = Color(0xFFFECACA), radius = headR * 0.32f, center = Offset(cx - headR * 0.25f, headY - headR * 0.25f))
-    }
-}
-
-@Composable
-fun PaperPlaneLocationIcon() {
-    Canvas(modifier = Modifier.size(28.dp)) {
-        val w = size.width
-        val h = size.height
-        val path = Path().apply {
-            moveTo(w * 0.88f, h * 0.14f)
-            lineTo(w * 0.12f, h * 0.46f)
-            lineTo(w * 0.46f, h * 0.56f)
-            lineTo(w * 0.58f, h * 0.88f)
-            close()
-        }
-        drawPath(path = path, color = Color.White, style = Stroke(width = 2.2.dp.toPx(), join = StrokeJoin.Round))
-    }
-}
-
-@Composable
-fun FilterRingsVectorIcon(active: Boolean) {
-    val tint = if (active) Color(0xFF38BDF8) else Color.White
-    Canvas(modifier = Modifier.size(28.dp)) {
-        val w = size.width
-        val h = size.height
-        val r = size.minDimension * 0.26f
-        val stroke = Stroke(width = 2.1.dp.toPx())
-        drawCircle(color = tint, radius = r, center = Offset(w * 0.50f, h * 0.34f), style = stroke)
-        drawCircle(color = tint, radius = r, center = Offset(w * 0.34f, h * 0.64f), style = stroke)
-        drawCircle(color = tint, radius = r, center = Offset(w * 0.66f, h * 0.64f), style = stroke)
-    }
-}
-
-@Composable
-fun WatermarkStampVectorIcon() {
-    Canvas(modifier = Modifier.size(28.dp)) {
-        val w = size.width
-        val h = size.height
-        drawRoundRect(
-            color = Color.White,
-            topLeft = Offset(w * 0.12f, h * 0.16f),
-            size = Size(w * 0.76f, h * 0.68f),
-            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
-            style = Stroke(width = 2.2.dp.toPx())
-        )
-        drawLine(Color.White, Offset(w * 0.26f, h * 0.36f), Offset(w * 0.74f, h * 0.36f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-        drawCircle(Color.White, radius = 1.6.dp.toPx(), center = Offset(w * 0.32f, h * 0.60f))
-        drawCircle(color = Color.White, radius = 1.6.dp.toPx(), center = Offset(w * 0.50f, h * 0.60f))
-        drawCircle(color = Color.White, radius = 1.6.dp.toPx(), center = Offset(w * 0.68f, h * 0.60f))
-    }
-}
-
-@Composable
-fun GalleryPlaceholderIcon() {
-    Canvas(modifier = Modifier.size(22.dp)) {
-        val w = size.width
-        val h = size.height
-        drawRoundRect(
-            color = Color(0xFF94A3B8),
-            topLeft = Offset(w * 0.1f, h * 0.15f),
-            size = Size(w * 0.8f, h * 0.7f),
-            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
-            style = Stroke(width = 1.8.dp.toPx())
-        )
     }
 }
 

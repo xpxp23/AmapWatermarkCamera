@@ -1,0 +1,179 @@
+<view class="detail-page">
+  <!-- 顶部悬浮透明导航栏 -->
+  <view
+    class="detail-nav"
+    style="padding-top: {{menuBtnTop}}px; height: {{menuBtnHeight}}px; padding-right: {{menuBtnRightSpace}}px;"
+  >
+    <view class="nav-back" bindtap="goBack">
+      <text class="nav-chevron">‹</text>
+      <text class="nav-txt">相册</text>
+    </view>
+    <view wx:if="{{photos.length > 0}}" class="nav-counter">{{currentIndex + 1}} / {{photos.length}}</view>
+  </view>
+
+  <!-- 全屏 <swiper> 左右丝滑滑切，点击调用 wx.previewImage 双指缩放 -->
+  <swiper
+    class="detail-swiper"
+    current="{{currentIndex}}"
+    duration="240"
+    bindchange="onSwiperChange"
+  >
+    <swiper-item wx:for="{{photos}}" wx:key="id" class="swiper-slide">
+      <image
+        src="{{item.wmPath}}"
+        mode="aspectFit"
+        class="detail-full-img"
+        bindtap="previewCurrentFullImage"
+      />
+    </swiper-item>
+  </swiper>
+
+  <!-- 底部极简悬浮 4 键栏：导航 | 转发 | 改水印/已锁 | 详情 -->
+  <view wx:if="{{currentPhoto}}" class="floating-dock">
+    <view class="dock-btn" bindtap="navigateCurrentPhoto">
+      <text class="dock-icon">🧭</text>
+      <text class="dock-lbl">导航</text>
+    </view>
+
+    <button class="dock-btn share-reset" open-type="share">
+      <text class="dock-icon">📤</text>
+      <text class="dock-lbl">转发</text>
+    </button>
+
+    <view
+      class="dock-btn {{currentPhoto.cfg.antiTamperMode ? 'locked' : ''}}"
+      bindtap="openEditDrawer"
+    >
+      <text class="dock-icon">{{currentPhoto.cfg.antiTamperMode ? '🔒' : '✎'}}</text>
+      <text class="dock-lbl">{{currentPhoto.cfg.antiTamperMode ? '已锁' : '改水印'}}</text>
+    </view>
+
+    <view class="dock-btn" bindtap="openDetailDrawer">
+      <text class="dock-icon">ℹ️</text>
+      <text class="dock-lbl">详情</text>
+    </view>
+  </view>
+
+  <!-- 半屏平滑详情抽屉（双坐标系、一键复制、SHA-256 验真报告、保存与删除） -->
+  <view wx:if="{{showDetailDrawer && currentPhoto}}" class="drawer-mask" bindtap="closeDetailDrawer">
+    <view class="drawer-card" catchtap="noop">
+      <view class="drawer-header">
+        <view class="drawer-title">📍 {{currentPhoto.cfg.shortPoi}}</view>
+        <view class="drawer-close" bindtap="closeDetailDrawer">✕</view>
+      </view>
+
+      <view class="coord-box">
+        <view class="coord-row">
+          <view class="coord-col">
+            <view class="coord-line accent mono">高德 GCJ-02: {{currentPhoto.cfg.gcjLat}}°N, {{currentPhoto.cfg.gcjLon}}°E</view>
+            <view class="coord-line mono">大地 WGS-84: {{currentPhoto.cfg.wgsLat}}°N, {{currentPhoto.cfg.wgsLon}}°E</view>
+            <view class="coord-line muted">拍摄时间: {{currentPhoto.cfg.fullTs}} · {{currentPhoto.cfg.coordSys}}</view>
+          </view>
+          <view class="copy-pill" bindtap="copyCurrentCoord">复制坐标</view>
+        </view>
+      </view>
+
+      <view wx:if="{{verifyReport}}" class="report-card {{verifyReport.status}}">
+        <view class="rep-head">
+          <text class="rep-badge">{{verifyReport.statusBadge}}</text>
+          <text class="rep-copy" bindtap="copyVerifyReport">📋 复制报告</text>
+        </view>
+        <view class="rep-title">{{verifyReport.statusTitle}}</view>
+        <view class="rep-desc">{{verifyReport.statusDesc}}</view>
+        <view class="rep-sig mono">内嵌签名: {{verifyReport.actualSig}} · 重算: {{verifyReport.expectedSig}}</view>
+      </view>
+
+      <view class="raw-hint">
+        {{currentPhoto.cfg.antiTamperMode ? '🛡 防篡改原片已锁定，禁止二次修改' : (currentPhoto.rawPath ? '✓ 保留无损底图，支持随时无损重绘水印' : 'ℹ️ 无损底图已回收（仅保留高清水印成品）')}}
+      </view>
+
+      <view class="drawer-actions">
+        <button class="d-btn blue" bindtap="saveCurrentToAlbum">⬇ 保存至系统相册</button>
+        <button class="d-btn danger" bindtap="deleteCurrentPhoto">🗑 删除照片</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 独立无损重绘半屏抽屉（使用深拷贝 editDraft，绝不污染全局相机配置） -->
+  <view wx:if="{{showEditDrawer && editDraft}}" class="drawer-mask" bindtap="closeEditDrawer">
+    <view class="drawer-card edit-drawer" catchtap="noop">
+      <view class="drawer-header">
+        <view class="drawer-title">✎ 无损重绘照片水印</view>
+        <view class="drawer-close" bindtap="closeEditDrawer">✕</view>
+      </view>
+
+      <scroll-view scroll-y class="edit-scroll">
+        <view class="section-lbl">1. 拍摄日期与秒级时间</view>
+        <view class="edit-row">
+          <picker mode="date" value="{{editDraft.editDatePart}}" data-field="editDatePart" bindchange="onDraftFieldInput" class="picker-col">
+            <view class="field-pill">📅 {{editDraft.editDatePart}}</view>
+          </picker>
+          <picker mode="time" value="{{editDraft.editTimeHm}}" data-field="editTimeHm" bindchange="onDraftFieldInput" class="picker-col">
+            <view class="field-pill">🕒 {{editDraft.editTimeHm}}</view>
+          </picker>
+          <input class="sec-input" type="number" maxlength="2" value="{{editDraft.editTimeSec}}" data-field="editTimeSec" bindinput="onDraftFieldInput" placeholder="秒" />
+        </view>
+
+        <view class="section-head">
+          <text class="section-lbl">2. 高德 GCJ-02 坐标 (自动同步 WGS-84)</text>
+          <view class="link-ops">
+            <text class="link-btn accent" bindtap="chooseDraftCoordOnMap">📌 地图选点</text>
+            <text class="link-btn muted" bindtap="restoreDraftOrigCoord">↺ 原始坐标</text>
+          </view>
+        </view>
+        <view class="edit-row">
+          <input class="edit-input" type="digit" value="{{editDraft.editGcjLat}}" data-field="editGcjLat" bindinput="onDraftFieldInput" placeholder="纬度" />
+          <input class="edit-input" type="digit" value="{{editDraft.editGcjLon}}" data-field="editGcjLon" bindinput="onDraftFieldInput" placeholder="经度" />
+        </view>
+
+        <view class="section-lbl">3. 海拔(m) / 方位角(°) / 精度(±m)</view>
+        <view class="edit-row">
+          <input class="edit-input" type="digit" value="{{editDraft.editAltitude}}" data-field="editAltitude" bindinput="onDraftFieldInput" placeholder="海拔" />
+          <input class="edit-input" type="number" value="{{editDraft.editAzimuthDeg}}" data-field="editAzimuthDeg" bindinput="onDraftFieldInput" placeholder="方位角" />
+          <input class="edit-input" type="digit" value="{{editDraft.editAccuracy}}" data-field="editAccuracy" bindinput="onDraftFieldInput" placeholder="精度" />
+        </view>
+
+        <view class="section-lbl">4. 模板与坐标系</view>
+        <view class="chip-row">
+          <view
+            wx:for="{{tplNames}}"
+            wx:key="index"
+            class="chip-opt {{editDraft.styleTemplate === index ? 'active' : ''}}"
+            data-idx="{{index}}"
+            bindtap="onDraftSelectTemplate"
+          >
+            {{item}}
+          </view>
+        </view>
+        <view class="chip-row">
+          <view class="chip-opt {{editDraft.coordSys === 'WGS-84' ? 'active' : ''}}" data-sys="WGS-84" bindtap="onDraftSelectCoordSys">WGS-84</view>
+          <view class="chip-opt {{editDraft.coordSys === 'CGCS2000' ? 'active' : ''}}" data-sys="CGCS2000" bindtap="onDraftSelectCoordSys">CGCS2000</view>
+          <view class="chip-opt {{editDraft.coordSys === 'GCJ-02' ? 'active' : ''}}" data-sys="GCJ-02" bindtap="onDraftSelectCoordSys">GCJ-02</view>
+        </view>
+
+        <view class="section-lbl">5. 标题 / 点位 / 地址 / 备注</view>
+        <input class="edit-input full" value="{{editDraft.customTitle}}" data-field="customTitle" bindinput="onDraftFieldInput" placeholder="卡片标题" />
+        <input class="edit-input full" value="{{editDraft.shortPoi}}" data-field="shortPoi" bindinput="onDraftFieldInput" placeholder="点位简称" />
+        <input class="edit-input full" value="{{editDraft.fullAddr}}" data-field="fullAddr" bindinput="onDraftFieldInput" placeholder="详细地址 (选填)" />
+        <input class="edit-input full" value="{{editDraft.note}}" data-field="note" bindinput="onDraftFieldInput" placeholder="现场备注 (选填)" />
+
+        <view class="toggle-row">
+          <text>🌘 模板0底部托底暗影</text>
+          <switch checked="{{editDraft.showBottomScrim}}" data-field="showBottomScrim" bindchange="onDraftToggleBool" color="#0284c7" />
+        </view>
+        <view class="toggle-row">
+          <text>▣ 显示高德定位二维码</text>
+          <switch checked="{{editDraft.showQr}}" data-field="showQr" bindchange="onDraftToggleBool" color="#0284c7" />
+        </view>
+        <view class="toggle-row">
+          <text>🗺 显示 160px 高德缩略图</text>
+          <switch checked="{{editDraft.showMiniMap}}" data-field="showMiniMap" bindchange="onDraftToggleBool" color="#0284c7" />
+        </view>
+      </scroll-view>
+
+      <button class="confirm-redraw-btn" bindtap="confirmRedrawWatermark">确认并全尺寸无损重绘</button>
+    </view>
+  </view>
+
+  <canvas type="2d" id="detailFallbackCanvas" style="width: 1080px; height: 1440px; position: fixed; left: -9999px; top: -9999px;"></canvas>
+</view>

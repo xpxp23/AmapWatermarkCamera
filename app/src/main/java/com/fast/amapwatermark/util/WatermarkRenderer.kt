@@ -8,7 +8,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Base64
 import android.util.LruCache
+import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import org.json.JSONObject
 import java.io.File
@@ -17,37 +19,36 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
-import kotlin.math.sin
 
 /**
- * Watermark configuration stored alongside each captured photo's clean base image.
+ * Watermark configuration stored alongside each captured photo's clean base image (v9.0.0).
  * Supports unlimited non-destructive re-rendering in both Portrait and Landscape,
- * plus v7.0.0 High-Def Vector Mini-Map PiP and Anti-Tamper Cryptographic Verification.
+ * High-Def Vector Mini-Map PiP, optional Template-0 bottom scrim, and SHA-256 + dHash Anti-Tamper Verification.
  */
 data class WatermarkConfig(
     var styleTemplate: Int = 0,
     var customTitle: String = "现场点位核验",
     var coordSystem: String = "WGS-84", // "WGS-84", "CGCS2000", or "GCJ-02"
     var useDms: Boolean = false,
-    var gcjLat: Double = 39.908823,
-    var gcjLon: Double = 116.397470,
-    var wgsLat: Double = 39.907419,
-    var wgsLon: Double = 116.391228,
-    var origGcjLat: Double = 39.908823,
-    var origGcjLon: Double = 116.397470,
-    var accuracyMeters: Float = 2.8f,
-    var altitudeMeters: Double = 46.0,
+    var gcjLat: Double = 0.0,
+    var gcjLon: Double = 0.0,
+    var wgsLat: Double = 0.0,
+    var wgsLon: Double = 0.0,
+    var origGcjLat: Double = 0.0,
+    var origGcjLon: Double = 0.0,
+    var accuracyMeters: Float = 0f,
+    var altitudeMeters: Double = 0.0,
     var azimuthDeg: Int = 0,
     var azimuthText: String = "正北 000°",
     var shortPoi: String = "定位中...",
     var address: String = "",
-    var timeHm: String = "19:09",
-    var dateWeek: String = "2026-11-17 星期二",
-    var timestamp: String = "2026-11-17 19:09:40",
+    var timeHm: String = "00:00",
+    var dateWeek: String = "",
+    var timestamp: String = "",
     var note: String = "",
     var showTime: Boolean = true,
     var showLocation: Boolean = true,
@@ -61,26 +62,31 @@ data class WatermarkConfig(
     var showNote: Boolean = true,
     var showMiniMap: Boolean = true,
     var miniMapPosition: Int = 0, // 0: 卡片左侧内嵌 (160x160), 1: 画面左上角独立悬浮
+    var showBottomScrim: Boolean = false, // 模板0底部托底暗影，默认关闭不压暗画面
     var antiTamperMode: Boolean = false,
     var ntpSynced: Boolean = false,
     var antiTamperHash: String = "",
+    var imageHash: String = "",
     var bottomRight: Boolean = false,
-    var filterIndex: Int = 0,
     var bgAlpha: Int = 185,
     var fontScale: Float = 1.0f, // 0.85f (小), 1.0f (标准), 1.15f (大)
     var accentColorIndex: Int = 0, // 0: 天际蓝, 1: 翡翠绿, 2: 琥珀金, 3: 珊瑚红
-    var mediaStoreUri: String = ""
+    var mediaStoreUri: String = "",
+    var cleanMediaStoreUri: String = ""
 ) {
+    fun hasValidCoords(): Boolean = (gcjLat != 0.0 || gcjLon != 0.0)
+
     fun ensureAntiTamperSignature(): String {
         if (antiTamperHash.isNotBlank() && antiTamperHash.length >= 12) return antiTamperHash
-        val computed = QrCodeGenerator.computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note)
+        if (!hasValidCoords()) return ""
+        val computed = QrCodeGenerator.computeAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, note, imageHash)
         antiTamperHash = computed
         return computed
     }
 
     fun isSignatureValid(): Boolean {
-        if (!antiTamperMode || antiTamperHash.isBlank()) return false
-        return QrCodeGenerator.verifyAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, antiTamperHash, note)
+        if (!antiTamperMode || antiTamperHash.isBlank() || !hasValidCoords()) return false
+        return QrCodeGenerator.verifyAntiTamperHash(gcjLat, gcjLon, timestamp, shortPoi, antiTamperHash, note, imageHash)
     }
 
     fun toJson(): String {
@@ -117,41 +123,44 @@ data class WatermarkConfig(
             put("showNote", showNote)
             put("showMiniMap", showMiniMap)
             put("miniMapPosition", miniMapPosition)
+            put("showBottomScrim", showBottomScrim)
             put("antiTamperMode", antiTamperMode)
             put("ntpSynced", ntpSynced)
             put("antiTamperHash", antiTamperHash)
+            put("imageHash", imageHash)
             put("bottomRight", bottomRight)
-            put("filterIndex", filterIndex)
             put("bgAlpha", bgAlpha)
             put("fontScale", fontScale.toDouble())
             put("accentColorIndex", accentColorIndex)
             put("mediaStoreUri", mediaStoreUri)
+            put("cleanMediaStoreUri", cleanMediaStoreUri)
         }.toString()
     }
 
     companion object {
         fun fromJson(jsonStr: String): WatermarkConfig {
             val o = JSONObject(jsonStr)
+            // Legacy "filterIndex" field is silently ignored for backward compatibility with v8 metadata
             return WatermarkConfig(
                 styleTemplate = o.optInt("styleTemplate", 0),
                 customTitle = o.optString("customTitle", "现场点位核验"),
                 coordSystem = o.optString("coordSystem", "WGS-84"),
                 useDms = o.optBoolean("useDms", false),
-                gcjLat = o.optDouble("gcjLat", 39.908823),
-                gcjLon = o.optDouble("gcjLon", 116.397470),
-                wgsLat = o.optDouble("wgsLat", 39.907419),
-                wgsLon = o.optDouble("wgsLon", 116.391228),
-                origGcjLat = o.optDouble("origGcjLat", 39.908823),
-                origGcjLon = o.optDouble("origGcjLon", 116.397470),
-                accuracyMeters = o.optDouble("accuracyMeters", 2.8).toFloat(),
-                altitudeMeters = o.optDouble("altitudeMeters", 46.0),
+                gcjLat = o.optDouble("gcjLat", 0.0),
+                gcjLon = o.optDouble("gcjLon", 0.0),
+                wgsLat = o.optDouble("wgsLat", 0.0),
+                wgsLon = o.optDouble("wgsLon", 0.0),
+                origGcjLat = o.optDouble("origGcjLat", 0.0),
+                origGcjLon = o.optDouble("origGcjLon", 0.0),
+                accuracyMeters = o.optDouble("accuracyMeters", 0.0).toFloat(),
+                altitudeMeters = o.optDouble("altitudeMeters", 0.0),
                 azimuthDeg = o.optInt("azimuthDeg", 0),
                 azimuthText = o.optString("azimuthText", "正北 000°"),
                 shortPoi = o.optString("shortPoi", "实拍点位"),
                 address = o.optString("address", ""),
-                timeHm = o.optString("timeHm", "19:09"),
-                dateWeek = o.optString("dateWeek", "2026-11-17 星期二"),
-                timestamp = o.optString("timestamp", "2026-11-17 19:09:40"),
+                timeHm = o.optString("timeHm", "00:00"),
+                dateWeek = o.optString("dateWeek", ""),
+                timestamp = o.optString("timestamp", ""),
                 note = o.optString("note", ""),
                 showTime = o.optBoolean("showTime", true),
                 showLocation = o.optBoolean("showLocation", true),
@@ -165,15 +174,17 @@ data class WatermarkConfig(
                 showNote = o.optBoolean("showNote", true),
                 showMiniMap = o.optBoolean("showMiniMap", true),
                 miniMapPosition = o.optInt("miniMapPosition", 0),
+                showBottomScrim = o.optBoolean("showBottomScrim", false),
                 antiTamperMode = o.optBoolean("antiTamperMode", false),
                 ntpSynced = o.optBoolean("ntpSynced", false),
                 antiTamperHash = o.optString("antiTamperHash", ""),
+                imageHash = o.optString("imageHash", ""),
                 bottomRight = o.optBoolean("bottomRight", false),
-                filterIndex = o.optInt("filterIndex", 0),
                 bgAlpha = o.optInt("bgAlpha", 185),
                 fontScale = o.optDouble("fontScale", 1.0).toFloat(),
                 accentColorIndex = o.optInt("accentColorIndex", 0),
-                mediaStoreUri = o.optString("mediaStoreUri", "")
+                mediaStoreUri = o.optString("mediaStoreUri", ""),
+                cleanMediaStoreUri = o.optString("cleanMediaStoreUri", "")
             )
         }
 
@@ -185,21 +196,21 @@ data class WatermarkConfig(
         }
 
         fun customTimeStrings(datePartStr: String, hmStr: String, secStr: String): Triple<String, String, String> {
-            val cleanDate = datePartStr.trim().ifBlank { "2026-11-17" }
+            val cleanDate = datePartStr.trim().ifBlank { SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date()) }
             val cleanHm = hmStr.trim().ifBlank { "09:20" }
             val secInt = (secStr.trim().toIntOrNull() ?: 0).coerceIn(0, 59)
             val cleanSec = String.format(Locale.US, "%02d", secInt)
             val fullCandidate = "$cleanDate $cleanHm:$cleanSec"
             return try {
                 val parsed = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).parse(fullCandidate)
-                if (parsed != null) currentTimeStrings(parsed) else Triple(cleanHm, "$cleanDate 星期二", fullCandidate)
+                if (parsed != null) currentTimeStrings(parsed) else Triple(cleanHm, cleanDate, fullCandidate)
             } catch (_: Exception) {
-                Triple(cleanHm, "$cleanDate 星期二", fullCandidate)
+                Triple(cleanHm, cleanDate, fullCandidate)
             }
         }
 
-        fun parseExifDateStrings(rawExifDate: String?): Triple<String, String, String> {
-            if (rawExifDate.isNullOrBlank()) return currentTimeStrings()
+        fun parseExifDateStrings(rawExifDate: String?, fallbackDate: Date = Date()): Triple<String, String, String> {
+            if (rawExifDate.isNullOrBlank()) return currentTimeStrings(fallbackDate)
             return try {
                 val clean = rawExifDate.trim()
                 val pattern = if (clean.length >= 10 && clean[4] == ':') {
@@ -208,13 +219,33 @@ data class WatermarkConfig(
                     "yyyy-MM-dd HH:mm:ss"
                 }
                 val parsed = SimpleDateFormat(pattern, Locale.CHINA).parse(clean)
-                if (parsed != null) currentTimeStrings(parsed) else currentTimeStrings()
+                if (parsed != null) currentTimeStrings(parsed) else currentTimeStrings(fallbackDate)
             } catch (_: Exception) {
-                currentTimeStrings()
+                currentTimeStrings(fallbackDate)
             }
         }
     }
 }
+
+enum class BatchTimeStrategy {
+    PREFER_EXIF,
+    UNIFY_CURRENT
+}
+
+enum class BatchMissingGpsStrategy {
+    USE_CURRENT_LOCATION,
+    USE_MANUAL_COORDS,
+    HIDE_COORDS
+}
+
+data class BatchWatermarkOptions(
+    val timeStrategy: BatchTimeStrategy = BatchTimeStrategy.PREFER_EXIF,
+    val missingGpsStrategy: BatchMissingGpsStrategy = BatchMissingGpsStrategy.USE_CURRENT_LOCATION,
+    val manualGcjLat: Double? = null,
+    val manualGcjLon: Double? = null,
+    val manualPoi: String = "",
+    val manualAddress: String = ""
+)
 
 data class PhotoEntry(
     val id: String,
@@ -229,12 +260,14 @@ data class SystemCameraPhoto(
     val contentUri: Uri,
     val displayName: String,
     val dateTakenStr: String,
-    val hasGps: Boolean,
-    val gcjLat: Double,
-    val gcjLon: Double,
-    val wgsLat: Double,
-    val wgsLon: Double,
-    val labelText: String,
+    val dateGroupKey: String = "",
+    val exifLoaded: Boolean = false,
+    val hasGps: Boolean = false,
+    val gcjLat: Double = 0.0,
+    val gcjLon: Double = 0.0,
+    val wgsLat: Double = 0.0,
+    val wgsLon: Double = 0.0,
+    val labelText: String = "",
     val antiTamperVerified: Boolean = false,
     val antiTamperHash: String = ""
 )
@@ -300,10 +333,27 @@ object BitmapCacheManager {
         }
     }
 
+    /**
+     * Two-step sampled URI decoder with automatic EXIF orientation correction (fixes sideways portrait photos).
+     */
     fun loadUriThumbnail(context: Context, uri: Uri, reqSize: Int = 256): Bitmap? {
         val key = "uri_${uri}_$reqSize"
         cache.get(key)?.let { if (!it.isRecycled) return it }
         return try {
+            val exifRot = try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val exif = ExifInterface(stream)
+                    when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                        ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                        ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                        ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                        else -> 0
+                    }
+                } ?: 0
+            } catch (_: Exception) {
+                0
+            }
+
             val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, boundsOpts)
@@ -312,11 +362,19 @@ object BitmapCacheManager {
                 inSampleSize = calculateInSampleSize(boundsOpts, reqSize, reqSize)
                 inPreferredConfig = Bitmap.Config.RGB_565
             }
-            val bmp = context.contentResolver.openInputStream(uri)?.use {
+            val rawBmp = context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, decodeOpts)
+            } ?: return null
+
+            val finalBmp = if (exifRot != 0) {
+                WatermarkRenderer.rotateBitmapIfNeeded(rawBmp, exifRot).also {
+                    if (it !== rawBmp && !rawBmp.isRecycled) rawBmp.recycle()
+                }
+            } else {
+                rawBmp
             }
-            if (bmp != null) cache.put(key, bmp)
-            bmp
+            cache.put(key, finalBmp)
+            finalBmp
         } catch (_: Exception) {
             null
         }
@@ -346,7 +404,8 @@ object BitmapCacheManager {
 
 object WatermarkRenderer {
 
-    val FILTER_NAMES = listOf("原图", "鲜明", "暖阳", "清冷", "黑白")
+    private const val EXIF_COMMENT_B64_PREFIX = "AMAP_WM_B64:"
+
     val STYLE_NAMES = listOf(
         "经典大字时间",
         "工程巡检卡片",
@@ -369,7 +428,6 @@ object WatermarkRenderer {
     )
 
     private val TYPEFACE_MONO_BOLD: Typeface by lazy { Typeface.create(Typeface.MONOSPACE, Typeface.BOLD) }
-    private val TYPEFACE_MONO_NORMAL: Typeface by lazy { Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL) }
     private val TYPEFACE_SANS_LIGHT: Typeface by lazy { Typeface.create("sans-serif-light", Typeface.NORMAL) }
     private val TYPEFACE_DEFAULT_BOLD: Typeface by lazy { Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
 
@@ -380,6 +438,10 @@ object WatermarkRenderer {
         val monoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = TYPEFACE_MONO_BOLD }
         val rectF = RectF()
         val path = Path()
+        // Cached LinearGradient shader for Template 0 optional bottom scrim (eliminates per-frame GC)
+        var cachedScrimShader: LinearGradient? = null
+        var cachedScrimTop: Float = -1f
+        var cachedScrimBottom: Float = -1f
     }
     private val paintPool = object : ThreadLocal<PaintPool>() {
         override fun initialValue(): PaintPool = PaintPool()
@@ -410,50 +472,71 @@ object WatermarkRenderer {
         }
     }
 
-    fun getAndroidColorMatrix(filterIndex: Int): ColorMatrix? {
-        return when (filterIndex) {
-            1 -> ColorMatrix(
-                floatArrayOf(
-                    1.18f, 0f, 0f, 0f, -10f,
-                    0f, 1.18f, 0f, 0f, -10f,
-                    0f, 0f, 1.18f, 0f, -10f,
-                    0f, 0f, 0f, 1f, 0f
-                )
-            )
-            2 -> ColorMatrix(
-                floatArrayOf(
-                    1.12f, 0f, 0f, 0f, 12f,
-                    0f, 1.05f, 0f, 0f, 6f,
-                    0f, 0f, 0.92f, 0f, -8f,
-                    0f, 0f, 0f, 1f, 0f
-                )
-            )
-            3 -> ColorMatrix(
-                floatArrayOf(
-                    0.92f, 0f, 0f, 0f, -6f,
-                    0f, 1.04f, 0f, 0f, 4f,
-                    0f, 0f, 1.16f, 0f, 14f,
-                    0f, 0f, 0f, 1f, 0f
-                )
-            )
-            4 -> ColorMatrix().apply { setSaturation(0f) }
-            else -> null
+    fun getShareUriForFile(context: Context, file: File): Uri {
+        return FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+    }
+
+    /**
+     * Export all app photos as an engineering ledger CSV file in cacheDir ready for ShareSheet.
+     */
+    fun exportPhotosLedgerCsv(context: Context, photos: List<PhotoEntry>): File? {
+        return try {
+            val tsName = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val csvFile = File(context.cacheDir, "AmapWatermark_Ledger_$tsName.csv")
+            fun esc(s: String): String {
+                val cleaned = s.replace("\"", "\"\"").replace("\n", " ").replace("\r", " ")
+                return "\"$cleaned\""
+            }
+            val sb = StringBuilder()
+            // UTF-8 BOM so Excel opens Chinese cleanly
+            sb.append('\uFEFF')
+            sb.append("ID,时间,点位名称,详细地址,坐标系,高德纬度(GCJ-02),高德经度(GCJ-02),原始纬度(WGS-84),原始经度(WGS-84),海拔(m),方位角,精度(m),备注,防伪状态,防伪签名,图像指纹\n")
+            for (p in photos) {
+                val c = p.config
+                val antiStatus = when {
+                    c.antiTamperMode && c.isSignatureValid() -> "防伪验真通过"
+                    c.antiTamperMode -> "防伪异常"
+                    else -> "普通模式"
+                }
+                sb.append(esc(p.id)).append(',')
+                    .append(esc(c.timestamp)).append(',')
+                    .append(esc(c.shortPoi)).append(',')
+                    .append(esc(c.address)).append(',')
+                    .append(esc(c.coordSystem)).append(',')
+                    .append(String.format(Locale.US, "%.6f", c.gcjLat)).append(',')
+                    .append(String.format(Locale.US, "%.6f", c.gcjLon)).append(',')
+                    .append(String.format(Locale.US, "%.6f", c.wgsLat)).append(',')
+                    .append(String.format(Locale.US, "%.6f", c.wgsLon)).append(',')
+                    .append(String.format(Locale.US, "%.1f", c.altitudeMeters)).append(',')
+                    .append(esc(c.azimuthText)).append(',')
+                    .append(String.format(Locale.US, "%.1f", c.accuracyMeters)).append(',')
+                    .append(esc(c.note)).append(',')
+                    .append(esc(antiStatus)).append(',')
+                    .append(esc(c.antiTamperHash)).append(',')
+                    .append(esc(c.imageHash)).append('\n')
+            }
+            csvFile.writeText(sb.toString(), Charsets.UTF_8)
+            csvFile
+        } catch (_: Exception) {
+            null
         }
     }
 
     fun renderWatermarkedBitmap(cleanBitmap: Bitmap, cfg: WatermarkConfig): Bitmap {
         if (cfg.antiTamperMode) {
+            if (cfg.imageHash.isBlank()) {
+                cfg.imageHash = QrCodeGenerator.computeImagePerceptualHash(cleanBitmap)
+            }
             cfg.ensureAntiTamperSignature()
         }
         val out = Bitmap.createBitmap(cleanBitmap.width, cleanBitmap.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
-
         val basePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-        getAndroidColorMatrix(cfg.filterIndex)?.let { cm ->
-            basePaint.colorFilter = ColorMatrixColorFilter(cm)
-        }
         canvas.drawBitmap(cleanBitmap, 0f, 0f, basePaint)
-
         drawWatermarkOverlay(canvas, out.width, out.height, cfg)
         return out
     }
@@ -463,12 +546,12 @@ object WatermarkRenderer {
         val orientFactor = if (isLandscape) 0.86f else 1.0f
         val baseScale = (min(width, height) / 1080f) * orientFactor * cfg.fontScale.coerceIn(0.78f, 1.25f)
 
-        if (cfg.antiTamperMode && cfg.antiTamperHash.isBlank()) {
+        if (cfg.antiTamperMode && cfg.antiTamperHash.isBlank() && cfg.hasValidCoords()) {
             cfg.ensureAntiTamperSignature()
         }
 
         // Top-left floating Mini-Map mode (when miniMapPosition == 1 and template is 1 or 2)
-        if (cfg.showMiniMap && cfg.miniMapPosition == 1 && cfg.styleTemplate in listOf(1, 2)) {
+        if (cfg.showMiniMap && cfg.miniMapPosition == 1 && cfg.styleTemplate in listOf(1, 2) && cfg.hasValidCoords()) {
             val mapSz = 160f * baseScale
             val margin = 28f * baseScale
             val topY = margin + 52f * baseScale
@@ -484,14 +567,13 @@ object WatermarkRenderer {
             else -> drawStyle0CenteredBigTime(canvas, width, height, baseScale, isLandscape, cfg)
         }
 
-        if (cfg.showQrCode) {
+        if (cfg.showQrCode && cfg.hasValidCoords()) {
             drawAmapQrBadge(canvas, width, height, baseScale, isLandscape, cfg, isLivePreview)
         }
     }
 
     /**
-     * Draw 160x160px High-Definition Vector Amap Mini-Map PiP (Picture-in-Picture)
-     * with surrounding road network, greenbelt/waterways, coordinate crosshair, azimuth view cone, and red pin!
+     * Draw 160x160px High-Definition Vector Amap Mini-Map PiP
      */
     private fun drawVectorMiniMapBox(
         canvas: Canvas,
@@ -510,18 +592,15 @@ object WatermarkRenderer {
         pool.path.addRoundRect(pool.rectF, cornerR, cornerR, Path.Direction.CW)
         canvas.clipPath(pool.path)
 
-        // 1. Dark GIS cartographic base fill
         pool.fillPaint.shader = null
         pool.fillPaint.color = Color.rgb(12, 22, 41)
         canvas.drawRect(boxX, boxY, boxX + boxSize, boxY + boxSize, pool.fillPaint)
 
-        // Deterministic coordinate-driven road & terrain offset
         val latSeed = (abs(cfg.gcjLat * 10000.0).toLong() % 100L).toFloat()
         val lonSeed = (abs(cfg.gcjLon * 10000.0).toLong() % 100L).toFloat()
         val shiftX = ((lonSeed - 50f) / 100f) * (boxSize * 0.22f)
         val shiftY = ((latSeed - 50f) / 100f) * (boxSize * 0.22f)
 
-        // 2. Greenbelt park & river waterway polygon
         pool.fillPaint.color = Color.argb(36, 16, 185, 129)
         pool.rectF.set(
             boxX + 8f * scale + shiftX,
@@ -545,7 +624,6 @@ object WatermarkRenderer {
         pool.path.close()
         canvas.drawPath(pool.path, pool.fillPaint)
 
-        // 3. Survey grid lines
         pool.strokePaint.color = Color.argb(36, 56, 189, 248)
         pool.strokePaint.strokeWidth = 1.0f * scale
         val step = boxSize / 4f
@@ -554,14 +632,12 @@ object WatermarkRenderer {
             canvas.drawLine(boxX, boxY + i * step, boxX + boxSize, boxY + i * step, pool.strokePaint)
         }
 
-        // 4. Secondary road network
         pool.strokePaint.color = Color.argb(75, 148, 163, 184)
         pool.strokePaint.strokeWidth = 3.5f * scale
         canvas.drawLine(boxX, boxY + boxSize * 0.32f + shiftY, boxX + boxSize, boxY + boxSize * 0.27f + shiftY, pool.strokePaint)
         canvas.drawLine(boxX + boxSize * 0.28f + shiftX, boxY, boxX + boxSize * 0.33f + shiftX, boxY + boxSize, pool.strokePaint)
         canvas.drawLine(boxX + boxSize * 0.74f + shiftX * 0.6f, boxY, boxX + boxSize * 0.68f + shiftX * 0.6f, boxY + boxSize, pool.strokePaint)
 
-        // Arterial highway (Amap amber road highlight)
         pool.strokePaint.color = Color.argb(125, 245, 158, 11)
         pool.strokePaint.strokeWidth = 5.0f * scale
         canvas.drawLine(boxX, boxY + boxSize * 0.56f + shiftY * 0.7f, boxX + boxSize, boxY + boxSize * 0.48f + shiftY * 0.7f, pool.strokePaint)
@@ -570,21 +646,18 @@ object WatermarkRenderer {
         val cx = boxX + boxSize / 2f
         val cy = boxY + boxSize / 2f
 
-        // 5. GPS accuracy radar circle
         pool.fillPaint.color = Color.argb(32, 56, 189, 248)
         canvas.drawCircle(cx, cy, boxSize * 0.24f, pool.fillPaint)
         pool.strokePaint.color = Color.argb(115, 56, 189, 248)
         pool.strokePaint.strokeWidth = 1.2f * scale
         canvas.drawCircle(cx, cy, boxSize * 0.24f, pool.strokePaint)
 
-        // 6. Electronic Compass Azimuth Sector Cone
         val coneRadius = boxSize * 0.36f
         pool.fillPaint.color = Color.argb(76, 56, 189, 248)
         pool.rectF.set(cx - coneRadius, cy - coneRadius, cx + coneRadius, cy + coneRadius)
         val startAngle = (cfg.azimuthDeg - 90 - 28).toFloat()
         canvas.drawArc(pool.rectF, startAngle, 56f, true, pool.fillPaint)
 
-        // 7. Center Amap Red Pin
         pool.strokePaint.color = Color.rgb(220, 38, 38)
         pool.strokePaint.strokeWidth = 2.8f * scale
         canvas.drawLine(cx, cy - 8f * scale, cx, cy + 2f * scale, pool.strokePaint)
@@ -598,7 +671,6 @@ object WatermarkRenderer {
         pool.fillPaint.color = Color.WHITE
         canvas.drawCircle(cx - 1.5f * scale, cy - 11.5f * scale, 1.8f * scale, pool.fillPaint)
 
-        // 8. North indicator badge & bottom POI pill
         pool.fillPaint.color = Color.argb(210, 15, 23, 42)
         pool.rectF.set(boxX + 6f * scale, boxY + 6f * scale, boxX + 44f * scale, boxY + 25f * scale)
         canvas.drawRoundRect(pool.rectF, 5f * scale, 5f * scale, pool.fillPaint)
@@ -619,12 +691,11 @@ object WatermarkRenderer {
             typeface = TYPEFACE_DEFAULT_BOLD
             textAlign = Paint.Align.CENTER
         }
-        val poiLabel = "📍" + cfg.shortPoi.ifBlank { "高德测绘点" }
+        val poiLabel = cfg.shortPoi.ifBlank { "高德测绘点" }
         canvas.drawText(ellipsizeToWidth(poiLabel, pool.textPaint, boxSize - 10f * scale), cx, boxY + boxSize - 7.5f * scale, pool.textPaint)
 
         canvas.restore()
 
-        // Outer border
         val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
         pool.strokePaint.color = Color.argb(165, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
         pool.strokePaint.strokeWidth = 1.8f * scale
@@ -658,7 +729,8 @@ object WatermarkRenderer {
             timestamp = effectiveTs,
             antiTamperHash = if (isLivePreview) "" else cfg.antiTamperHash,
             ntpSynced = cfg.ntpSynced,
-            note = cfg.note
+            note = cfg.note,
+            imageHash = if (isLivePreview) "" else cfg.imageHash
         )
         val matrix = QrCodeGenerator.encodeUrlToMatrix(url)
         val modules = matrix.size
@@ -682,7 +754,6 @@ object WatermarkRenderer {
         pool.strokePaint.strokeWidth = 1.6f * scale
         canvas.drawRoundRect(pool.rectF, 14f * scale, 14f * scale, pool.strokePaint)
 
-        // White quiet zone inside QR card (strictly >= 4 modules on all 4 sides per ISO/IEC 18004)
         val pad = 8f * scale
         val whiteSize = qrBoxSize - pad * 2f
         val whiteLeft = boxLeft + pad
@@ -691,7 +762,7 @@ object WatermarkRenderer {
         pool.rectF.set(whiteLeft, whiteTop, whiteLeft + whiteSize, whiteTop + whiteSize)
         canvas.drawRoundRect(pool.rectF, 6f * scale, 6f * scale, pool.fillPaint)
 
-        val totalModulesWithQuiet = modules + 8 // 4 modules quiet zone on each side
+        val totalModulesWithQuiet = modules + 8
         val cellSize = whiteSize / totalModulesWithQuiet.toFloat()
         val startX = whiteLeft + cellSize * 4f
         val startY = whiteTop + cellSize * 4f
@@ -720,12 +791,15 @@ object WatermarkRenderer {
     }
 
     private fun buildCoordString(cfg: WatermarkConfig): String {
+        if (!cfg.hasValidCoords()) {
+            return "GPS 定位中..."
+        }
         val isGcj = (cfg.coordSystem == "GCJ-02")
         val shownLat = if (isGcj) cfg.gcjLat else cfg.wgsLat
         val shownLon = if (isGcj) cfg.gcjLon else cfg.wgsLon
         val coordStr = CoordinateConverter.formatCoordinate(shownLat, shownLon, cfg.useDms)
         val sysTag = if (cfg.showCoordTag) " [${cfg.coordSystem}]" else ""
-        val accTag = if (cfg.showAccuracy) String.format(Locale.US, " ±%.1fm", cfg.accuracyMeters) else ""
+        val accTag = if (cfg.showAccuracy && cfg.accuracyMeters > 0f) String.format(Locale.US, " ±%.1fm", cfg.accuracyMeters) else ""
         return "$coordStr$sysTag$accTag"
     }
 
@@ -742,9 +816,10 @@ object WatermarkRenderer {
 
     private fun buildAntiTamperLine(cfg: WatermarkConfig): String {
         if (!cfg.antiTamperMode) return ""
+        if (!cfg.hasValidCoords()) return "防伪模式待定位锁定..."
         val sig = cfg.ensureAntiTamperSignature().take(12)
         val ntpLabel = if (cfg.ntpSynced) "NTP授时已锁" else "防伪锁定"
-        return "🛡 $ntpLabel · SHA256:$sig"
+        return "$ntpLabel · SHA256:$sig"
     }
 
     private fun ellipsizeToWidth(text: String, paint: Paint, maxWidth: Float): String {
@@ -759,10 +834,6 @@ object WatermarkRenderer {
         return text.substring(0, end) + ellipsis
     }
 
-    /**
-     * Split long text into up to 2 lines within maxWidth so long addresses/POI names never get cut off prematurely
-     * and never collide with the QR code!
-     */
     private fun wrapTextToTwoLines(text: String, paint: Paint, maxWidth: Float): List<String> {
         if (text.isEmpty() || maxWidth <= 0f) return emptyList()
         if (paint.measureText(text) <= maxWidth) return listOf(text)
@@ -777,7 +848,8 @@ object WatermarkRenderer {
     }
 
     /**
-     * Style 0: 经典大字时间 (Fixed QR collision math: shifts center or bounds width strictly clear of QR badge!)
+     * Style 0: 经典大字时间
+     * v9.0.0: 底部托底暗影改为可选且默认关闭 (cfg.showBottomScrim)，开启时复用缓存 Shader 消除每帧 GC。
      */
     private fun drawStyle0CenteredBigTime(
         canvas: Canvas,
@@ -788,10 +860,11 @@ object WatermarkRenderer {
         cfg: WatermarkConfig
     ) {
         val pool = paintPool.get()!!
-        val qrReserveRight = if (cfg.showQrCode) 182f * scale else 28f * scale
+        val hasQr = cfg.showQrCode && cfg.hasValidCoords()
+        val qrReserveRight = if (hasQr) 182f * scale else 28f * scale
         val leftMargin = 28f * scale
         val safeZoneWidth = (width - leftMargin - qrReserveRight).coerceAtLeast(width * 0.55f)
-        val cx = if (cfg.showQrCode) (leftMargin + safeZoneWidth / 2f) else (width / 2f)
+        val cx = if (hasQr) (leftMargin + safeZoneWidth / 2f) else (width / 2f)
         val maxLineW = safeZoneWidth - 16f * scale
 
         val fullCoordLine = buildCoordString(cfg)
@@ -799,15 +872,26 @@ object WatermarkRenderer {
         val antiLine = buildAntiTamperLine(cfg)
         val accentColor = ACCENT_COLORS.getOrElse(cfg.accentColorIndex) { ACCENT_COLORS[0] }
 
-        val scrimH = if (isLandscape) 300f * scale else 390f * scale
-        val scrimTop = height - scrimH
-        pool.fillPaint.shader = LinearGradient(
-            0f, scrimTop, 0f, height.toFloat(),
-            Color.TRANSPARENT, Color.argb(155, 0, 0, 0),
-            Shader.TileMode.CLAMP
-        )
-        canvas.drawRect(0f, scrimTop, width.toFloat(), height.toFloat(), pool.fillPaint)
-        pool.fillPaint.shader = null
+        if (cfg.showBottomScrim) {
+            val scrimH = if (isLandscape) 260f * scale else 340f * scale
+            val scrimTop = height - scrimH
+            val scrimBottom = height.toFloat()
+            if (pool.cachedScrimShader == null ||
+                abs(pool.cachedScrimTop - scrimTop) > 1f ||
+                abs(pool.cachedScrimBottom - scrimBottom) > 1f
+            ) {
+                pool.cachedScrimShader = LinearGradient(
+                    0f, scrimTop, 0f, scrimBottom,
+                    Color.TRANSPARENT, Color.argb(140, 0, 0, 0),
+                    Shader.TileMode.CLAMP
+                )
+                pool.cachedScrimTop = scrimTop
+                pool.cachedScrimBottom = scrimBottom
+            }
+            pool.fillPaint.shader = pool.cachedScrimShader
+            canvas.drawRect(0f, scrimTop, width.toFloat(), scrimBottom, pool.fillPaint)
+            pool.fillPaint.shader = null
+        }
 
         var cursorBottomY = height - (if (isLandscape) 28f * scale else 36f * scale)
 
@@ -817,7 +901,7 @@ object WatermarkRenderer {
                 textSize = 20f * scale
                 typeface = TYPEFACE_MONO_BOLD
                 textAlign = Paint.Align.CENTER
-                setShadowLayer(6f * scale, 0f, 2f * scale, Color.argb(210, 0, 0, 0))
+                setShadowLayer(7f * scale, 0f, 2f * scale, Color.argb(225, 0, 0, 0))
             }
             canvas.drawText(ellipsizeToWidth(antiLine, pool.monoPaint, maxLineW), cx, cursorBottomY, pool.monoPaint)
             cursorBottomY -= 32f * scale
@@ -829,7 +913,7 @@ object WatermarkRenderer {
                 textSize = 24f * scale
                 typeface = Typeface.DEFAULT
                 textAlign = Paint.Align.CENTER
-                setShadowLayer(6f * scale, 0f, 2f * scale, Color.argb(200, 0, 0, 0))
+                setShadowLayer(7f * scale, 0f, 2f * scale, Color.argb(220, 0, 0, 0))
             }
             val clippedNote = ellipsizeToWidth("备注：${cfg.note}", pool.textPaint, maxLineW)
             canvas.drawText(clippedNote, cx, cursorBottomY, pool.textPaint)
@@ -842,7 +926,7 @@ object WatermarkRenderer {
                 textSize = 21.5f * scale
                 typeface = TYPEFACE_MONO_BOLD
                 textAlign = Paint.Align.CENTER
-                setShadowLayer(6f * scale, 0f, 2f * scale, Color.argb(200, 0, 0, 0))
+                setShadowLayer(7f * scale, 0f, 2f * scale, Color.argb(220, 0, 0, 0))
             }
             canvas.drawText(ellipsizeToWidth(envLine, pool.textPaint, maxLineW), cx, cursorBottomY, pool.textPaint)
             cursorBottomY -= 32f * scale
@@ -850,11 +934,11 @@ object WatermarkRenderer {
 
         if (cfg.showAddress && cfg.address.isNotBlank()) {
             pool.textPaint.apply {
-                color = Color.argb(235, 241, 245, 249)
+                color = Color.argb(242, 241, 245, 249)
                 textSize = 22.5f * scale
                 typeface = Typeface.DEFAULT
                 textAlign = Paint.Align.CENTER
-                setShadowLayer(6f * scale, 0f, 2f * scale, Color.argb(200, 0, 0, 0))
+                setShadowLayer(7f * scale, 0f, 2f * scale, Color.argb(220, 0, 0, 0))
             }
             val clippedAddr = ellipsizeToWidth(cfg.address, pool.textPaint, maxLineW)
             canvas.drawText(clippedAddr, cx, cursorBottomY, pool.textPaint)
@@ -875,6 +959,7 @@ object WatermarkRenderer {
             val pillTop = cursorBottomY - 28f * scale
             pool.rectF.set(cx - textW / 2f - pillPadX, pillTop, cx + textW / 2f + pillPadX, pillTop + pillH)
 
+            pool.fillPaint.shader = null
             pool.fillPaint.color = Color.argb(cfg.bgAlpha.coerceIn(90, 240), 11, 19, 43)
             pool.strokePaint.color = Color.argb(105, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
             pool.strokePaint.strokeWidth = 1.5f * scale
@@ -892,7 +977,7 @@ object WatermarkRenderer {
                 color = Color.WHITE
                 textSize = 31f * scale
                 typeface = Typeface.DEFAULT
-                setShadowLayer(8f * scale, 0f, 2.5f * scale, Color.argb(190, 0, 0, 0))
+                setShadowLayer(9f * scale, 0f, 2.5f * scale, Color.argb(220, 0, 0, 0))
             }
             val datePart = if (cfg.showTime) cfg.dateWeek else ""
             val rawPoi = if (cfg.showLocation) cfg.shortPoi else ""
@@ -918,6 +1003,7 @@ object WatermarkRenderer {
                     strokeCap = Paint.Cap.ROUND
                 }
                 canvas.drawLine(pinCenterX, pinHeadY + 5f * scale, pinCenterX, cursorBottomY - 2f * scale, pool.strokePaint)
+                pool.fillPaint.shader = null
                 pool.fillPaint.color = Color.rgb(239, 68, 68)
                 canvas.drawCircle(pinCenterX, pinHeadY, 8.5f * scale, pool.fillPaint)
                 pool.fillPaint.color = Color.rgb(254, 202, 202)
@@ -936,14 +1022,14 @@ object WatermarkRenderer {
                 textSize = (if (isLandscape) 98f else 114f) * scale
                 textAlign = Paint.Align.CENTER
                 typeface = TYPEFACE_SANS_LIGHT
-                setShadowLayer(10f * scale, 0f, 3f * scale, Color.argb(180, 0, 0, 0))
+                setShadowLayer(12f * scale, 0f, 3f * scale, Color.argb(215, 0, 0, 0))
             }
             canvas.drawText(cfg.timeHm, cx, cursorBottomY, pool.textPaint)
         }
     }
 
     /**
-     * Style 1: 工程巡检卡片 (Supports embedded 160x160 Mini-Map PiP, 2-line location wrapping, and Anti-Tamper seal)
+     * Style 1: 工程巡检卡片
      */
     private fun drawStyle1EngineeringCard(
         canvas: Canvas,
@@ -955,9 +1041,10 @@ object WatermarkRenderer {
     ) {
         val pool = paintPool.get()!!
         val margin = 26f * scale
-        val qrSpace = if (cfg.showQrCode) 178f * scale else 0f
+        val hasQr = cfg.showQrCode && cfg.hasValidCoords()
+        val qrSpace = if (hasQr) 178f * scale else 0f
         val maxAllowedBoxW = if (isLandscape) (width * 0.62f) else (width - margin * 2 - qrSpace)
-        val embedMiniMap = cfg.showMiniMap && cfg.miniMapPosition == 0
+        val embedMiniMap = cfg.showMiniMap && cfg.miniMapPosition == 0 && cfg.hasValidCoords()
         val mapSize = if (embedMiniMap) 160f * scale else 0f
         val mapGap = if (embedMiniMap) 18f * scale else 0f
         val padX = 22f * scale
@@ -999,13 +1086,16 @@ object WatermarkRenderer {
             lines.add("地点" to cfg.address)
         }
         if (cfg.showTime && cfg.timestamp.isNotBlank()) {
-            lines.add("时间" to "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ")}")
+            lines.add("时间" to "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ", "")}".trim())
         }
         if (cfg.showNote && cfg.note.isNotBlank()) {
             lines.add("备注" to cfg.note)
         }
         if (cfg.antiTamperMode) {
-            lines.add("验真" to "SHA256:${cfg.ensureAntiTamperSignature().take(12)} (${if (cfg.ntpSynced) "NTP真时" else "已锁"})")
+            val antiVal = if (cfg.hasValidCoords()) {
+                "SHA256:${cfg.ensureAntiTamperSignature().take(12)} (${if (cfg.ntpSynced) "NTP真时" else "已锁"})"
+            } else "待定位锁定"
+            lines.add("验真" to antiVal)
         }
         if (lines.isEmpty()) {
             lines.add("状态" to "高德 ${cfg.coordSystem} 零偏差已对齐")
@@ -1025,7 +1115,6 @@ object WatermarkRenderer {
         canvas.drawRoundRect(pool.rectF, 18f * scale, 18f * scale, pool.fillPaint)
         canvas.drawRoundRect(pool.rectF, 18f * scale, 18f * scale, pool.strokePaint)
 
-        // Header bar
         pool.fillPaint.color = accentColor
         pool.rectF.set(boxLeft + padX, boxTop + padY, boxLeft + padX + 7f * scale, boxTop + padY + 26f * scale)
         canvas.drawRoundRect(pool.rectF, 3.5f * scale, 3.5f * scale, pool.fillPaint)
@@ -1052,7 +1141,7 @@ object WatermarkRenderer {
                 textSize = 18.5f * scale
                 textAlign = Paint.Align.CENTER
             }
-            val tagTxt = if (cfg.antiTamperMode) "🛡防伪已锁" else cfg.coordSystem
+            val tagTxt = if (cfg.antiTamperMode) "防伪已锁" else cfg.coordSystem
             canvas.drawText(tagTxt, pool.rectF.centerX(), boxTop + padY + 19.5f * scale, pool.monoPaint)
         }
 
@@ -1094,7 +1183,7 @@ object WatermarkRenderer {
     }
 
     /**
-     * Style 2: 经纬网格测绘 (Supports embedded 160x160 Mini-Map PiP & Anti-Tamper verification line)
+     * Style 2: 经纬网格测绘
      */
     private fun drawStyle2GisSurveyGrid(
         canvas: Canvas,
@@ -1106,9 +1195,10 @@ object WatermarkRenderer {
     ) {
         val pool = paintPool.get()!!
         val margin = 26f * scale
-        val qrSpace = if (cfg.showQrCode) 178f * scale else 0f
+        val hasQr = cfg.showQrCode && cfg.hasValidCoords()
+        val qrSpace = if (hasQr) 178f * scale else 0f
         val maxAllowedW = if (isLandscape) (width * 0.62f) else (width - margin * 2 - qrSpace)
-        val embedMiniMap = cfg.showMiniMap && cfg.miniMapPosition == 0
+        val embedMiniMap = cfg.showMiniMap && cfg.miniMapPosition == 0 && cfg.hasValidCoords()
         val mapSize = if (embedMiniMap) 160f * scale else 0f
         val boxW = maxAllowedW.coerceIn(420f * scale, 820f * scale)
         val envLine = buildEnvTelemetryLine(cfg)
@@ -1231,7 +1321,7 @@ object WatermarkRenderer {
     }
 
     /**
-     * Style 3: 极简胶片底栏 (v8.0.0 全宽上下双层通栏布局：第一层左点位+右完整时间星期，第二层全宽经纬度+右侧防伪/备注角标，彻底根治DMS截断与日期重复)
+     * Style 3: 极简胶片底栏
      */
     private fun drawStyle3MinimalistFilmBar(
         canvas: Canvas,
@@ -1254,7 +1344,6 @@ object WatermarkRenderer {
         canvas.drawLine(0f, barTop, width.toFloat(), barTop, pool.strokePaint)
 
         val padX = 26f * scale
-        // Row 1: Left POI name (50% width), Right non-duplicated full timestamp + weekday (46% width)
         pool.textPaint.apply {
             clearShadowLayer()
             color = Color.WHITE
@@ -1263,7 +1352,7 @@ object WatermarkRenderer {
             textAlign = Paint.Align.LEFT
         }
         val leftPrimary = if (cfg.showLocation && cfg.shortPoi.isNotBlank()) {
-            "📍 ${cfg.shortPoi}"
+            cfg.shortPoi
         } else {
             cfg.customTitle.ifBlank { "极速高德水印" }
         }
@@ -1282,7 +1371,6 @@ object WatermarkRenderer {
             canvas.drawText(ellipsizeToWidth(timeLine, pool.monoPaint, width * 0.46f), width - padX, barTop + 42f * scale, pool.monoPaint)
         }
 
-        // Row 2: Left full-width Coordinates (up to 64% or 95% width so DMS never truncates!), Right badge
         val envLine = buildEnvTelemetryLine(cfg)
         val antiLine = buildAntiTamperLine(cfg)
         val rightBadgeRaw = when {
@@ -1341,14 +1429,20 @@ object WatermarkRenderer {
         } else if (cfg.showAddress && cfg.address.isNotBlank()) {
             rows.add("点位地址" to cfg.address)
         }
-        if (cfg.showTime) rows.add("记录时间" to "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ")}")
+        if (cfg.showTime) rows.add("记录时间" to "${cfg.timestamp} ${cfg.dateWeek.substringAfter(" ", "")}".trim())
         if (cfg.showNote && cfg.note.isNotBlank()) rows.add("现场备注" to cfg.note)
-        if (cfg.antiTamperMode) rows.add("防伪签名" to "SHA256:${cfg.ensureAntiTamperSignature()} (${if (cfg.ntpSynced) "NTP" else "已锁"})")
+        if (cfg.antiTamperMode) {
+            val antiVal = if (cfg.hasValidCoords()) {
+                "SHA256:${cfg.ensureAntiTamperSignature()} (${if (cfg.ntpSynced) "NTP" else "已锁"})"
+            } else "待定位锁定"
+            rows.add("防伪签名" to antiVal)
+        }
         if (rows.isEmpty()) rows.add("核验状态" to "高德GCJ-02已对齐")
 
         val headerH = 44f * scale
         val rowH = 39f * scale
-        val qrSpace = if (cfg.showQrCode) 178f * scale else 0f
+        val hasQr = cfg.showQrCode && cfg.hasValidCoords()
+        val qrSpace = if (hasQr) 178f * scale else 0f
         val maxAllowedW = if (isLandscape) (width * 0.60f) else (width - margin * 2 - qrSpace)
         val boxW = (720f * scale).coerceAtMost(maxAllowedW.coerceAtLeast(380f * scale))
         val boxH = headerH + rows.size * rowH
@@ -1412,8 +1506,29 @@ object WatermarkRenderer {
         }
     }
 
+    /**
+     * Decode EXIF TAG_USER_COMMENT supporting both v9 UTF-8 Base64 and legacy plain JSON.
+     */
+    fun decodeUserCommentJson(comment: String?): WatermarkConfig? {
+        if (comment.isNullOrBlank()) return null
+        val trimmed = comment.trim()
+        return try {
+            val jsonStr = when {
+                trimmed.startsWith(EXIF_COMMENT_B64_PREFIX) -> {
+                    val b64 = trimmed.removePrefix(EXIF_COMMENT_B64_PREFIX)
+                    String(Base64.decode(b64, Base64.DEFAULT), Charsets.UTF_8)
+                }
+                trimmed.startsWith("{") -> trimmed
+                else -> return null
+            }
+            WatermarkConfig.fromJson(jsonStr)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun saveJpegWithDualTrackExif(bitmap: Bitmap, targetFile: File, cfg: WatermarkConfig) {
-        if (cfg.antiTamperMode) {
+        if (cfg.antiTamperMode && cfg.hasValidCoords()) {
             cfg.ensureAntiTamperSignature()
         }
         FileOutputStream(targetFile).use { fos ->
@@ -1421,33 +1536,54 @@ object WatermarkRenderer {
         }
         try {
             val exif = ExifInterface(targetFile.absolutePath)
-            exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, if (cfg.wgsLat >= 0) "N" else "S")
-            exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, if (cfg.wgsLon >= 0) "E" else "W")
-            exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE, decimalToExifDms(cfg.wgsLat))
-            exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, decimalToExifDms(cfg.wgsLon))
+            if (cfg.hasValidCoords()) {
+                exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, if (cfg.wgsLat >= 0) "N" else "S")
+                exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, if (cfg.wgsLon >= 0) "E" else "W")
+                exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE, decimalToExifDms(cfg.wgsLat))
+                exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, decimalToExifDms(cfg.wgsLon))
+                val altCm = (abs(cfg.altitudeMeters) * 100.0).roundToLong().coerceAtLeast(0L)
+                exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE, "$altCm/100")
+                exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE_REF, if (cfg.altitudeMeters >= 0.0) "0" else "1")
+                val dirCentis = (((cfg.azimuthDeg % 360) + 360) % 360) * 100
+                exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION, "$dirCentis/100")
+                exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION_REF, "T")
+            }
             val exifFormattedDate = if (cfg.timestamp.length >= 10) {
                 cfg.timestamp.substring(0, 10).replace('-', ':') + cfg.timestamp.substring(10)
             } else {
                 cfg.timestamp
             }
-            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, exifFormattedDate)
-            exif.setAttribute(ExifInterface.TAG_DATETIME, exifFormattedDate)
-            exif.setAttribute(ExifInterface.TAG_USER_COMMENT, cfg.toJson())
+            if (exifFormattedDate.isNotBlank()) {
+                exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, exifFormattedDate)
+                exif.setAttribute(ExifInterface.TAG_DATETIME, exifFormattedDate)
+            }
+            val encodedJson = EXIF_COMMENT_B64_PREFIX + Base64.encodeToString(
+                cfg.toJson().toByteArray(Charsets.UTF_8),
+                Base64.NO_WRAP
+            )
+            exif.setAttribute(ExifInterface.TAG_USER_COMMENT, encodedJson)
             if (cfg.antiTamperMode && cfg.antiTamperHash.isNotBlank()) {
                 exif.setAttribute(
                     ExifInterface.TAG_IMAGE_DESCRIPTION,
-                    "AMAP_WM_V7_SHA256:${cfg.antiTamperHash}|GCJ02:${cfg.gcjLat},${cfg.gcjLon}|TS:${cfg.timestamp}"
+                    "AMAP_WM_V9_SHA256:${cfg.antiTamperHash}|IMG:${cfg.imageHash}|GCJ02:${cfg.gcjLat},${cfg.gcjLon}|TS:${cfg.timestamp}"
                 )
             }
             exif.saveAttributes()
         } catch (_: Exception) {}
     }
 
-    fun exportOrUpdateSystemCameraGallery(context: Context, wmFile: File, cfg: WatermarkConfig): String {
+    fun exportOrUpdateSystemCameraGallery(
+        context: Context,
+        wmFile: File,
+        cfg: WatermarkConfig,
+        suffix: String = "WM",
+        existingUriOverride: String? = null
+    ): String {
         val resolver = context.contentResolver
-        if (cfg.mediaStoreUri.isNotBlank()) {
+        val existingStr = existingUriOverride ?: cfg.mediaStoreUri
+        if (existingStr.isNotBlank()) {
             try {
-                val existingUri = Uri.parse(cfg.mediaStoreUri)
+                val existingUri = Uri.parse(existingStr)
                 val outStream = try {
                     resolver.openOutputStream(existingUri, "wt")
                 } catch (_: Exception) {
@@ -1457,19 +1593,18 @@ object WatermarkRenderer {
                     wmFile.inputStream().use { inStream ->
                         inStream.copyTo(out)
                     }
-                    return cfg.mediaStoreUri
+                    return existingStr
                 }
             } catch (_: Exception) {
-                // Clean up stale MediaStore entry before inserting replacement to avoid duplicate orphan photos
                 try {
-                    resolver.delete(Uri.parse(cfg.mediaStoreUri), null, null)
+                    resolver.delete(Uri.parse(existingStr), null, null)
                 } catch (_: Exception) {}
             }
         }
 
         return try {
-            val tsName = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val filename = "IMG_${tsName}.jpg"
+            val tsName = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+            val filename = "IMG_${tsName}_${suffix}.jpg"
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, filename)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
@@ -1477,6 +1612,15 @@ object WatermarkRenderer {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/Camera")
                     put(MediaStore.Images.Media.IS_PENDING, 1)
+                } else {
+                    @Suppress("DEPRECATION")
+                    val dcimCamera = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                        "Camera"
+                    ).apply { mkdirs() }
+                    val legacyDest = File(dcimCamera, filename)
+                    @Suppress("DEPRECATION")
+                    put(MediaStore.Images.Media.DATA, legacyDest.absolutePath)
                 }
             }
             val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return ""
@@ -1504,19 +1648,32 @@ object WatermarkRenderer {
                 context.contentResolver.delete(Uri.parse(target.config.mediaStoreUri), null, null)
             } catch (_: Exception) {}
         }
+        if (target.config.cleanMediaStoreUri.isNotBlank()) {
+            try {
+                context.contentResolver.delete(Uri.parse(target.config.cleanMediaStoreUri), null, null)
+            } catch (_: Exception) {}
+        }
         target.cleanFile.delete()
         target.watermarkedFile.delete()
         target.metaFile.delete()
     }
 
-    fun saveNewPhotoEntry(context: Context, cleanBitmap: Bitmap, cfg: WatermarkConfig, alsoExportOriginal: Boolean = false): PhotoEntry {
+    fun saveNewPhotoEntry(
+        context: Context,
+        cleanBitmap: Bitmap,
+        cfg: WatermarkConfig,
+        alsoExportOriginal: Boolean = false
+    ): PhotoEntry {
         val dir = File(context.filesDir, "captured_photos").apply { mkdirs() }
-        val id = System.currentTimeMillis().toString()
+        val id = "${System.currentTimeMillis()}_${(100..999).random()}"
         val cleanFile = File(dir, "clean_$id.jpg")
         val wmFile = File(dir, "wm_$id.jpg")
         val metaFile = File(dir, "meta_$id.json")
 
-        if (cfg.antiTamperMode) {
+        if (cfg.antiTamperMode && cfg.hasValidCoords()) {
+            if (cfg.imageHash.isBlank()) {
+                cfg.imageHash = QrCodeGenerator.computeImagePerceptualHash(cleanBitmap)
+            }
             cfg.ensureAntiTamperSignature()
         }
 
@@ -1524,20 +1681,29 @@ object WatermarkRenderer {
             cleanBitmap.compress(Bitmap.CompressFormat.JPEG, 96, fos)
         }
         val wmBitmap = renderWatermarkedBitmap(cleanBitmap, cfg)
-        saveJpegWithDualTrackExif(wmBitmap, wmFile, cfg)
-        if (wmBitmap !== cleanBitmap && !wmBitmap.isRecycled) {
-            wmBitmap.recycle()
+        try {
+            saveJpegWithDualTrackExif(wmBitmap, wmFile, cfg)
+        } finally {
+            if (wmBitmap !== cleanBitmap && !wmBitmap.isRecycled) {
+                wmBitmap.recycle()
+            }
         }
 
-        val savedUriStr = exportOrUpdateSystemCameraGallery(context, wmFile, cfg)
+        val savedUriStr = exportOrUpdateSystemCameraGallery(context, wmFile, cfg, suffix = "WM")
         cfg.mediaStoreUri = savedUriStr
-        metaFile.writeText(cfg.toJson())
 
         if (alsoExportOriginal) {
-            val origCfg = cfg.copy(mediaStoreUri = "")
-            exportOrUpdateSystemCameraGallery(context, cleanFile, origCfg)
+            val origUriStr = exportOrUpdateSystemCameraGallery(
+                context = context,
+                wmFile = cleanFile,
+                cfg = cfg,
+                suffix = "ORIG",
+                existingUriOverride = ""
+            )
+            cfg.cleanMediaStoreUri = origUriStr
         }
 
+        metaFile.writeText(cfg.toJson())
         return PhotoEntry(id = id, cleanFile = cleanFile, watermarkedFile = wmFile, metaFile = metaFile, config = cfg)
     }
 
@@ -1560,7 +1726,11 @@ object WatermarkRenderer {
         return list.sortedByDescending { it.id }
     }
 
-    fun scanSystemCameraPhotos(context: Context, maxCount: Int = 40): List<SystemCameraPhoto> {
+    /**
+     * Fast, zero-jank system photo scan (v9.0.0):
+     * Queries MediaStore index only; EXIF GPS & anti-tamper metadata are loaded lazily on demand.
+     */
+    fun scanSystemCameraPhotos(context: Context, maxCount: Int = 120): List<SystemCameraPhoto> {
         val results = mutableListOf<SystemCameraPhoto>()
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
@@ -1568,6 +1738,8 @@ object WatermarkRenderer {
             MediaStore.Images.Media.DATE_MODIFIED
         )
         val sortOrder = "${MediaStore.Images.Media.DATE_MODIFIED} DESC"
+        val dateTimeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA)
+        val dateGroupFmt = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA)
         try {
             context.contentResolver.query(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -1585,68 +1757,18 @@ object WatermarkRenderer {
                     count++
                     val id = cursor.getLong(idCol)
                     val name = cursor.getString(nameCol) ?: "IMG_$id.jpg"
-                    val dateSec = cursor.getLong(dateCol)
-                    val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA).format(Date(dateSec * 1000L))
+                    val dateMs = cursor.getLong(dateCol) * 1000L
+                    val d = Date(dateMs)
                     val baseUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-
-                    val photoUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        try { MediaStore.setRequireOriginal(baseUri) } catch (_: Exception) { baseUri }
-                    } else baseUri
-
-                    var hasGps = false
-                    var gcjLat = 0.0
-                    var gcjLon = 0.0
-                    var wgsLat = 0.0
-                    var wgsLon = 0.0
-                    var label = "未包含EXIF定位信息"
-                    var verified = false
-                    var sigHash = ""
-
-                    try {
-                        context.contentResolver.openInputStream(photoUri)?.use { stream ->
-                            val exif = ExifInterface(stream)
-                            val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
-                            if (!comment.isNullOrBlank() && comment.trim().startsWith("{")) {
-                                val parsed = WatermarkConfig.fromJson(comment.trim())
-                                hasGps = true
-                                gcjLat = parsed.gcjLat
-                                gcjLon = parsed.gcjLon
-                                wgsLat = parsed.wgsLat
-                                wgsLon = parsed.wgsLon
-                                verified = parsed.isSignatureValid()
-                                sigHash = parsed.antiTamperHash
-                                label = parsed.shortPoi.ifBlank { "本机水印照片" }
-                            } else {
-                                val latLong = FloatArray(2)
-                                if (exif.getLatLong(latLong)) {
-                                    wgsLat = latLong[0].toDouble()
-                                    wgsLon = latLong[1].toDouble()
-                                    if (wgsLat != 0.0 || wgsLon != 0.0) {
-                                        val gcj = CoordinateConverter.wgs84ToGcj02(wgsLat, wgsLon)
-                                        hasGps = true
-                                        gcjLat = gcj.lat
-                                        gcjLon = gcj.lon
-                                        label = String.format(Locale.US, "原相机EXIF (%.4f°N, %.4f°E)", gcjLat, gcjLon)
-                                    }
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
 
                     results.add(
                         SystemCameraPhoto(
                             mediaId = id,
                             contentUri = baseUri,
                             displayName = name,
-                            dateTakenStr = dateStr,
-                            hasGps = hasGps,
-                            gcjLat = gcjLat,
-                            gcjLon = gcjLon,
-                            wgsLat = wgsLat,
-                            wgsLon = wgsLon,
-                            labelText = label,
-                            antiTamperVerified = verified,
-                            antiTamperHash = sigHash
+                            dateTakenStr = dateTimeFmt.format(d),
+                            dateGroupKey = dateGroupFmt.format(d),
+                            exifLoaded = false
                         )
                     )
                 }
@@ -1655,107 +1777,328 @@ object WatermarkRenderer {
         return results
     }
 
-    fun importExternalPhotoUri(context: Context, uri: Uri, fallbackLoc: LocationSnapshot, defaultSys: String): PhotoEntry? {
+    /**
+     * Lazy on-demand EXIF loader for a single SystemCameraPhoto (called in detail view).
+     */
+    fun loadSystemPhotoExif(context: Context, photo: SystemCameraPhoto): SystemCameraPhoto {
+        if (photo.exifLoaded) return photo
+        val photoUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try { MediaStore.setRequireOriginal(photo.contentUri) } catch (_: Exception) { photo.contentUri }
+        } else photo.contentUri
+
+        var hasGps = false
+        var gcjLat = 0.0
+        var gcjLon = 0.0
+        var wgsLat = 0.0
+        var wgsLon = 0.0
+        var label = "未包含EXIF定位信息"
+        var verified = false
+        var sigHash = ""
+
+        try {
+            context.contentResolver.openInputStream(photoUri)?.use { stream ->
+                val exif = ExifInterface(stream)
+                val parsed = decodeUserCommentJson(exif.getAttribute(ExifInterface.TAG_USER_COMMENT))
+                if (parsed != null && parsed.hasValidCoords()) {
+                    hasGps = true
+                    gcjLat = parsed.gcjLat
+                    gcjLon = parsed.gcjLon
+                    wgsLat = parsed.wgsLat
+                    wgsLon = parsed.wgsLon
+                    verified = parsed.isSignatureValid()
+                    sigHash = parsed.antiTamperHash
+                    label = parsed.shortPoi.ifBlank { "本机水印照片" }
+                } else {
+                    val latLong = FloatArray(2)
+                    if (exif.getLatLong(latLong)) {
+                        wgsLat = latLong[0].toDouble()
+                        wgsLon = latLong[1].toDouble()
+                        if (wgsLat != 0.0 || wgsLon != 0.0) {
+                            val gcj = CoordinateConverter.wgs84ToGcj02(wgsLat, wgsLon)
+                            hasGps = true
+                            gcjLat = gcj.lat
+                            gcjLon = gcj.lon
+                            label = "原相机EXIF (${CoordinateConverter.formatDecimalHemisphere(gcjLat, gcjLon, 4)})"
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        return photo.copy(
+            exifLoaded = true,
+            hasGps = hasGps,
+            gcjLat = gcjLat,
+            gcjLon = gcjLon,
+            wgsLat = wgsLat,
+            wgsLon = wgsLon,
+            labelText = label,
+            antiTamperVerified = verified,
+            antiTamperHash = sigHash
+        )
+    }
+
+    /**
+     * P0 OOM-safe external photo import with two-step sampled decoding (<= 2560px long edge)
+     * and full try-finally resource cleanup.
+     */
+    fun importExternalPhotoUri(
+        context: Context,
+        uri: Uri,
+        fallbackLoc: LocationSnapshot,
+        defaultSys: String,
+        templateBase: WatermarkConfig? = null,
+        batchOptions: BatchWatermarkOptions = BatchWatermarkOptions(),
+        resolvedPoiAddress: Pair<String, String>? = null
+    ): PhotoEntry? {
+        val dir = File(context.filesDir, "captured_photos").apply { mkdirs() }
+        val tempFile = File(dir, "temp_import_${System.currentTimeMillis()}_${(100..999).random()}.jpg")
+        var decodedBmp: Bitmap? = null
+        var rotatedBmp: Bitmap? = null
+        var cleanBmp: Bitmap? = null
+
         return try {
             val originalUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 try { MediaStore.setRequireOriginal(uri) } catch (_: Exception) { uri }
             } else uri
 
-            val dir = File(context.filesDir, "captured_photos").apply { mkdirs() }
-            val tempFile = File(dir, "temp_import_${System.currentTimeMillis()}.jpg")
             context.contentResolver.openInputStream(originalUri)?.use { input ->
                 FileOutputStream(tempFile).use { output ->
                     input.copyTo(output)
                 }
             } ?: return null
 
-            val parsedCfg = readPhotoMetadataOrExif(tempFile, fallbackLoc, defaultSys)
+            val parsedCfg = readPhotoMetadataOrExif(
+                file = tempFile,
+                fallbackLoc = fallbackLoc,
+                defaultSys = defaultSys,
+                templateBase = templateBase,
+                batchOptions = batchOptions,
+                resolvedPoiAddress = resolvedPoiAddress
+            )
             val exifRotation = readExifRotationDegrees(tempFile)
-            val decodedBmp = BitmapFactory.decodeFile(tempFile.absolutePath)
-            tempFile.delete()
-            if (decodedBmp == null) return null
 
-            val rotatedBmp = rotateBitmapIfNeeded(decodedBmp, exifRotation)
+            // Step 1: Decode bounds only to compute inSampleSize so long edge <= 2560px
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(tempFile.absolutePath, boundsOpts)
+            val rawLongEdge = max(boundsOpts.outWidth, boundsOpts.outHeight)
+            if (rawLongEdge <= 0) return null
+            var sample = 1
+            while (rawLongEdge / sample > 2560) {
+                sample *= 2
+            }
+
+            // Step 2: Sampled ARGB_8888 decode
+            val decodeOpts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            decodedBmp = BitmapFactory.decodeFile(tempFile.absolutePath, decodeOpts) ?: return null
+
+            rotatedBmp = rotateBitmapIfNeeded(decodedBmp, exifRotation)
             if (rotatedBmp !== decodedBmp && !decodedBmp.isRecycled) {
                 decodedBmp.recycle()
             }
+            decodedBmp = null
 
-            val maxDim = max(rotatedBmp.width, rotatedBmp.height)
-            val cleanBmp = if (maxDim > 2560) {
-                val ratio = 2560f / maxDim
-                Bitmap.createScaledBitmap(rotatedBmp, (rotatedBmp.width * ratio).toInt(), (rotatedBmp.height * ratio).toInt(), true).also {
-                    if (it !== rotatedBmp && !rotatedBmp.isRecycled) rotatedBmp.recycle()
+            val curRotated = rotatedBmp ?: return null
+            val maxDim = max(curRotated.width, curRotated.height)
+            cleanBmp = if (maxDim > 2560) {
+                val ratio = 2560f / maxDim.toFloat()
+                val tw = (curRotated.width * ratio).roundToInt().coerceAtLeast(1)
+                val th = (curRotated.height * ratio).roundToInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(curRotated, tw, th, true).also {
+                    if (it !== curRotated && !curRotated.isRecycled) curRotated.recycle()
                 }
-            } else rotatedBmp
+            } else {
+                curRotated
+            }
+            rotatedBmp = null
 
-            saveNewPhotoEntry(context, cleanBmp, parsedCfg, alsoExportOriginal = false).also {
-                if (!cleanBmp.isRecycled) cleanBmp.recycle()
+            saveNewPhotoEntry(context, cleanBmp, parsedCfg, alsoExportOriginal = false)
+        } catch (_: Exception) {
+            null
+        } finally {
+            if (decodedBmp != null && !decodedBmp.isRecycled) decodedBmp.recycle()
+            if (rotatedBmp != null && !rotatedBmp.isRecycled) rotatedBmp.recycle()
+            if (cleanBmp != null && !cleanBmp.isRecycled) cleanBmp.recycle()
+            if (tempFile.exists()) tempFile.delete()
+        }
+    }
+
+    /**
+     * Extract EXIF coordinates quickly from a content URI (for batch 100m grid reverse geocode cache).
+     */
+    fun extractExifCoordsFromUri(context: Context, uri: Uri): Pair<LatLon, LatLon>? {
+        return try {
+            val originalUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try { MediaStore.setRequireOriginal(uri) } catch (_: Exception) { uri }
+            } else uri
+            context.contentResolver.openInputStream(originalUri)?.use { stream ->
+                val exif = ExifInterface(stream)
+                val latLong = FloatArray(2)
+                if (exif.getLatLong(latLong)) {
+                    val wgsLat = latLong[0].toDouble()
+                    val wgsLon = latLong[1].toDouble()
+                    if (wgsLat != 0.0 || wgsLon != 0.0) {
+                        val gcj = CoordinateConverter.wgs84ToGcj02(wgsLat, wgsLon)
+                        return@use LatLon(wgsLat, wgsLon) to gcj
+                    }
+                }
+                null
             }
         } catch (_: Exception) {
             null
         }
     }
 
-    private fun readPhotoMetadataOrExif(file: File, fallbackLoc: LocationSnapshot, defaultSys: String): WatermarkConfig {
-        val (nowHm, nowDateWeek, nowFullTs) = WatermarkConfig.currentTimeStrings(Date(fallbackLoc.trustedCurrentTimeMillis()))
+    private fun readPhotoMetadataOrExif(
+        file: File,
+        fallbackLoc: LocationSnapshot,
+        defaultSys: String,
+        templateBase: WatermarkConfig?,
+        batchOptions: BatchWatermarkOptions,
+        resolvedPoiAddress: Pair<String, String>?
+    ): WatermarkConfig {
+        val trustedNow = Date(fallbackLoc.trustedCurrentTimeMillis())
+        val (nowHm, nowDateWeek, nowFullTs) = WatermarkConfig.currentTimeStrings(trustedNow)
+
+        val base = templateBase?.copy(
+            antiTamperMode = false,
+            antiTamperHash = "",
+            imageHash = "",
+            mediaStoreUri = "",
+            cleanMediaStoreUri = ""
+        ) ?: WatermarkConfig(
+            styleTemplate = 0,
+            coordSystem = defaultSys
+        )
+
+        var rawExifDate: String? = null
         try {
             val exif = ExifInterface(file.absolutePath)
-            val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
-            if (!comment.isNullOrBlank() && comment.trim().startsWith("{")) {
-                return WatermarkConfig.fromJson(comment.trim())
+            val parsedUserComment = decodeUserCommentJson(exif.getAttribute(ExifInterface.TAG_USER_COMMENT))
+            if (parsedUserComment != null && templateBase == null) {
+                return parsedUserComment.copy(mediaStoreUri = "", cleanMediaStoreUri = "")
             }
-            val rawExifDate = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+
+            rawExifDate = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
                 ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
-            val (exifHm, exifDateWeek, exifFullTs) = WatermarkConfig.parseExifDateStrings(rawExifDate)
+
+            val (timeHm, dateWeek, fullTs) = if (batchOptions.timeStrategy == BatchTimeStrategy.PREFER_EXIF && !rawExifDate.isNullOrBlank()) {
+                WatermarkConfig.parseExifDateStrings(rawExifDate, trustedNow)
+            } else {
+                Triple(nowHm, nowDateWeek, nowFullTs)
+            }
 
             val latLong = FloatArray(2)
             if (exif.getLatLong(latLong)) {
                 val wgsLat = latLong[0].toDouble()
                 val wgsLon = latLong[1].toDouble()
-                val gcj = CoordinateConverter.wgs84ToGcj02(wgsLat, wgsLon)
-                return WatermarkConfig(
-                    styleTemplate = 0,
-                    coordSystem = defaultSys,
-                    gcjLat = gcj.lat,
-                    gcjLon = gcj.lon,
-                    wgsLat = wgsLat,
-                    wgsLon = wgsLon,
-                    origGcjLat = gcj.lat,
-                    origGcjLon = gcj.lon,
-                    accuracyMeters = 3.0f,
-                    altitudeMeters = fallbackLoc.altitudeMeters,
-                    azimuthDeg = fallbackLoc.azimuthDeg,
-                    azimuthText = fallbackLoc.azimuthText,
-                    shortPoi = String.format(Locale.US, "EXIF点位(%.4f°N)", gcj.lat),
-                    address = String.format(Locale.US, "原相机EXIF坐标: %.6f, %.6f", gcj.lat, gcj.lon),
-                    timeHm = exifHm,
-                    dateWeek = exifDateWeek,
-                    timestamp = exifFullTs,
-                    note = "原相机EXIF识别 · 已对齐高德坐标"
-                )
+                if (wgsLat != 0.0 || wgsLon != 0.0) {
+                    val gcj = CoordinateConverter.wgs84ToGcj02(wgsLat, wgsLon)
+                    val exifAlt = exif.getAltitude(fallbackLoc.altitudeMeters)
+                    val poiName = resolvedPoiAddress?.first?.takeIf { it.isNotBlank() }
+                        ?: "EXIF点位(${CoordinateConverter.formatLatHemisphere(gcj.lat, 4)})"
+                    val fullAddr = resolvedPoiAddress?.second?.takeIf { it.isNotBlank() }
+                        ?: "原相机EXIF: ${CoordinateConverter.formatDecimalHemisphere(gcj.lat, gcj.lon, 6)}"
+                    return base.copy(
+                        coordSystem = defaultSys,
+                        gcjLat = gcj.lat,
+                        gcjLon = gcj.lon,
+                        wgsLat = wgsLat,
+                        wgsLon = wgsLon,
+                        origGcjLat = gcj.lat,
+                        origGcjLon = gcj.lon,
+                        accuracyMeters = 3.0f,
+                        altitudeMeters = exifAlt,
+                        azimuthDeg = fallbackLoc.azimuthDeg,
+                        azimuthText = fallbackLoc.azimuthText,
+                        shortPoi = poiName,
+                        address = fullAddr,
+                        timeHm = timeHm,
+                        dateWeek = dateWeek,
+                        timestamp = fullTs,
+                        note = base.note.ifBlank { "原相机EXIF识别 · 已对齐高德坐标" }
+                    )
+                }
             }
         } catch (_: Exception) {}
 
-        return WatermarkConfig(
-            styleTemplate = 0,
-            coordSystem = defaultSys,
-            gcjLat = fallbackLoc.gcjLat,
-            gcjLon = fallbackLoc.gcjLon,
-            wgsLat = fallbackLoc.wgsLat,
-            wgsLon = fallbackLoc.wgsLon,
-            origGcjLat = fallbackLoc.gcjLat,
-            origGcjLon = fallbackLoc.gcjLon,
-            accuracyMeters = fallbackLoc.accuracyMeters,
-            altitudeMeters = fallbackLoc.altitudeMeters,
-            azimuthDeg = fallbackLoc.azimuthDeg,
-            azimuthText = fallbackLoc.azimuthText,
-            shortPoi = fallbackLoc.shortPoi,
-            address = fallbackLoc.fullAddress,
-            timeHm = nowHm,
-            dateWeek = nowDateWeek,
-            timestamp = nowFullTs,
-            note = "外部相册导入"
-        )
+        // Photo has no EXIF GPS: independently preserve its TAG_DATETIME_ORIGINAL when PREFER_EXIF is chosen!
+        val (noGpsHm, noGpsDateWeek, noGpsFullTs) = if (batchOptions.timeStrategy == BatchTimeStrategy.PREFER_EXIF && !rawExifDate.isNullOrBlank()) {
+            WatermarkConfig.parseExifDateStrings(rawExifDate, trustedNow)
+        } else {
+            Triple(nowHm, nowDateWeek, nowFullTs)
+        }
+
+        return when (batchOptions.missingGpsStrategy) {
+            BatchMissingGpsStrategy.HIDE_COORDS -> {
+                base.copy(
+                    coordSystem = defaultSys,
+                    gcjLat = 0.0,
+                    gcjLon = 0.0,
+                    wgsLat = 0.0,
+                    wgsLon = 0.0,
+                    origGcjLat = 0.0,
+                    origGcjLon = 0.0,
+                    showCoords = false,
+                    showQrCode = false,
+                    showMiniMap = false,
+                    shortPoi = batchOptions.manualPoi.ifBlank { "外部相册照片" },
+                    address = batchOptions.manualAddress,
+                    timeHm = noGpsHm,
+                    dateWeek = noGpsDateWeek,
+                    timestamp = noGpsFullTs,
+                    note = base.note.ifBlank { "外部相册导入" }
+                )
+            }
+            BatchMissingGpsStrategy.USE_MANUAL_COORDS -> {
+                val mLat = batchOptions.manualGcjLat ?: fallbackLoc.gcjLat
+                val mLon = batchOptions.manualGcjLon ?: fallbackLoc.gcjLon
+                val mWgs = if (mLat != 0.0 || mLon != 0.0) CoordinateConverter.gcj02ToWgs84(mLat, mLon) else LatLon(0.0, 0.0)
+                base.copy(
+                    coordSystem = defaultSys,
+                    gcjLat = mLat,
+                    gcjLon = mLon,
+                    wgsLat = mWgs.lat,
+                    wgsLon = mWgs.lon,
+                    origGcjLat = mLat,
+                    origGcjLon = mLon,
+                    accuracyMeters = 5.0f,
+                    altitudeMeters = fallbackLoc.altitudeMeters,
+                    azimuthDeg = fallbackLoc.azimuthDeg,
+                    azimuthText = fallbackLoc.azimuthText,
+                    shortPoi = batchOptions.manualPoi.ifBlank { resolvedPoiAddress?.first ?: "手动指定点位" },
+                    address = batchOptions.manualAddress.ifBlank { resolvedPoiAddress?.second ?: CoordinateConverter.formatDecimalHemisphere(mLat, mLon, 6) },
+                    timeHm = noGpsHm,
+                    dateWeek = noGpsDateWeek,
+                    timestamp = noGpsFullTs,
+                    note = base.note.ifBlank { "批量水印 · 手动定位" }
+                )
+            }
+            BatchMissingGpsStrategy.USE_CURRENT_LOCATION -> {
+                base.copy(
+                    coordSystem = defaultSys,
+                    gcjLat = fallbackLoc.gcjLat,
+                    gcjLon = fallbackLoc.gcjLon,
+                    wgsLat = fallbackLoc.wgsLat,
+                    wgsLon = fallbackLoc.wgsLon,
+                    origGcjLat = fallbackLoc.gcjLat,
+                    origGcjLon = fallbackLoc.gcjLon,
+                    accuracyMeters = fallbackLoc.accuracyMeters,
+                    altitudeMeters = fallbackLoc.altitudeMeters,
+                    azimuthDeg = fallbackLoc.azimuthDeg,
+                    azimuthText = fallbackLoc.azimuthText,
+                    shortPoi = fallbackLoc.shortPoi,
+                    address = fallbackLoc.fullAddress,
+                    timeHm = noGpsHm,
+                    dateWeek = noGpsDateWeek,
+                    timestamp = noGpsFullTs,
+                    note = base.note.ifBlank { "外部相册导入" }
+                )
+            }
+        }
     }
 
     private fun decimalToExifDms(coord: Double): String {

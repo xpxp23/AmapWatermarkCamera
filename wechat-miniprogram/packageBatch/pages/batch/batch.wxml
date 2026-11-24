@@ -1,0 +1,107 @@
+<view class="batch-page">
+  <!-- 顶部胶囊对齐毛玻璃导航栏 -->
+  <view
+    class="nav-header"
+    style="padding-top: {{menuBtnTop}}px; height: {{menuBtnHeight}}px; padding-right: {{menuBtnRightSpace}}px;"
+  >
+    <view class="nav-back" bindtap="goBack">
+      <text class="nav-chevron">‹</text>
+      <text class="nav-back-txt">返回</text>
+    </view>
+    <view class="nav-title">批量加水印</view>
+  </view>
+
+  <scroll-view scroll-y class="batch-scroll">
+    <!-- 顶部配置卡片 -->
+    <view class="config-card">
+      <view class="card-row-between">
+        <text class="card-section-title">🎨 水印模板与来源策略</text>
+        <view class="exif-toggle-pill {{useExifPriority ? 'on' : ''}}" bindtap="toggleExifMode">
+          {{useExifPriority ? '✓ 优先用照片EXIF' : '统一用当前时间/地点'}}
+        </view>
+      </view>
+
+      <view class="tpl-chip-row">
+        <view
+          wx:for="{{tplNames}}"
+          wx:key="index"
+          class="tpl-chip {{styleTemplate === index ? 'active' : ''}}"
+          data-idx="{{index}}"
+          bindtap="selectTemplate"
+        >
+          {{item}}
+        </view>
+      </view>
+
+      <view class="inline-field-row">
+        <input class="batch-input" value="{{shortPoi}}" disabled="{{isRunning}}" bindinput="onInputPoi" placeholder="默认点位简称 (无EXIF GPS时使用)" />
+        <input class="batch-input" value="{{note}}" disabled="{{isRunning}}" bindinput="onInputNote" placeholder="统一现场备注 (选填)" />
+      </view>
+
+      <view wx:if="{{styleTemplate === 0}}" class="scrim-row">
+        <text class="scrim-lbl">🌘 模板0底部托底暗影 (默认关闭)</text>
+        <switch checked="{{showBottomScrim}}" disabled="{{isRunning}}" bindchange="onToggleBottomScrim" color="#0284c7" />
+      </view>
+    </view>
+
+    <!-- 实时进度条 -->
+    <view wx:if="{{items.length > 0}}" class="progress-card">
+      <view class="progress-head">
+        <text class="progress-txt">队列进度：{{doneCount}} / {{items.length}} (成功 {{successCount}} · 失败 {{failedCount}})</text>
+        <text class="progress-pct accent">{{progressPercent}}%</text>
+      </view>
+      <view class="progress-track">
+        <view class="progress-fill" style="width: {{progressPercent}}%;"></view>
+      </view>
+    </view>
+
+    <!-- 选图队列网格 -->
+    <view wx:if="{{items.length === 0}}" class="empty-box" bindtap="chooseAlbumImages">
+      <view class="empty-icon">🗂</view>
+      <view class="empty-title">从手机系统相册批量选图</view>
+      <view class="empty-sub">单次最多选 20 张（支持继续追加）· 自动读取照片 EXIF 原拍时间与 GPS · 串行合成直存系统相册不占空间</view>
+      <view class="empty-cta">＋ 选择相册照片</view>
+    </view>
+
+    <view wx:else class="queue-section">
+      <view class="queue-header">
+        <text class="queue-title">待处理照片 ({{items.length}})</text>
+        <view class="queue-ops">
+          <text wx:if="{{!isRunning}}" class="op-link accent" bindtap="chooseAlbumImages">＋ 继续加图</text>
+          <text wx:if="{{!isRunning}}" class="op-link danger" bindtap="clearAllItems">清空</text>
+        </view>
+      </view>
+
+      <view class="queue-grid">
+        <view wx:for="{{items}}" wx:key="id" class="queue-card">
+          <image src="{{item.path}}" mode="aspectFill" lazy-load="{{true}}" class="queue-thumb" />
+          <view wx:if="{{!isRunning && item.status !== 'processing'}}" class="queue-del" data-id="{{item.id}}" bindtap="removeItem">✕</view>
+          <view class="queue-exif-tag">{{item.exifLabel}}</view>
+          <view class="queue-status-bar {{item.status}}">
+            <text wx:if="{{item.status === 'pending'}}">等待处理</text>
+            <text wx:elif="{{item.status === 'processing'}}">合成中...</text>
+            <text wx:elif="{{item.status === 'success'}}">✓ 已存相册</text>
+            <text wx:else>✕ 失败</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </scroll-view>
+
+  <!-- 底部固定操作栏 -->
+  <view class="batch-footer">
+    <block wx:if="{{isRunning}}">
+      <button class="footer-btn danger" disabled="{{isCancelling}}" bindtap="cancelBatchQueue">
+        {{isCancelling ? '正在停止...' : '⏹ 取消剩余任务'}}
+      </button>
+    </block>
+    <block wx:else>
+      <button wx:if="{{failedCount > 0}}" class="footer-btn amber" bindtap="retryFailedItems">↻ 重试失败项 ({{failedCount}})</button>
+      <button class="footer-btn primary" bindtap="{{items.length > 0 ? 'startBatchQueue' : 'chooseAlbumImages'}}">
+        {{items.length > 0 ? ('⚡ 开始批量加水印 (' + items.length + '张)') : '🖼 从系统相册选图'}}
+      </button>
+    </block>
+  </view>
+
+  <canvas type="2d" id="batchFallbackCanvas" style="width: 1080px; height: 1440px; position: fixed; left: -9999px; top: -9999px;"></canvas>
+</view>

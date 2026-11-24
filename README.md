@@ -1,30 +1,35 @@
-# 极速高德经纬度水印相机 v8.0.0 (Android 原生双模版 + 微信小程序版 + Web PWA 版)
+# 极速高德经纬度水印相机 v9.0.0 (Android 原生双模版 + 微信小程序版 + Web PWA 版)
 
-本项目是专为「**秒开秒拍、光学拍照/极速抓拍双模切换、高德 160×160 矢量缩略地图画中画（Mini-Map）、NTP 授时 + SHA-256 外业防伪验真、三级智能识图验真核验中心、高德 GCJ-02 零偏差定位码、非防篡改照片全要素无损改水印**」打造的全端工程。
+本项目是专为「**秒开秒拍、光学拍照/极速抓拍双模切换、NTP 授时 + SHA-256 外业防伪验真、批量相册加水印、类 iOS 分层网格相册、高德 GCJ-02 零偏差定位码、非防篡改照片全要素无损改水印**」打造的全端工程。
 
-## v8.0.0 重大升级与全端深度修复
+## v9.0.0 重大架构重构与全端深度修复
 
-1. **🛡 三级无侵入「识图验真」引擎与独立核验报告中心（小程序 + Android 双端同步）**
-   - 新增独立模块 `wechat-miniprogram/utils/photo_verifier.js` 与 Android `QrCodeGenerator.parseAndVerifyPayload`：
-     - **相册原图 2x 超分局部裁切 + VisionKit 内存识码**：针对全尺寸水印照片右下角/左下角定位码占比仅 1.4% 导致系统全图扫码失败的痛点，自动在离屏 Canvas 2D 中裁切定位码区域并放大至 `520×520` 高对比度矩阵，调用微信原生 `wx.createVKSession (mode: 2)` 静态识码引擎秒级提取防伪载荷。
-     - **SHA-256 全字段密码学重算与独立核验报告弹窗**：比对照片内嵌签名与实时重算摘要（绑定 `GCJ-02 经纬度 + 秒级时间戳 + 点位名称 + 现场备注`），输出「🛡 防篡改核验通过 · 真实原片」、「⚠️ 签名校验异常 · 疑似篡改」或「ℹ️ 普通定位照片」三种等级报告，支持一键跳高德导航与复制完整验真报告。
+1. **🧹 做减法：彻底移除滤镜 + 模板 0 底部暗影默认关闭（双端同步）**
+   - 彻底清理 Android 与微信小程序全部滤镜配置、矩阵渲染、`RenderEffect` 与 CSS `filter`（恢复小程序 `<camera>` 同层渲染性能），将主底栏黄金交互位升级为**「批量水印」**一级入口。
+   - 核实用户反馈的“暗角”源自模板 0 硬编码的底部 390px 纯黑渐变遮罩，现已重构为可选开关 `showBottomScrim`（**默认关闭**），仅保留清晰文字投影，预览与成片 100% 一致。
 
-2. **🔒 防篡改照片硬锁定 vs 🔓 非防篡改照片全要素无损修改（双端同步）**
-   - **开启防篡改的照片严禁后期修改**：对拍摄时开启 `antiTamperMode` 的照片，在相册 UI 与底层重绘管线中实施双重硬锁定（显示「🔒 防伪禁改」），彻底封堵修改后重新计算哈希洗白的漏洞；同时修复小程序转发非防伪照片时误带 `sig=` 参数的问题。
-   - **未开启防篡改的照片支持修改一切内容**：在小程序与 Android 端重绘面板中全面开放**日期选择器、时分秒精确时间（自动重算星期）、高德/大地经纬度手动输入与地图重新选点、恢复原拍坐标、地点简称、详细街道地址、海拔高程、罗盘方位角、定位精度、5 款滤镜、点缀色、字号缩放与透明度**的无损重绘。
+2. **⚡ 新增「批量相册加水印」防 OOM 串行流水线（双端同步）**
+   - **Android 端**：接入 `PickMultipleVisualMedia(50)` 与相册长按多选，采用 `Dispatchers.IO.limitedParallelism(1)` 串行队列 + 两步 `inSampleSize` 采样（`<= 2560px`）+ 即时 `recycle()` 锁死峰值内存；支持原片 EXIF 时间/GPS 独立读取与 100m 网格逆地理缓存、实时进度与取消。
+   - **微信小程序端**：拆出独立分包 `packageBatch` 自动卸载首页相机释放显存；新增纯 JS 64KB 头部解析器 `utils/exif_lite.js`；基于 `OffscreenCanvas` 串行合成并直存系统相册（不占 `USER_DATA_PATH` 配额），逐张释放纹理并支持单张容错与一键重试。
 
-3. **⚡ 启动性能、首次存图竞态与手势交互体验彻底根治**
-   - **根治首次保存照片因权限弹窗导致丢图**：将 `fs.saveFile`（会剪切销毁临时文件）升级为 `fs.copyFile` 持久化，并在相机初始化完成后静默预申请 `scope.writePhotosAlbum` 权限，在持久化回调内使用永久路径写入系统相册；Android 端同步补齐 API 26~28 `WRITE_EXTERNAL_STORAGE` 权限请求。
-   - **消除开局 2~3 秒黑屏与卡顿**：合并小程序 `onLoad` 首屏 5 次连续 `setData` 为单次批处理，消除 `onLoad` 与 `onShow` 重复高精度定位并发冲突；加入毛玻璃光学镜头加载过渡层，启用 `<camera>` 同层渲染常驻保活（打开半屏水印设置时实时预览不黑屏）；Android 端为实时预览二维码引入分钟级缓存键，消除主线程每秒 Reed-Solomon 重算掉帧。
-   - **拦截二级菜单侧滑退出与相册顶栏美学重构**：接入微信小程序原生 `<page-container>` 手势拦截器，在相册、地点校准、设置、水印定制或验真报告界面侧滑返回时仅关闭当前弹窗而不退出小程序；基于 `wx.getMenuButtonBoundingClientRect()` 精确对齐微信右上角胶囊，重构毛玻璃返回导航栏。
-   - **本地存储自动垃圾回收与组件按需注入**：在删除照片、无损重绘覆盖及超出 25 张上限淘汰时自动调用 `fs.unlink` 清理 `USER_DATA_PATH` 旧文件，杜绝 200MB 存储爆仓；在 `app.json` 启用 `"lazyCodeLoading": "requiredComponents"`。
+3. **🖼️ 重构类 iOS 分层相册 UI（遵循双端平台权限最优解）**
+   - **Android 端**（`ui/GalleryScreen.kt`）：默认 4 列按日吸顶网格（水印相册 / 系统相册双 Tab，自动 EXIF 旋转纠偏 + 懒读元数据 + 长按多选批量操作），点击进入全屏 `HorizontalPager` 滑切 + 双指缩放详情页，底部 4 键栏补齐系统 ShareSheet 一键分享与 Material 3 `ModalBottomSheet` 详情抽屉。
+   - **微信小程序端**（`packageAlbum` 双页分包 + `utils/photo_store.js`）：告别单页巨型弹窗与 `<page-container>` 闪黑冲突；采用**双轨分级存储**（240px 缩略图 + 120 张水印成品 / 25 张无损底图 + 冷启动孤儿文件 GC），顶部融合「从系统相册批量加水印 / 选图验真」双入口，3 列网格秒开，独立详情页支持 `<swiper>` 滑切与半屏验真抽屉。
 
-4. **🔄 App 端与小程序端 100% 功能对齐**
-   - **小程序端补齐**：`160×160` 高德矢量缩略地图画中画（卡片内嵌/左上角悬浮双位置）、4 大一键场景预设（极简打卡/工程全要素/GIS测绘/标准台账）、九宫格辅助线、延时倒计时拍摄、变焦倍率切换、5 款实时滤镜与卡片居右对齐。
-   - **Android 端补齐**：三大坐标系（`WGS-84` / `CGCS2000` / `GCJ-02`）自由切换、`FastLocationManager` 手动坐标锁定与硬件真实 GPS 双轨隔离（防止手动改坐标 0.8s 后被 GPS 覆盖）、模板 3（极简胶片底栏）上下双层全宽通栏布局（根治日期重复打印与 DMS 截断）、音量键物理快门与删除二次确认。
+4. **🛡 P0 安全、稳定性与合规缺陷全量根治**
+   - **消除防伪漏洞**：彻底删除小程序验真降级假阳性分支；移除 Android 空备注回退绕过；严格校验 `sig.length >= 10`；双端 QR 码升级至 ISO/IEC 18004 V14（8 掩码择优）彻底杜绝超长中文截断签名；防伪模式下严禁未定位默认坐标签发哈希并同时锁定地点/备注；Android 端开启 R8 混淆与 64 位 dHash 图像感知指纹绑定。
+   - **修复崩溃、泄漏与合规**：修复 Android 外部导图 OOM、`FastLocationManager` Activity/协程泄漏、Android 14 `READ_MEDIA_VISUAL_USER_SELECTED` 权限、同秒文件名碰撞与 EXIF 海拔/方向缺失；修复小程序 `VKSession` 异常未销毁泄漏、iOS 4096px 纹理上限、隐私合规 `utils/privacy.js`、线上 NTP 授时降级与 `onShareAppMessage` 错发旧图。
+
+5. **🏗️ 工程化模块化拆分**
+   - **Android 端**：将 3,700 行 `MainActivity.kt` 拆分为 `ui/{GalleryScreen,BatchWatermarkUi,WatermarkEditorSheet,CameraDialogs,VectorIcons}.kt`，隔离高频定位重组、恢复全画面点按对焦并支持工程台账 CSV 导出。
+   - **微信小程序端**：将 5,595 行单页巨石拆为 `packageAlbum`、`packageBatch` 双分包、`components/watermark-overlay/` 预览组件及 `utils/{watermark_renderer,photo_store,exif_lite,privacy}.js`。
 
 ## 目录结构
 
-- `app/`：Android 原生工程 v8.0.0（Kotlin + Jetpack Compose + CameraX + ExifInterface）
-- `wechat-miniprogram/`：零依赖原生微信小程序工程 v8.0.0（直接导入**微信开发者工具**即可真机运行）
-- `web-pwa/`：单文件离线 Web PWA 预览版 v8.0.0
+- `app/`：Android 原生工程 v9.0.0（Kotlin + Jetpack Compose + CameraX + ExifInterface）
+- `wechat-miniprogram/`：零依赖原生微信小程序工程 v9.0.0（直接导入**微信开发者工具**即可真机运行）
+- `web-pwa/`：单文件离线 Web PWA 预览版
+
+## 历史版本
+
+- `v8.0.0`：三级无侵入识图验真、防篡改硬锁定 vs 非防篡改无损重绘、双端三坐标系对齐。

@@ -2,12 +2,29 @@
   "pages": [
     "pages/index/index"
   ],
+  "subpackages": [
+    {
+      "root": "packageBatch",
+      "name": "packageBatch",
+      "pages": [
+        "pages/batch/batch"
+      ]
+    },
+    {
+      "root": "packageAlbum",
+      "name": "packageAlbum",
+      "pages": [
+        "pages/gallery/gallery",
+        "pages/detail/detail"
+      ]
+    }
+  ],
   "lazyCodeLoading": "requiredComponents",
   "window": {
     "backgroundTextStyle": "dark",
     "navigationStyle": "custom",
     "navigationBarBackgroundColor": "#000000",
-    "navigationBarTitleText": "极速高德水印相机 v8.0",
+    "navigationBarTitleText": "极速高德水印相机 v9.0",
     "navigationBarTextStyle": "white",
     "backgroundColor": "#000000"
   },
@@ -19,12 +36,6 @@
   "permission": {
     "scope.userLocation": {
       "desc": "获取位置用于生成高德经纬水印及一键导航"
-    },
-    "scope.writePhotosAlbum": {
-      "desc": "用于将合成的高清水印照片保存至手机系统相册"
-    },
-    "scope.camera": {
-      "desc": "用于拍摄实景水印照片与扫描识别水印定位码"
     }
   },
   "style": "v2",

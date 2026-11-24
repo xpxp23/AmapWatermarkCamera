@@ -67,6 +67,18 @@ object CoordinateConverter {
         }
     }
 
+    fun formatDecimalHemisphere(lat: Double, lon: Double, decimals: Int = 6): String {
+        val ns = if (lat >= 0) "N" else "S"
+        val ew = if (lon >= 0) "E" else "W"
+        val fmt = "%.${decimals}f°%s, %.${decimals}f°%s"
+        return String.format(Locale.US, fmt, abs(lat), ns, abs(lon), ew)
+    }
+
+    fun formatLatHemisphere(lat: Double, decimals: Int = 4): String {
+        val ns = if (lat >= 0) "N" else "S"
+        return String.format(Locale.US, "%.${decimals}f°%s", abs(lat), ns)
+    }
+
     /**
      * Fixed DMS conversion with centisecond carry-over to prevent "59°60'60.00"" rounding overflow.
      */
