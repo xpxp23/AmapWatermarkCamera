@@ -23,6 +23,11 @@ const {
   ensureAlbumWritePermission
 } = require('../../../utils/privacy.js');
 
+const {
+  checkImageSecurity,
+  showViolationModal
+} = require('../../../utils/sec_check.js');
+
 function saveOneToAlbum(filePath) {
   return new Promise((resolve, reject) => {
     wx.saveImageToPhotosAlbum({
@@ -190,30 +195,37 @@ Page({
       count: 1,
       mediaType: ['image'],
       sourceType: ['album'],
-      success: res => {
+      success: async res => {
         const file = res && res.tempFiles && res.tempFiles[0];
         if (!file) return;
-        wx.showLoading({ title: '1:1双角识码验真中...' });
-        this.getVerifyFallbackCanvas().then(fc => verifyImageFile(file.tempFilePath, fc))
-          .then(result => {
+        wx.showLoading({ title: '内容安全检测中...' });
+        try {
+          const fc = await this.getVerifyFallbackCanvas();
+          const sec = await checkImageSecurity(file.tempFilePath, fc);
+          if (!sec.pass) {
             wx.hideLoading();
-            if (result && result.ok && result.report) {
-              this.setData({
-                showVerifyModal: true,
-                verifyReport: result.report
-              });
-            } else {
-              wx.showToast({
-                title: (result && result.reason) || '未检测到有效防伪定位码',
-                icon: 'none',
-                duration: 2400
-              });
-            }
-          })
-          .catch(() => {
-            wx.hideLoading();
-            wx.showToast({ title: '未检测到有效防伪定位码', icon: 'none' });
-          });
+            showViolationModal(sec.message);
+            return;
+          }
+          wx.showLoading({ title: '1:1双角识码验真中...' });
+          const result = await verifyImageFile(file.tempFilePath, fc);
+          wx.hideLoading();
+          if (result && result.ok && result.report) {
+            this.setData({
+              showVerifyModal: true,
+              verifyReport: result.report
+            });
+          } else {
+            wx.showToast({
+              title: (result && result.reason) || '未检测到有效防伪定位码',
+              icon: 'none',
+              duration: 2400
+            });
+          }
+        } catch (err) {
+          wx.hideLoading();
+          wx.showToast({ title: '未检测到有效防伪定位码', icon: 'none' });
+        }
       }
     });
   },

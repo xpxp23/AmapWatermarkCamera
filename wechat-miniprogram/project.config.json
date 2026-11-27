@@ -1,7 +1,12 @@
 {
-  "description": "极速经纬水印相机 v6.0.0 · 高德GCJ-02零偏差微信小程序版",
+  "description": "极速经纬水印相机 v9.0.0 · 高德GCJ-02零偏差微信小程序版",
+  "cloudfunctionRoot": "cloudfunctions/",
   "packOptions": {
     "ignore": [
+      {
+        "type": "folder",
+        "value": "cloudfunctions"
+      },
       {
         "type": "file",
         "value": "images/logo_*.png"

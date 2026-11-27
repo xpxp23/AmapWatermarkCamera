@@ -31,6 +31,7 @@ const {
 } = require('../../../utils/photo_store.js');
 
 const { saveImageToAlbumWithPermission } = require('../../../utils/privacy.js');
+const { checkTextsSecurity, showViolationModal } = require('../../../utils/sec_check.js');
 
 const TPL_NAMES = ['大字时间', '巡检卡片', '网格测绘', '胶片底栏', '标准台账'];
 
@@ -350,6 +351,14 @@ Page({
     if (!cur || !d || !cur.rawPath) return;
     if (cur.cfg && cur.cfg.antiTamperMode) {
       wx.showToast({ title: '🛡 防篡改原片禁止修改', icon: 'none' });
+      return;
+    }
+
+    wx.showLoading({ title: '内容安全检测中...' });
+    const txtSec = await checkTextsSecurity([d.customTitle, d.shortPoi, d.fullAddr, d.note], 3);
+    if (!txtSec.pass) {
+      wx.hideLoading();
+      showViolationModal(txtSec.message);
       return;
     }
 

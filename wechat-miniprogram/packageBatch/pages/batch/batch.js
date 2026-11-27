@@ -16,6 +16,11 @@ const { readImageExifLite } = require('../../../utils/exif_lite.js');
 const { renderWatermarkToTempFile } = require('../../../utils/watermark_renderer.js');
 const { ensureAlbumWritePermission } = require('../../../utils/privacy.js');
 const { loadUserConfig } = require('../../../utils/photo_store.js');
+const {
+  checkImageSecurity,
+  checkTextsSecurity,
+  showViolationModal
+} = require('../../../utils/sec_check.js');
 
 const TPL_NAMES = ['大字时间', '巡检卡片', '网格测绘', '胶片底栏', '标准台账'];
 
@@ -92,6 +97,8 @@ Page({
       note: this._baseCfg.note || '',
       coordSys: this._baseCfg.coordSys || 'WGS-84'
     });
+    this._safeShortPoi = this._baseCfg.shortPoi || '实拍点位';
+    this._safeNote = this._baseCfg.note || '';
 
     if (query && query.autoPick === '1') {
       setTimeout(() => this.chooseAlbumImages(), 180);
@@ -207,10 +214,22 @@ Page({
         const files = (res && res.tempFiles) || [];
         if (files.length === 0) return;
 
-        wx.showLoading({ title: `解析 ${files.length} 张 EXIF...` });
+        wx.showLoading({ title: `内容安全检测 (${files.length}张)...` });
+        const fallbackCanvas = await this.getFallbackCanvasNode();
         const newItems = [];
+        let blockedCount = 0;
+        let blockedMsg = '';
+
         for (let i = 0; i < files.length; i++) {
           const f = files[i];
+          wx.showLoading({ title: `安全检测 (${i + 1}/${files.length})...` });
+          const sec = await checkImageSecurity(f.tempFilePath, fallbackCanvas);
+          if (!sec.pass) {
+            blockedCount++;
+            if (!blockedMsg && sec.message) blockedMsg = sec.message;
+            continue;
+          }
+
           const exif = await readImageExifLite(f.tempFilePath);
           let exifLabel = '无EXIF·用当前';
           if (exif.hasTime && exif.hasGps) exifLabel = 'EXIF 时间+GPS';
@@ -223,13 +242,19 @@ Page({
             status: 'pending',
             errorMsg: '',
             exif,
-            exifLabel
+            exifLabel,
+            secChecked: true
           });
         }
         wx.hideLoading();
 
-        const merged = [...this.data.items, ...newItems];
-        this.setData({ items: merged }, () => this.recomputeStats());
+        if (newItems.length > 0) {
+          const merged = [...this.data.items, ...newItems];
+          this.setData({ items: merged }, () => this.recomputeStats());
+        }
+        if (blockedCount > 0) {
+          showViolationModal(blockedMsg);
+        }
       }
     });
   },
@@ -365,6 +390,22 @@ Page({
       return;
     }
 
+    wx.showLoading({ title: '内容安全检测中...' });
+    const txtSec = await checkTextsSecurity([this.data.shortPoi, this.data.note], 3);
+    wx.hideLoading();
+    if (!txtSec.pass) {
+      if (txtSec.risky) {
+        this.setData({
+          shortPoi: this._safeShortPoi || '实拍点位',
+          note: this._safeNote || ''
+        });
+      }
+      showViolationModal(txtSec.message);
+      return;
+    }
+    this._safeShortPoi = this.data.shortPoi;
+    this._safeNote = this.data.note;
+
     const granted = await ensureAlbumWritePermission(true);
     if (!granted) {
       wx.showToast({ title: '未开启相册写入权限，无法导出', icon: 'none' });
@@ -391,6 +432,12 @@ Page({
 
         let exportedTempPath = '';
         try {
+          if (!currentItem.secChecked) {
+            const sec = await checkImageSecurity(currentItem.path, fallbackCanvas);
+            if (!sec.pass) {
+              throw new Error(sec.message || '所发布内容含违规信息');
+            }
+          }
           const cfg = this.buildCfgForItem(currentItem);
           const out = await renderWatermarkToTempFile(currentItem.path, cfg, {
             fallbackCanvas,

@@ -44,6 +44,12 @@ const {
   saveImageToAlbumWithPermission
 } = require('../../utils/privacy.js');
 
+const {
+  checkImageSecurity,
+  checkTextsSecurity,
+  showViolationModal
+} = require('../../utils/sec_check.js');
+
 const ACCENT_PALETTE = [
   { name: '天际蓝', hex: '#38bdf8' },
   { name: '翡翠绿', hex: '#34d399' },
@@ -170,6 +176,12 @@ Page({
 
     const mergedInit = this.buildMergedStartupPatch(statusBarHeight, menuBtnTop, menuBtnHeight, menuBtnRightSpace);
     this.setData(mergedInit);
+    this._safeTextSnapshot = {
+      customTitle: mergedInit.customTitle !== undefined ? mergedInit.customTitle : this.data.customTitle,
+      shortPoi: this.data.shortPoi,
+      fullAddr: this.data.fullAddr,
+      note: mergedInit.note !== undefined ? mergedInit.note : this.data.note
+    };
 
     this.consumeLaunchQuery(query);
 
@@ -621,10 +633,15 @@ Page({
     wx.scanCode({
       scanType: ['qrCode'],
       onlyFromCamera: false,
-      success: res => {
+      success: async res => {
         const parsed = parseLocationPayload(res.result);
         const report = buildVerificationReport(parsed, '', '镜头扫码核验');
         if (report) {
+          const sec = await checkTextsSecurity([report.shortPoi, parsed && parsed.note], 3);
+          if (!sec.pass) {
+            showViolationModal(sec.message);
+            return;
+          }
           this.setData({
             showVerifyModal: true,
             verifyReport: report,
@@ -647,29 +664,35 @@ Page({
         const file = res.tempFiles && res.tempFiles[0];
         if (!file) return;
         const path = file.tempFilePath;
-        wx.showLoading({ title: '1:1双角识码验真中...' });
+        wx.showLoading({ title: '内容安全检测中...' });
 
-        this.getFallbackCanvasNode(fallbackCanvas => {
-          verifyImageFile(path, fallbackCanvas)
-            .then(result => {
+        this.getFallbackCanvasNode(async fallbackCanvas => {
+          try {
+            const sec = await checkImageSecurity(path, fallbackCanvas);
+            if (!sec.pass) {
               wx.hideLoading();
-              if (result && result.ok && result.report) {
-                this.setData({
-                  showVerifyModal: true,
-                  verifyReport: result.report
-                });
-              } else {
-                wx.showToast({
-                  title: (result && result.reason) || '未检测到有效防伪定位码',
-                  icon: 'none',
-                  duration: 2400
-                });
-              }
-            })
-            .catch(() => {
-              wx.hideLoading();
-              wx.showToast({ title: '未检测到有效防伪定位码', icon: 'none' });
-            });
+              showViolationModal(sec.message);
+              return;
+            }
+            wx.showLoading({ title: '1:1双角识码验真中...' });
+            const result = await verifyImageFile(path, fallbackCanvas);
+            wx.hideLoading();
+            if (result && result.ok && result.report) {
+              this.setData({
+                showVerifyModal: true,
+                verifyReport: result.report
+              });
+            } else {
+              wx.showToast({
+                title: (result && result.reason) || '未检测到有效防伪定位码',
+                icon: 'none',
+                duration: 2400
+              });
+            }
+          } catch (err) {
+            wx.hideLoading();
+            wx.showToast({ title: '未检测到有效防伪定位码', icon: 'none' });
+          }
         });
       }
     });
@@ -679,10 +702,20 @@ Page({
     this.setData({ manualVerifyInput: e.detail.value });
   },
 
-  runManualTextVerify() {
+  async runManualTextVerify() {
     const raw = (this.data.manualVerifyInput || '').trim();
     if (!raw) {
       wx.showToast({ title: '请粘贴链接或二维码文本', icon: 'none' });
+      return;
+    }
+    wx.showLoading({ title: '内容安全检测中...' });
+    const sec = await checkTextsSecurity([raw], 3);
+    wx.hideLoading();
+    if (!sec.pass) {
+      if (sec.risky) {
+        this.setData({ manualVerifyInput: '' });
+      }
+      showViolationModal(sec.message);
       return;
     }
     const parsed = parseLocationPayload(raw);
@@ -1137,7 +1170,29 @@ Page({
   },
 
   // ==================== 快门拍摄与离屏双轨保存 ====================
-  handleShutterTap() {
+  async validateLiveTextsAndGuard(revertOnAnyFailure) {
+    this.flushInputBuffers();
+    const res = await checkTextsSecurity(
+      [this.data.customTitle, this.data.shortPoi, this.data.fullAddr, this.data.note],
+      3
+    );
+    if (res && res.pass) {
+      this._safeTextSnapshot = {
+        customTitle: this.data.customTitle,
+        shortPoi: this.data.shortPoi,
+        fullAddr: this.data.fullAddr,
+        note: this.data.note
+      };
+      return true;
+    }
+    if ((revertOnAnyFailure || (res && res.risky)) && this._safeTextSnapshot) {
+      this.setData(this._safeTextSnapshot);
+    }
+    showViolationModal(res && res.message);
+    return false;
+  },
+
+  async handleShutterTap() {
     if (this.data.countdownRemaining > 0) {
       if (this._countdownTimer) clearInterval(this._countdownTimer);
       this._countdownTimer = null;
@@ -1145,7 +1200,7 @@ Page({
       wx.showToast({ title: '已取消延时拍摄', icon: 'none' });
       return;
     }
-    if (this.isCompositing) return;
+    if (this.isCompositing || this._checkingBeforeShutter) return;
 
     this.flushInputBuffers();
 
@@ -1164,6 +1219,15 @@ Page({
       });
       return;
     }
+
+    this._checkingBeforeShutter = true;
+    let safeOk = false;
+    try {
+      safeOk = await this.validateLiveTextsAndGuard();
+    } finally {
+      this._checkingBeforeShutter = false;
+    }
+    if (!safeOk) return;
 
     if (this.data.timerSeconds > 0) {
       let rem = this.data.timerSeconds;
@@ -1363,9 +1427,9 @@ Page({
       showPoiModal: true
     });
   },
-  closePoiQuickModal() {
-    this.flushInputBuffers();
-    this.persistUserConfig();
+  async closePoiQuickModal() {
+    const ok = await this.validateLiveTextsAndGuard(true);
+    if (ok) this.persistUserConfig();
     this.setData({ showPoiModal: false });
   },
   openSettingsModal() {
@@ -1387,13 +1451,16 @@ Page({
       showWmModal: true
     });
   },
-  closeWatermarkModal() {
-    this.flushInputBuffers();
-    this.persistUserConfig();
+  async closeWatermarkModal() {
+    const ok = await this.validateLiveTextsAndGuard(true);
+    if (ok) this.persistUserConfig();
     this.setData({ showWmModal: false });
   },
-  applyWatermarkCustomization() {
-    this.flushInputBuffers();
+  async applyWatermarkCustomization() {
+    wx.showLoading({ title: '内容安全检测中...' });
+    const ok = await this.validateLiveTextsAndGuard(false);
+    wx.hideLoading();
+    if (!ok) return;
     this.persistUserConfig();
     this.setData({ showWmModal: false });
     wx.showToast({ title: '水印设置已实时生效', icon: 'none' });

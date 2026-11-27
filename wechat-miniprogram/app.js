@@ -4,6 +4,7 @@
  */
 
 const { runOrphanFileGC } = require('./utils/photo_store.js');
+const { initCloudSecurity } = require('./utils/sec_check.js');
 
 App({
   globalData: {
@@ -19,6 +20,7 @@ App({
   },
 
   onLaunch(options) {
+    initCloudSecurity();
     if (options && options.query && Object.keys(options.query).length > 0) {
       this.globalData.launchQuery = options.query;
     }

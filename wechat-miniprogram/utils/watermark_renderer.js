@@ -838,6 +838,9 @@ function renderWatermarkToTempFile(rawImagePath, cfg, options) {
 module.exports = {
   MAX_EXPORT_EDGE,
   THUMB_WIDTH,
+  createCanvasInstance,
+  loadCanvasImage,
+  exportCanvasToJpg,
   drawCanvasVectorMiniMap,
   drawCanvasWatermarkAndQr,
   renderWatermarkToTempFile

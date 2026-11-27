@@ -13,4 +13,5 @@ captures
 project.private.config.json
 *.private.config.json
 project.config.json
+**/node_modules/
 
