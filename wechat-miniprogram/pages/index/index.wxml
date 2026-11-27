@@ -227,6 +227,7 @@
           </view>
           <view wx:if="{{hasRealFix || isManualCoord}}" class="source-coord-line mono">WGS-84: {{wgsLat}}°N, {{wgsLon}}°E</view>
           <view wx:if="{{hasRealFix || isManualCoord}}" class="source-coord-line sub mono">GCJ-02: {{gcjLat}}°N, {{gcjLon}}°E</view>
+          <view wx:if="{{poiStatusHint}}" class="source-coord-line sub amber">{{poiStatusHint}}</view>
         </view>
 
         <view class="setting-section-label">

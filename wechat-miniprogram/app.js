@@ -17,6 +17,11 @@ App({
     // 留空时自动通过云函数 regeoPoi 获取服务端权威授时，无需额外域名配置
     ntpConfig: {
       endpoint: ''
+    },
+    // 可选：如暂未部署 regeoPoi 云函数且已在公众平台配置 request 合法域名，可在此直填 Key 兜底
+    poiConfig: {
+      qqMapKey: '',
+      amapKey: ''
     }
   },
 

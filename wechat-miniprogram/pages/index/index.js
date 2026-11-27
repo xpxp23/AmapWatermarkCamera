@@ -113,6 +113,7 @@ Page({
     hasCustomPoi: false,
     poiResolved: false,
     poiLoading: false,
+    poiStatusHint: '',
     isManualCoord: false,
     rawGcjLat: 0,
     rawGcjLon: 0,
@@ -718,25 +719,65 @@ Page({
 
   // ==================== 定位与自动周边微信地点 (POI) 识别 ====================
   startHighAccuracyLocation(forceOverwriteManual, interactive) {
+    const onSuccess = res => {
+      if (this._locationDenied) {
+        this._locationDenied = false;
+        this.setData({ locationDenied: false });
+        this.startContinuousLocationTracking();
+      }
+      this.recordHardwareGpsFix(
+        res.latitude,
+        res.longitude,
+        res.accuracy,
+        res.altitude,
+        Boolean(forceOverwriteManual)
+      );
+    };
+
+    const handleFinalFail = err => {
+      const msg = (err && err.errMsg) || '';
+      const isDenied =
+        msg.indexOf('auth deny') !== -1 ||
+        msg.indexOf('authorize') !== -1 ||
+        msg.indexOf('denied') !== -1;
+      if (isDenied) {
+        this._locationDenied = true;
+        this.stopLocationPolling();
+        this.setData({
+          locationDenied: true,
+          shortPoi: '未开启定位',
+          poiStatusHint: '请在小程序设置中开启「位置信息」权限'
+        });
+        if (interactive) {
+          promptOpenSetting(
+            'scope.userLocation',
+            '需要位置信息权限',
+            '定位权限已关闭，无法获取真实 GPS 经纬度与周边地点。请在设置中开启「位置信息」权限。'
+          ).then(granted => {
+            if (granted) {
+              this._locationDenied = false;
+              this.setData({ locationDenied: false });
+              this.startHighAccuracyLocation(true, false);
+              this.startContinuousLocationTracking();
+            }
+          });
+        }
+        return;
+      }
+      if (!this.data.hasRealFix && this.data.shortPoi === '定位中...') {
+        this.setData({
+          shortPoi: '实拍点位',
+          poiStatusHint: '定位暂未返回，请确认手机定位服务已开启'
+        });
+      }
+    };
+
     wx.getLocation({
       type: 'gcj02',
       altitude: true,
       isHighAccuracy: true,
       highAccuracyExpireTime: 3200,
-      success: res => {
-        if (this._locationDenied) {
-          this._locationDenied = false;
-          this.setData({ locationDenied: false });
-          this.startContinuousLocationTracking();
-        }
-        this.recordHardwareGpsFix(
-          res.latitude,
-          res.longitude,
-          res.accuracy,
-          res.altitude,
-          Boolean(forceOverwriteManual)
-        );
-      },
+      success: onSuccess,
       fail: err => {
         const msg = (err && err.errMsg) || '';
         const isDenied =
@@ -744,28 +785,15 @@ Page({
           msg.indexOf('authorize') !== -1 ||
           msg.indexOf('denied') !== -1;
         if (isDenied) {
-          this._locationDenied = true;
-          this.stopLocationPolling();
-          this.setData({ locationDenied: true, shortPoi: '未开启定位' });
-          if (interactive) {
-            promptOpenSetting(
-              'scope.userLocation',
-              '需要位置信息权限',
-              '定位权限已关闭，无法获取真实 GPS 经纬度与周边地点。请在设置中开启「位置信息」权限。'
-            ).then(granted => {
-              if (granted) {
-                this._locationDenied = false;
-                this.setData({ locationDenied: false });
-                this.startHighAccuracyLocation(true, false);
-                this.startContinuousLocationTracking();
-              }
-            });
-          }
+          handleFinalFail(err);
           return;
         }
-        if (!this.data.hasRealFix && this.data.shortPoi === '定位中...') {
-          this.setData({ shortPoi: '实拍点位' });
-        }
+        // 室内/弱信号高精度或海拔超时时，自动降级为标准 GCJ-02 定位，确保一定拿到坐标
+        wx.getLocation({
+          type: 'gcj02',
+          success: onSuccess,
+          fail: handleFinalFail
+        });
       }
     });
   },
@@ -834,12 +862,16 @@ Page({
 
     if (res.ok && res.resolved && res.shortPoi) {
       patch.poiResolved = true;
+      patch.poiStatusHint = res.unconfigured
+        ? '已用免费逆地理自动识别（配置 QQMAP_KEY 可识别精确商铺/小区）'
+        : '';
       if (!this.data.hasCustomPoi || forceRefresh) {
         patch.shortPoi = res.shortPoi;
         patch.fullAddr = res.fullAddr || this.data.fullAddr;
       }
     } else {
       patch.poiResolved = false;
+      patch.poiStatusHint = res.debugReason || '暂未识别到周边地点，请点击刷新定位或检查网络';
       if (this.data.shortPoi === '识别周边地点...' || this.data.shortPoi === '定位中...') {
         patch.shortPoi = '实拍点位';
       }
@@ -1595,6 +1627,11 @@ Page({
     if (this.data.locationDenied) {
       this.startHighAccuracyLocation(true, true);
       return;
+    }
+    if (!this.data.hasRealFix && !this.data.isManualCoord) {
+      this.startHighAccuracyLocation(false, true);
+    } else if (this.data.hasRealFix && !this.data.poiResolved && !this.data.poiLoading) {
+      this.autoResolveNearbyPoi(this.data.gcjLat, this.data.gcjLon, true);
     }
     this.setData({
       showSettings: false,
