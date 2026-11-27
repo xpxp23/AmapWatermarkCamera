@@ -12,7 +12,7 @@ const {
   gcj02ToWgs84
 } = require('../../../utils/coord_qr.js');
 
-const { readImageExifLite } = require('../../../utils/exif_lite.js');
+const { readImageExifLite } = require('../../utils/exif_lite.js');
 const { renderWatermarkToTempFile } = require('../../../utils/watermark_renderer.js');
 const { ensureAlbumWritePermission } = require('../../../utils/privacy.js');
 const { loadUserConfig } = require('../../../utils/photo_store.js');

@@ -32,6 +32,7 @@
     "packNpmRelationList": [],
     "minifyWXSS": true,
     "minifyWXML": true,
+    "ignoreUploadUnusedFiles": true,
     "localPlugins": false,
     "disableUseStrict": false,
     "condition": false,

@@ -3,7 +3,7 @@
  * 仅读取图片前 64KB 头部字节，零依赖解析 APP1 Exif 中的 DateTimeOriginal 与 GPS 经纬度/海拔
  */
 
-const { wgs84ToGcj02, formatTimeFromDate } = require('./coord_qr.js');
+const { wgs84ToGcj02, formatTimeFromDate } = require('../../utils/coord_qr.js');
 
 const EXIF_HEAD_BYTES = 65536;
 
