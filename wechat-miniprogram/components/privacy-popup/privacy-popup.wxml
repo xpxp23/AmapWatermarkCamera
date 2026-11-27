@@ -1,0 +1,19 @@
+<view wx:if="{{visible}}" class="privacy-mask" catchtap="noop">
+  <view class="privacy-card" catchtap="noop">
+    <view class="privacy-title">用户隐私保护指引</view>
+    <view class="privacy-desc">
+      在使用相机实景拍摄、获取实时定位生成水印及保存至系统相册前，请阅读并同意
+      <text class="privacy-link" bindtap="openPrivacyContract">《用户隐私保护指引》</text>
+      。我们仅在您使用对应功能时申请必要权限。
+    </view>
+    <view class="privacy-actions">
+      <button class="privacy-btn cancel" bindtap="handleDisagree">暂不同意</button>
+      <button
+        id="agree-privacy-btn"
+        class="privacy-btn confirm"
+        open-type="agreePrivacyAuthorization"
+        bindagreeprivacyauthorization="handleAgree"
+      >同意并继续</button>
+    </view>
+  </view>
+</view>

@@ -1,6 +1,8 @@
 /**
- * 极速高德水印相机 v9.0.0 · 实时水印预览独立组件 (<watermark-overlay>)
- * 承载 5 套水印模板的实时所见即所得渲染，1s 时钟刷新仅在组件内局部 setData，彻底避免主页面整页 Diff
+ * 极速高德水印相机 v1.0 · 实时水印预览独立组件 (<watermark-overlay>)
+ * - 彻底移除 160px 假小图，拓宽卡片与网格排版宽度
+ * - 未开启防伪模式时跳过无意义 SHA-256 计算
+ * - 无真实定位或无真实海拔时优雅降级，绝不展示假天安门坐标或假 46.5m
  */
 
 const {
@@ -22,20 +24,19 @@ Component({
     accentHex: { type: String, value: '#38bdf8' },
     fontScale: { type: Number, value: 1 },
     cardBgRgba: { type: String, value: 'rgba(11, 19, 43, 0.84)' },
-    gcjLat: { type: Number, value: 39.908823 },
-    gcjLon: { type: Number, value: 116.397470 },
-    wgsLat: { type: Number, value: 39.907419 },
-    wgsLon: { type: Number, value: 116.391228 },
+    gcjLat: { type: Number, value: 0 },
+    gcjLon: { type: Number, value: 0 },
+    wgsLat: { type: Number, value: 0 },
+    wgsLon: { type: Number, value: 0 },
     hasRealFix: { type: Boolean, value: false },
-    accuracy: { type: String, value: '2.4' },
-    altitude: { type: String, value: '46.5' },
-    azimuthText: { type: String, value: '正北 000°' },
+    isManualCoord: { type: Boolean, value: false },
+    accuracy: { type: String, value: '' },
+    altitude: { type: String, value: '' },
+    azimuthText: { type: String, value: '' },
     shortPoi: { type: String, value: '实拍点位' },
     fullAddr: { type: String, value: '' },
     note: { type: String, value: '' },
     showQr: { type: Boolean, value: true },
-    showMiniMap: { type: Boolean, value: true },
-    miniMapPosition: { type: Number, value: 0 },
     bottomRight: { type: Boolean, value: false },
     antiTamperMode: { type: Boolean, value: false },
     ntpSynced: { type: Boolean, value: false },
@@ -51,15 +52,17 @@ Component({
   },
 
   data: {
-    timeHm: '09:20',
-    timeHms: '09:20:00',
-    dateOnlyStr: '2026-11-24',
-    weekStr: '星期二',
-    dateWeek: '2026-11-24 星期二',
-    fullTs: '2026-11-24 09:20:00',
-    liveCoordOnlyStr: '39.907419°N, 116.391228°E',
-    liveCoordStr: '39.907419°N, 116.391228°E [WGS-84] ±2.4m',
-    liveAntiTamperShort: '待真实GPS定位'
+    timeHm: '--:--',
+    timeHms: '--:--:--',
+    dateOnlyStr: '',
+    weekStr: '',
+    dateWeek: '',
+    fullTs: '',
+    hasValidCoord: false,
+    liveCoordOnlyStr: '定位校准中...',
+    liveCoordStr: '定位校准中...',
+    liveEnvStr: '',
+    liveAntiTamperShort: ''
   },
 
   lifetimes: {
@@ -83,7 +86,7 @@ Component({
         this._stopClock();
       }
     },
-    'coordSys, useDms, gcjLat, gcjLon, wgsLat, wgsLon, accuracy, showCoordTag, showAccuracy, shortPoi, note, antiTamperMode, hasRealFix, ntpOffsetMs'() {
+    'coordSys, useDms, gcjLat, gcjLon, wgsLat, wgsLon, accuracy, altitude, azimuthText, showCoordTag, showAccuracy, showEnv, shortPoi, note, antiTamperMode, hasRealFix, isManualCoord, ntpOffsetMs'() {
       this._refreshAll();
     }
   },
@@ -104,6 +107,7 @@ Component({
     },
 
     _computeSig(fullTs) {
+      if (!this.data.antiTamperMode) return '';
       if (!canSignAntiTamper(this.data.hasRealFix, this.data.gcjLat, this.data.gcjLon)) {
         return '待真实GPS定位';
       }
@@ -116,18 +120,41 @@ Component({
       ).slice(0, 12);
     },
 
+    _buildEnvStr() {
+      if (!this.data.showEnv) return '';
+      const parts = [];
+      if (this.data.altitude !== '' && this.data.altitude !== null && this.data.altitude !== undefined) {
+        parts.push(`海拔 ${this.data.altitude}m`);
+      }
+      if (this.data.azimuthText) {
+        parts.push(`方位 ${this.data.azimuthText}`);
+      }
+      return parts.join(' · ');
+    },
+
     _refreshAll() {
       const t = getTimeStrings(this.data.ntpOffsetMs);
-      const resolved = resolveDisplayCoordinates(
-        this.data.coordSys,
-        this.data.gcjLat,
-        this.data.gcjLon,
-        this.data.wgsLat,
-        this.data.wgsLon
+      const validCoord = Boolean(
+        (this.data.hasRealFix || this.data.isManualCoord) &&
+        !(Number(this.data.gcjLat) === 0 && Number(this.data.gcjLon) === 0)
       );
-      const coordOnly = formatCoords(resolved.lat, resolved.lon, this.data.useDms);
-      const tagPart = this.data.showCoordTag ? ` [${resolved.tag}]` : '';
-      const accPart = this.data.showAccuracy ? ` ±${this.data.accuracy}m` : '';
+
+      let coordOnly = '定位校准中...';
+      let coordFull = '定位校准中...';
+      if (validCoord) {
+        const resolved = resolveDisplayCoordinates(
+          this.data.coordSys,
+          this.data.gcjLat,
+          this.data.gcjLon,
+          this.data.wgsLat,
+          this.data.wgsLon
+        );
+        coordOnly = formatCoords(resolved.lat, resolved.lon, this.data.useDms);
+        const tagPart = this.data.showCoordTag ? ` [${resolved.tag}]` : '';
+        const accPart = this.data.showAccuracy && this.data.accuracy ? ` ±${this.data.accuracy}m` : '';
+        coordFull = `${coordOnly}${tagPart}${accPart}`;
+      }
+
       this.setData({
         timeHm: t.hm,
         timeHms: t.hms,
@@ -135,8 +162,10 @@ Component({
         weekStr: t.weekStr,
         dateWeek: t.dateWeek,
         fullTs: t.fullTs,
+        hasValidCoord: validCoord,
         liveCoordOnlyStr: coordOnly,
-        liveCoordStr: `${coordOnly}${tagPart}${accPart}`,
+        liveCoordStr: coordFull,
+        liveEnvStr: this._buildEnvStr(),
         liveAntiTamperShort: this._computeSig(t.fullTs)
       });
     },

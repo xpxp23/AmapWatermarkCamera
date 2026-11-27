@@ -1,5 +1,5 @@
 /**
- * 极速高德水印相机 v9.0.0 · 独立相册分包 · 网格相册页 (packageAlbum/pages/gallery)
+ * 极速高德水印相机 v1.0 · 独立相册分包 · 网格相册页 (packageAlbum/pages/gallery)
  * 特性：
  * - 仅加载 240px 缩略图 thumbPath + lazy-load，100 张显存 < 8MB
  * - 按日期吸顶分组的 3 列正方形网格，极简角标（左下防伪盾牌/可编辑标记，右下时间）
@@ -24,9 +24,10 @@ const {
 } = require('../../../utils/privacy.js');
 
 const {
-  checkImageSecurity,
-  showViolationModal
-} = require('../../../utils/sec_check.js');
+  getOfflinePendingCount,
+  removeOfflinePhoto,
+  reconcileOfflineQueue
+} = require('../../../utils/offline_queue.js');
 
 function saveOneToAlbum(filePath) {
   return new Promise((resolve, reject) => {
@@ -58,6 +59,7 @@ function groupPhotosByDate(photos) {
       wmPath: p.wmPath || '',
       hasRaw: Boolean(p.rawPath),
       antiTamper: Boolean(cfg.antiTamperMode),
+      offlinePending: Boolean(cfg.offlinePending),
       hm,
       shortPoi: cfg.shortPoi || '实拍点位'
     });
@@ -88,6 +90,8 @@ Page({
     multiSelectMode: false,
     selectedMap: {},
     selectedCount: 0,
+    offlinePendingCount: 0,
+    isReconcilingOffline: false,
     showVerifyModal: false,
     verifyReport: null
   },
@@ -124,7 +128,8 @@ Page({
       dateGroups,
       selectedMap: {},
       selectedCount: 0,
-      multiSelectMode: photos.length === 0 ? false : this.data.multiSelectMode
+      multiSelectMode: photos.length === 0 ? false : this.data.multiSelectMode,
+      offlinePendingCount: getOfflinePendingCount()
     });
     estimateStorageUsage().then(storage => {
       this.setData({ storage });
@@ -198,16 +203,9 @@ Page({
       success: async res => {
         const file = res && res.tempFiles && res.tempFiles[0];
         if (!file) return;
-        wx.showLoading({ title: '内容安全检测中...' });
+        wx.showLoading({ title: '1:1双角识码验真中...' });
         try {
           const fc = await this.getVerifyFallbackCanvas();
-          const sec = await checkImageSecurity(file.tempFilePath, fc);
-          if (!sec.pass) {
-            wx.hideLoading();
-            showViolationModal(sec.message);
-            return;
-          }
-          wx.showLoading({ title: '1:1双角识码验真中...' });
           const result = await verifyImageFile(file.tempFilePath, fc);
           wx.hideLoading();
           if (result && result.ok && result.report) {
@@ -311,7 +309,7 @@ Page({
       wx.showToast({ title: '请先勾选照片', icon: 'none' });
       return;
     }
-    const lines = [`【极速高德水印相机 v9.0.0 · 批量外业台账 (${selected.length}条)】`];
+    const lines = [`【极速高德水印相机 v1.0 · 批量外业台账 (${selected.length}条)】`];
     selected.forEach((p, idx) => {
       const c = p.cfg || {};
       const lockTag = c.antiTamperMode ? `🛡防伪(${(c.antiTamperHash || '').slice(0, 12)})` : '普通水印';
@@ -341,7 +339,9 @@ Page({
       confirmText: '确认删除',
       success: res => {
         if (!res.confirm) return;
-        deletePhotosByIds(selected.map(p => p.id));
+        const ids = selected.map(p => p.id);
+        ids.forEach(id => removeOfflinePhoto(id));
+        deletePhotosByIds(ids);
         this.setData({ multiSelectMode: false });
         this.reloadGalleryData();
         wx.showToast({ title: `已删除 ${selected.length} 张照片`, icon: 'none' });
@@ -365,6 +365,37 @@ Page({
           resolve(node || null);
         });
     });
+  },
+
+  async handleReconcileOffline() {
+    if (this.data.isReconcilingOffline) return;
+    const cnt = getOfflinePendingCount();
+    if (cnt === 0) return;
+    this.setData({ isReconcilingOffline: true });
+    wx.showLoading({ title: `正在补签授时 (0/${cnt})...` });
+    try {
+      const fc = await this.getVerifyFallbackCanvas();
+      const res = await reconcileOfflineQueue({
+        fallbackCanvas: fc,
+        onProgress: ({ current, total }) => {
+          wx.showLoading({ title: `正在补签 (${current}/${total})...` });
+        }
+      });
+      wx.hideLoading();
+      this.reloadGalleryData();
+      if (res.offline) {
+        wx.showToast({ title: '当前无网络，联网后可自动补签', icon: 'none' });
+      } else if (res.reconciled > 0) {
+        wx.showToast({ title: `已完成 ${res.reconciled} 张离线照片补签`, icon: 'success' });
+      } else {
+        wx.showToast({ title: '暂无需补签项', icon: 'none' });
+      }
+    } catch (e) {
+      wx.hideLoading();
+      wx.showToast({ title: '补签失败，请稍后重试', icon: 'none' });
+    } finally {
+      this.setData({ isReconcilingOffline: false });
+    }
   },
 
   noop() {}

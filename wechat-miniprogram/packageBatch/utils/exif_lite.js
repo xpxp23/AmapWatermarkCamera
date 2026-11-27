@@ -1,5 +1,5 @@
 /**
- * 极速高德水印相机 v9.0.0 · 轻量纯 JS JPEG EXIF 解析引擎
+ * 极速高德水印相机 v1.0 · 轻量纯 JS JPEG EXIF 解析引擎
  * 仅读取图片前 64KB 头部字节，零依赖解析 APP1 Exif 中的 DateTimeOriginal 与 GPS 经纬度/海拔
  */
 

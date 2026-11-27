@@ -1,5 +1,5 @@
 /**
- * 极速高德水印相机 v9.0.0 · 独立相册分包 · 照片详情与无损重绘页 (packageAlbum/pages/detail)
+ * 极速高德水印相机 v1.0 · 独立相册分包 · 照片详情与无损重绘页 (packageAlbum/pages/detail)
  * 特性：
  * - 全屏 <swiper> 左右滑切，点击大图调用 wx.previewImage 双指缩放
  * - 底部极简悬浮 4 键栏：导航 | 转发 | 改水印/已锁 | 详情
@@ -31,7 +31,7 @@ const {
 } = require('../../../utils/photo_store.js');
 
 const { saveImageToAlbumWithPermission } = require('../../../utils/privacy.js');
-const { checkTextsSecurity, showViolationModal } = require('../../../utils/sec_check.js');
+const { removeOfflinePhoto } = require('../../../utils/offline_queue.js');
 
 const TPL_NAMES = ['大字时间', '巡检卡片', '网格测绘', '胶片底栏', '标准台账'];
 
@@ -190,6 +190,7 @@ Page({
       confirmText: '确认删除',
       success: res => {
         if (!res.confirm) return;
+        removeOfflinePhoto(cur.id);
         const remaining = deletePhotosByIds([cur.id]);
         if (remaining.length === 0) {
           wx.navigateBack();
@@ -234,7 +235,10 @@ Page({
     }
 
     const cloned = JSON.parse(JSON.stringify(cur.cfg));
-    const datePart = cloned.dateOnlyStr || (cloned.fullTs ? cloned.fullTs.slice(0, 10) : '2026-11-24');
+    const nowObj = new Date();
+    const pad2 = n => (n < 10 ? '0' + n : '' + n);
+    const fallbackDate = `${nowObj.getFullYear()}-${pad2(nowObj.getMonth() + 1)}-${pad2(nowObj.getDate())}`;
+    const datePart = cloned.dateOnlyStr || (cloned.fullTs ? cloned.fullTs.slice(0, 10) : fallbackDate);
     const hmPart = cloned.hm || (cloned.fullTs ? cloned.fullTs.slice(11, 16) : '09:20');
     const secPart =
       cloned.hms && cloned.hms.length >= 8
@@ -250,9 +254,9 @@ Page({
       editTimeSec: secPart,
       editGcjLat: String(cloned.gcjLat),
       editGcjLon: String(cloned.gcjLon),
-      editAltitude: String(cloned.altitude || '46.5'),
+      editAltitude: String(cloned.altitude || ''),
       editAzimuthDeg: String(cloned.azimuthDeg || 0),
-      editAccuracy: String(cloned.accuracy || '2.4'),
+      editAccuracy: String(cloned.accuracy || ''),
       showBottomScrim: Boolean(cloned.showBottomScrim)
     };
 
@@ -354,13 +358,7 @@ Page({
       return;
     }
 
-    wx.showLoading({ title: '内容安全检测中...' });
-    const txtSec = await checkTextsSecurity([d.customTitle, d.shortPoi, d.fullAddr, d.note], 3);
-    if (!txtSec.pass) {
-      wx.hideLoading();
-      showViolationModal(txtSec.message);
-      return;
-    }
+
 
     const rawLat = parseFloat(d.editGcjLat);
     const rawLon = parseFloat(d.editGcjLon);
@@ -368,7 +366,10 @@ Page({
     const newGcjLon = !isNaN(rawLon) ? Number(rawLon.toFixed(6)) : cur.cfg.gcjLon;
     const newWgs = gcj02ToWgs84(newGcjLat, newGcjLon);
 
-    const dateStr = (d.editDatePart || cur.cfg.dateOnlyStr || '2026-11-24').trim();
+    const nowObj2 = new Date();
+    const pad2b = n => (n < 10 ? '0' + n : '' + n);
+    const todayStr = `${nowObj2.getFullYear()}-${pad2b(nowObj2.getMonth() + 1)}-${pad2b(nowObj2.getDate())}`;
+    const dateStr = (d.editDatePart || cur.cfg.dateOnlyStr || todayStr).trim();
     const hmStr = (d.editTimeHm || cur.cfg.hm || '09:20').trim();
     const secNum = Math.min(59, Math.max(0, parseInt(d.editTimeSec, 10) || 0));
     const secStr = secNum < 10 ? '0' + secNum : '' + secNum;
@@ -392,6 +393,8 @@ Page({
       shortPoi: d.shortPoi || '实拍点位',
       fullAddr: d.fullAddr || '',
       note: d.note || '',
+      hasRealFix: Boolean(cur.cfg.hasRealFix || (newGcjLat !== 0 || newGcjLon !== 0)),
+      isManualCoord: true,
       gcjLat: newGcjLat,
       gcjLon: newGcjLon,
       wgsLat: newWgs.lat,
@@ -402,14 +405,13 @@ Page({
       weekStr,
       dateWeek: dateWeekStr,
       fullTs: fullTsStr,
-      altitude: String(d.editAltitude || cur.cfg.altitude || '46.5'),
+      altitude: String(d.editAltitude !== undefined ? d.editAltitude : (cur.cfg.altitude || '')),
       azimuthDeg: azDeg,
       azimuthText: formatAzimuthText(azDeg),
-      accuracy: String(d.editAccuracy || cur.cfg.accuracy || '2.4'),
+      accuracy: String(d.editAccuracy !== undefined ? d.editAccuracy : (cur.cfg.accuracy || '')),
       showAddress: Boolean(d.showAddress),
       showEnv: Boolean(d.showEnv),
       showQr: d.showQr !== false,
-      showMiniMap: d.showMiniMap !== false,
       bottomRight: Boolean(d.bottomRight)
     };
 
@@ -462,7 +464,7 @@ Page({
     const cur = this.data.currentPhoto;
     if (!cur || !cur.cfg) {
       return {
-        title: '极速高德水印相机 v9.0',
+        title: '极速高德水印相机 v1.0',
         path: '/pages/index/index'
       };
     }
@@ -474,11 +476,12 @@ Page({
     const sig = isAnti
       ? String(c.antiTamperHash || computeAntiTamperHash(c.gcjLat, c.gcjLon, c.fullTs, c.shortPoi, c.note)).slice(0, 12)
       : '';
-    const sigParam = sig ? `&sig=${sig}&note=${note}` : '';
+    const ntpFlag = c.ntpSynced ? '1' : '0';
+    const extraParam = `&ntp=${ntpFlag}${note ? `&note=${note}` : ''}${sig ? `&sig=${sig}` : ''}`;
     return {
-      title: `📍 实拍定位：${c.shortPoi || '实拍点位'} (${c.gcjLat}°N, ${c.gcjLon}°E)`,
-      path: `/pages/index/index?act=jump&lat=${c.gcjLat}&lon=${c.gcjLon}&poi=${poi}&ts=${ts}${sigParam}`,
-      imageUrl: cur.wmPath || ''
+      title: `实拍定位：${c.shortPoi || '实拍点位'} (${c.gcjLat}°N, ${c.gcjLon}°E)`,
+      path: `/pages/index/index?act=jump&lat=${c.gcjLat}&lon=${c.gcjLon}&poi=${poi}&ts=${ts}${extraParam}`,
+      imageUrl: cur.thumbPath || cur.wmPath || ''
     };
   }
 });

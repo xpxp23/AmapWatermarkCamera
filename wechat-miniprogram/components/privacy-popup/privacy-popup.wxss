@@ -1,0 +1,75 @@
+.privacy-mask {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 48rpx;
+}
+
+.privacy-card {
+  width: 100%;
+  max-width: 600rpx;
+  background: #111827;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 28rpx;
+  padding: 40rpx 36rpx 32rpx;
+  box-sizing: border-box;
+}
+
+.privacy-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #f8fafc;
+  text-align: center;
+}
+
+.privacy-desc {
+  margin-top: 22rpx;
+  font-size: 26rpx;
+  line-height: 1.65;
+  color: #cbd5e1;
+}
+
+.privacy-link {
+  color: #38bdf8;
+  font-weight: 500;
+}
+
+.privacy-actions {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 34rpx;
+}
+
+.privacy-btn {
+  flex: 1;
+  height: 82rpx;
+  line-height: 82rpx;
+  border-radius: 18rpx;
+  font-size: 27rpx;
+  font-weight: 500;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+.privacy-btn::after {
+  border: none;
+}
+
+.privacy-btn.cancel {
+  background: rgba(51, 65, 85, 0.65);
+  color: #cbd5e1;
+}
+
+.privacy-btn.confirm {
+  background: #0284c7;
+  color: #ffffff;
+}

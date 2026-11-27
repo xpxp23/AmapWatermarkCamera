@@ -1,10 +1,11 @@
 /**
- * 极速高德水印相机 v9.0.0 · 微信云开发内容安全合规校验模块
+ * 极速高德水印相机 v1.0 · 微信云开发内容安全合规校验模块
  * 对接微信官方 openapi.security.imgSecCheck 与 openapi.security.msgSecCheck (v2)
  * 环境 ID：cloud1-d1gmv7jr01aacf3cc
  */
 
 const {
+  getImageInfoAsync,
   createCanvasInstance,
   loadCanvasImage,
   exportCanvasToJpg
@@ -74,7 +75,7 @@ function compressImageFallback(src) {
 }
 
 /**
- * 将任意分辨率图片安全缩绘为 <= 480px 的轻量 JPEG（符合 imgSecCheck <= 1MB / 750x1334 规范）
+ * 将任意分辨率图片安全缩绘为 <= 480px 的轻量 JPEG（先测宽高再建画布，根治左上角裁切漏检）
  */
 async function buildCompressedThumbForCheck(imagePath, fallbackCanvas) {
   let thumbPath = '';
@@ -84,18 +85,38 @@ async function buildCompressedThumbForCheck(imagePath, fallbackCanvas) {
   let img = null;
 
   try {
-    const wrap = createCanvasInstance(MAX_CHECK_EDGE, MAX_CHECK_EDGE, fallbackCanvas);
+    const info = await getImageInfoAsync(imagePath);
+    const iw0 = (info && info.width) || MAX_CHECK_EDGE;
+    const ih0 = (info && info.height) || MAX_CHECK_EDGE;
+    const ratio0 = Math.min(1, MAX_CHECK_EDGE / Math.max(iw0, ih0));
+    const tw0 = Math.max(1, Math.round(iw0 * ratio0));
+    const th0 = Math.max(1, Math.round(ih0 * ratio0));
+
+    const wrap = createCanvasInstance(tw0, th0, fallbackCanvas);
     canvas = wrap.canvas;
     isOffscreen = wrap.isOffscreen;
     if (canvas) {
       img = await loadCanvasImage(canvas, imagePath);
-      const iw = img.width || MAX_CHECK_EDGE;
-      const ih = img.height || MAX_CHECK_EDGE;
+      const iw = img.width || iw0;
+      const ih = img.height || ih0;
       const ratio = Math.min(1, MAX_CHECK_EDGE / Math.max(iw, ih));
       const tw = Math.max(1, Math.round(iw * ratio));
       const th = Math.max(1, Math.round(ih * ratio));
-      canvas.width = tw;
-      canvas.height = th;
+      if (tw !== canvas.width || th !== canvas.height) {
+        if (isOffscreen) {
+          try {
+            canvas.width = 1;
+            canvas.height = 1;
+          } catch (e) {}
+          const rebuilt = createCanvasInstance(tw, th, fallbackCanvas);
+          canvas = rebuilt.canvas;
+          isOffscreen = rebuilt.isOffscreen;
+          img = await loadCanvasImage(canvas, imagePath);
+        } else {
+          canvas.width = tw;
+          canvas.height = th;
+        }
+      }
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, tw, th);
@@ -169,7 +190,6 @@ async function checkImageSecurity(imagePath, fallbackCanvas) {
         contentType: 'image/jpeg'
       };
     } else {
-      // 超限降级通过临时云存储传 fileID，云函数侧检测完毕立即删除
       const cloudPath = `sec_tmp/${Date.now()}_${Math.floor(Math.random() * 100000)}.jpg`;
       const upRes = await wx.cloud.uploadFile({
         cloudPath,

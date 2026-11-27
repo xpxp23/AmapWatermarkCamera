@@ -1,5 +1,5 @@
 /**
- * 极速高德水印相机 v9.0.0 · 微信小程序三坐标系（默认 WGS-84 / 国标 CGCS2000 / 高德 GCJ-02）双向解耦引擎、
+ * 极速高德水印相机 v1.0 · 微信小程序三坐标系（默认 WGS-84 / 国标 CGCS2000 / 高德 GCJ-02）双向解耦引擎、
  * ISO/IEC 18004 V1-V14 全容量 8 掩码择优离线二维码引擎与 FIPS 180-4 SHA-256 外业防篡改验真引擎
  */
 
@@ -89,8 +89,11 @@ function isDefaultFallbackCoord(lat, lon) {
  */
 function canSignAntiTamper(hasRealFix, gcjLat, gcjLon) {
   if (!hasRealFix) return false;
-  if (isNaN(Number(gcjLat)) || isNaN(Number(gcjLon))) return false;
-  if (isDefaultFallbackCoord(gcjLat, gcjLon)) return false;
+  const lat = Number(gcjLat);
+  const lon = Number(gcjLon);
+  if (isNaN(lat) || isNaN(lon)) return false;
+  if (lat === 0 && lon === 0) return false;
+  if (isDefaultFallbackCoord(lat, lon)) return false;
   return true;
 }
 
@@ -777,55 +780,17 @@ function parseLocationPayload(rawInput) {
   return null;
 }
 
-const CITY_ANCHORS = [
-  { name: '北京中心区', city: '北京市朝阳区', lat: 39.908823, lon: 116.397470 },
-  { name: '上海陆家嘴', city: '上海市浦东新区', lat: 31.239702, lon: 121.499763 },
-  { name: '广州珠江新城', city: '广东省广州市天河区', lat: 23.119293, lon: 113.321206 },
-  { name: '深圳南山科技园', city: '广东省深圳市南山区', lat: 22.540503, lon: 113.953412 },
-  { name: '杭州西湖滨江', city: '浙江省杭州市西湖区', lat: 30.259244, lon: 120.219375 },
-  { name: '成都天府新区', city: '四川省成都市武侯区', lat: 30.657420, lon: 104.065840 },
-  { name: '武汉光谷片区', city: '湖北省武汉市洪山区', lat: 30.505600, lon: 114.408600 },
-  { name: '南京河西新城', city: '江苏省南京市建邺区', lat: 32.003600, lon: 118.732500 },
-  { name: '西安高新片区', city: '陕西省西安市雁塔区', lat: 34.218600, lon: 108.889100 },
-  { name: '重庆江北嘴', city: '重庆市江北区', lat: 29.571000, lon: 106.574000 }
-];
-
-function inferSmartPoiFromCoords(gcjLat, gcjLon) {
-  const lat = Number(gcjLat);
-  const lon = Number(gcjLon);
-  let nearest = null;
-  let minDegSq = 999999;
-  for (let i = 0; i < CITY_ANCHORS.length; i++) {
-    const c = CITY_ANCHORS[i];
-    const dSq = Math.pow(lat - c.lat, 2) + Math.pow(lon - c.lon, 2);
-    if (dSq < minDegSq) {
-      minDegSq = dSq;
-      nearest = c;
-    }
-  }
-  if (nearest && minDegSq < 0.25) {
-    return {
-      shortPoi: nearest.name,
-      fullAddr: `${nearest.city} · 实测定位网格`,
-      nearbyPois: [
-        nearest.name,
-        '实拍点位',
-        '1号巡检点',
-        '施工现场',
-        '隐蔽工程核验点',
-        '外业测绘基准桩'
-      ]
-    };
-  }
+function inferSmartPoiFromCoords() {
+  // 真实周边 POI 由 utils/poi_service.js 通过云函数逆地理编码动态获取；
+  // 此函数仅作为纯离线兜底快捷词，不再使用 10 城市 55km 粗粒度假地名误导用户
   return {
     shortPoi: '实拍点位',
     fullAddr: '',
     nearbyPois: [
       '实拍点位',
-      '1号巡检点',
       '施工现场',
+      '1号巡检点',
       '隐蔽工程验收点',
-      '测绘控制点A',
       '外业打卡现场'
     ]
   };

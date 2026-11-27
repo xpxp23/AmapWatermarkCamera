@@ -1,39 +1,33 @@
 <view class="page-root">
-  <!-- 1. 精简顶部相机工具栏 (5 键精准对齐微信胶囊，绝不撞击胶囊) -->
+  <!-- 1. 极简顶部 3 键工具栏（精准对齐微信胶囊，清爽克制） -->
   <view
     class="top-bar"
     style="padding-top: {{menuBtnTop}}px; min-height: {{menuBtnHeight}}px; padding-right: {{menuBtnRightSpace}}px;"
   >
-    <view class="top-left-group">
-      <view class="top-btn" bindtap="openSettingsModal">
-        <view class="top-icon-pill">⚙</view>
-        <text class="top-label">设置</text>
+    <view class="top-actions">
+      <view class="top-pill {{flashMode !== 'off' ? 'active' : ''}}" bindtap="cycleFlashMode">
+        <view class="ico ico-flash"></view>
+        <text class="top-pill-txt">{{flashLabel}}</text>
       </view>
 
-      <view class="top-btn" bindtap="toggleCaptureMode">
-        <view class="top-icon-pill {{captureMode === 'photo' ? 'accent' : 'amber'}}">{{captureMode === 'photo' ? '📷' : '⚡'}}</view>
-        <text class="top-label {{captureMode === 'photo' ? 'accent' : 'amber'}}">{{captureMode === 'photo' ? '光学' : '抓拍'}}</text>
+      <view class="top-pill" bindtap="flipCamera">
+        <view class="ico ico-flip"></view>
+        <text class="top-pill-txt">{{devicePosition === 'back' ? '后置' : '前置'}}</text>
       </view>
 
-      <view class="top-btn" bindtap="openVerifyEntrySheet">
-        <view class="top-icon-pill emerald">🛡</view>
-        <text class="top-label emerald">验真</text>
-      </view>
-
-      <view class="top-btn" bindtap="cycleFlashMode">
-        <view class="top-icon-pill {{flashMode !== 'off' ? 'amber' : ''}}">{{flashLabel}}</view>
-        <text class="top-label">闪光</text>
-      </view>
-
-      <view class="top-btn" bindtap="flipCamera">
-        <view class="top-icon-pill">🔄</view>
-        <text class="top-label">{{devicePosition === 'back' ? '后置' : '前置'}}</text>
+      <view class="top-pill {{antiTamperMode ? 'emerald-active' : ''}}" bindtap="openSettingsModal">
+        <view class="ico ico-gear"></view>
+        <text class="top-pill-txt">设置</text>
       </view>
     </view>
   </view>
 
-  <!-- 2. 中央实时取景器 (去掉 filter 样式恢复同层硬件渲染加速；离页卸载 camera 释放 100MB+ 显存) -->
-  <view class="viewfinder-wrap">
+  <!-- 2. 沉浸式中央取景器（支持轻点对焦 + 左右滑动切模板） -->
+  <view
+    class="viewfinder-wrap"
+    bindtouchstart="onViewfinderTouchStart"
+    bindtouchend="onViewfinderTouchEnd"
+  >
     <camera
       wx:if="{{pageActive}}"
       class="camera-view"
@@ -46,13 +40,13 @@
     ></camera>
 
     <view wx:if="{{pageActive}}" class="viewfinder-hud-layer">
-      <!-- 冷启动毛玻璃过渡层 -->
+      <!-- 冷启动过渡层 -->
       <view wx:if="{{!cameraReady}}" class="camera-boot-overlay">
         <view class="boot-lens-ring">
           <view class="boot-lens-core"></view>
         </view>
-        <text class="boot-title">正在开启光学高清取景...</text>
-        <text class="boot-sub">极速高德水印相机 v9.0 · {{coordSys}}</text>
+        <text class="boot-title">正在开启高清取景...</text>
+        <text class="boot-sub">极速高德水印相机 v1.0</text>
       </view>
 
       <!-- 九宫格构图辅助线 -->
@@ -63,18 +57,37 @@
         <view class="grid-h h2"></view>
       </view>
 
-      <!-- 顶部实时状态胶囊 -->
-      <view class="gps-pill" bindtap="openPoiQuickModal">
-        <view class="gps-dot {{locationDenied ? 'denied' : (isManualCoord ? 'manual' : (hasRealFix ? 'fixed' : 'searching'))}}"></view>
-        <text class="gps-pill-text">{{locationDenied ? '定位权限已关·点此开启' : (coordSys + ' · ' + (isManualCoord ? '📌手动选点' : ('±' + accuracy + 'm')) + ' · ' + (antiTamperMode ? '🛡防伪锁定' : (captureMode === 'photo' ? '光学高清' : '极速抓拍')))}}</text>
+      <!-- 轻点对焦指示框 -->
+      <view
+        wx:if="{{focusRingVisible}}"
+        class="focus-reticle"
+        style="left: {{focusX}}px; top: {{focusY}}px;"
+      ></view>
+
+      <!-- 横滑切换模板居中提示 -->
+      <view wx:if="{{templateToastText}}" class="tpl-hud-toast">
+        {{templateToastText}}
       </view>
 
-      <!-- 右侧光学变焦倍率快切胶囊 -->
-      <view class="zoom-floating-btn" catchtap="cycleCameraZoom">
-        <text class="zoom-txt">{{zoomRatioStr}}</text>
+      <!-- 顶部简洁状态栏：当前自动识别地点 + 精度 + 防伪/合成/离线状态 -->
+      <view class="hud-top-stack">
+        <view class="gps-pill" catchtouchstart="noop" catchtouchend="noop" catchtap="openPoiQuickModal">
+          <view class="gps-dot {{locationDenied ? 'denied' : (isManualCoord ? 'manual' : (hasRealFix ? 'fixed' : 'searching'))}}"></view>
+          <text class="gps-pill-poi">{{locationDenied ? '定位已关 · 点此开启' : shortPoi}}</text>
+          <text wx:if="{{!locationDenied && hasRealFix && accuracy}}" class="gps-pill-meta">±{{accuracy}}m</text>
+          <text wx:if="{{antiTamperMode}}" class="gps-pill-lock">防伪</text>
+        </view>
+
+        <view wx:if="{{pendingComposeCount > 0}}" class="status-chip blue">
+          后台合成中 ({{pendingComposeCount}})
+        </view>
+
+        <view wx:if="{{offlinePendingCount > 0}}" class="status-chip amber" catchtouchstart="noop" catchtouchend="noop" catchtap="onTapOfflineReconcile">
+          {{isReconcilingOffline ? '正在补签授时...' : ('离线待补签 ' + offlinePendingCount + ' 张 · 点此补签')}}
+        </view>
       </view>
 
-      <!-- 倒计时拍摄大字读秒层 -->
+      <!-- 倒计时读秒层 -->
       <view wx:if="{{countdownRemaining > 0}}" class="countdown-overlay">
         <text class="countdown-num">{{countdownRemaining}}</text>
       </view>
@@ -82,20 +95,20 @@
       <!-- 快门闪白动效 -->
       <view wx:if="{{shutterFlashVisible}}" class="shutter-flash-mask"></view>
 
-      <!-- 好友分享位置 & SHA-256 防伪核验横幅 -->
-      <view wx:if="{{sharedBannerVisible}}" class="shared-jump-banner">
-        <view class="shared-banner-title">📍 收到实拍位置：{{sharedPoint.shortPoi}}</view>
-        <view class="shared-banner-coord">高德 GCJ-02: {{sharedPoint.gcjLat}}°N, {{sharedPoint.gcjLon}}°E</view>
+      <!-- 好友分享位置横幅 -->
+      <view wx:if="{{sharedBannerVisible}}" class="shared-jump-banner" catchtouchstart="noop" catchtouchend="noop" catchtap="noop">
+        <view class="shared-banner-title">收到实拍位置：{{sharedPoint.shortPoi}}</view>
+        <view class="shared-banner-coord mono">GCJ-02: {{sharedPoint.gcjLat}}°N, {{sharedPoint.gcjLon}}°E</view>
         <view wx:if="{{sharedPoint.hasAntiTamper}}" class="shared-banner-verify {{sharedPoint.verified ? 'ok' : 'warn'}}">
-          {{sharedPoint.verified ? '🛡 SHA-256 防篡改签名核验通过 · 真实原片坐标' : '⚠️ 防伪签名不匹配，坐标或时间可能被修改'}}
+          {{sharedPoint.verified ? 'SHA-256 完整性核验通过' : '签名不匹配，坐标或时间可能已修改'}}
         </view>
         <view class="shared-banner-actions">
-          <view class="shared-btn-nav" bindtap="openSharedLocationInMap">🧭 立即唤起高德地图导航</view>
+          <view class="shared-btn-nav" bindtap="openSharedLocationInMap">打开高德地图导航</view>
           <view class="shared-btn-close" bindtap="closeSharedBanner">关闭</view>
         </view>
       </view>
 
-      <!-- 独立实时水印预览组件 (1s 时钟刷新仅触发组件内局部 setData) -->
+      <!-- 独立实时水印预览组件 -->
       <watermark-overlay
         active="{{pageActive}}"
         styleTemplate="{{styleTemplate}}"
@@ -111,6 +124,7 @@
         wgsLat="{{wgsLat}}"
         wgsLon="{{wgsLon}}"
         hasRealFix="{{hasRealFix}}"
+        isManualCoord="{{isManualCoord}}"
         accuracy="{{accuracy}}"
         altitude="{{altitude}}"
         azimuthText="{{azimuthText}}"
@@ -118,8 +132,6 @@
         fullAddr="{{fullAddr}}"
         note="{{note}}"
         showQr="{{showQr}}"
-        showMiniMap="{{showMiniMap}}"
-        miniMapPosition="{{miniMapPosition}}"
         bottomRight="{{bottomRight}}"
         antiTamperMode="{{antiTamperMode}}"
         ntpSynced="{{ntpSynced}}"
@@ -139,53 +151,57 @@
     </view>
   </view>
 
-  <!-- 5 款专业模板一键快切栏 -->
-  <view class="tpl-bar">
-    <view
-      wx:for="{{tplNames}}"
-      wx:key="index"
-      class="tpl-pill {{styleTemplate === index ? 'active' : ''}}"
-      data-idx="{{index}}"
-      bindtap="selectTemplate"
-    >
-      {{item}}
-    </view>
-  </view>
-
-  <!-- 3. 底部主控栏 (相册 | 地点校准 | 快门 | 批量水印 | 水印设置) 对称 5 槽布局 -->
-  <view class="bottom-bar">
-    <view class="bot-btn" bindtap="openAlbumGalleryPage">
-      <image wx:if="{{latestPhotoThumb}}" src="{{latestPhotoThumb}}" class="thumb-circle" mode="aspectFill" />
-      <view wx:else class="thumb-placeholder">🖼</view>
-      <text class="bot-label">相册({{photoCount}})</text>
+  <!-- 精简底部控制区：变焦胶囊 + 经典 3 槽主控栏（相册 | 快门 | 水印） -->
+  <view class="bottom-dock">
+    <view class="zoom-bar">
+      <view
+        wx:for="{{zoomSteps}}"
+        wx:key="val"
+        class="zoom-chip {{zoomRatio === item.val ? 'active' : ''}}"
+        data-zoom="{{item.val}}"
+        bindtap="selectZoomRatio"
+      >{{item.label}}</view>
     </view>
 
-    <view class="bot-btn" bindtap="openPoiQuickModal">
-      <view class="bot-icon-ring">📍</view>
-      <text class="bot-label">地点校准</text>
-    </view>
-
-    <view class="shutter-outer {{countdownRemaining > 0 ? 'counting' : (captureMode === 'photo' ? 'optical' : '')}}" bindtap="handleShutterTap">
-      <view class="shutter-inner">
-        <text wx:if="{{countdownRemaining > 0}}" class="shutter-stop-txt">停止</text>
+    <view class="bottom-bar">
+      <view class="dock-side-btn" bindtap="openAlbumGalleryPage">
+        <view class="thumb-wrap">
+          <image wx:if="{{latestPhotoThumb}}" src="{{latestPhotoThumb}}" class="thumb-circle" mode="aspectFill" />
+          <view wx:else class="thumb-placeholder">
+            <view class="ico ico-gallery"></view>
+          </view>
+          <view wx:if="{{photoCount > 0}}" class="thumb-count-badge">{{photoCount}}</view>
+        </view>
+        <text class="dock-label">相册</text>
       </view>
-    </view>
 
-    <view class="bot-btn" bindtap="openBatchWatermarkPage">
-      <view class="bot-icon-ring batch">🗂</view>
-      <text class="bot-label">批量水印</text>
-    </view>
+      <view
+        class="shutter-outer {{countdownRemaining > 0 ? 'counting' : ''}}"
+        hover-class="shutter-pressed"
+        hover-stay-time="80"
+        bindtap="handleShutterTap"
+      >
+        <view class="shutter-inner">
+          <text wx:if="{{countdownRemaining > 0}}" class="shutter-stop-txt">停止</text>
+        </view>
+      </view>
 
-    <view class="bot-btn" bindtap="openWatermarkModal">
-      <view class="bot-icon-ring {{showWmModal ? 'active' : ''}}">🎨</view>
-      <text class="bot-label {{showWmModal ? 'accent' : ''}}">水印设置</text>
+      <view class="dock-side-btn" bindtap="openWatermarkModal">
+        <view class="dock-icon-ring {{showWmModal ? 'active' : ''}}">
+          <view class="ico ico-watermark"></view>
+        </view>
+        <text class="dock-label {{showWmModal ? 'accent' : ''}}">水印</text>
+      </view>
     </view>
   </view>
 
   <!-- 兼容旧基础库的备用离屏 Canvas 2D -->
   <canvas type="2d" id="compositeCanvas" style="width: 1080px; height: 1440px; position: fixed; left: -9999px; top: -9999px;"></canvas>
 
-  <!-- 原生 page-container 手势拦截容器（仅承载互斥的半屏/卡片弹窗，无嵌套闪黑冲突） -->
+  <!-- 官方合规隐私弹窗 -->
+  <privacy-popup />
+
+  <!-- 原生 page-container 互斥半屏抽屉 -->
   <page-container
     show="{{showPoiModal || showSettings || showWmModal || showVerifyModal}}"
     position="bottom"
@@ -194,33 +210,29 @@
     custom-style="background: transparent; z-index: 999;"
     bind:beforeleave="onInterceptBackGesture"
   >
-    <!-- ==================== 弹窗 1：地点名称与位置校准 ==================== -->
+    <!-- ==================== 弹窗 1：附近地点快选与坐标校准 ==================== -->
     <view wx:if="{{showPoiModal}}" class="modal-mask" bindtap="closePoiQuickModal">
       <view class="dialog-card" catchtap="noop">
+        <view class="dialog-handle"></view>
         <view class="dialog-header-row">
-          <view class="dialog-title">📍 地点名称与位置校准</view>
+          <view class="dialog-title">附近地点与位置校准</view>
           <view class="dialog-close-x" bindtap="closePoiQuickModal">✕</view>
         </view>
 
         <view class="coord-source-banner {{isManualCoord ? 'manual' : 'real'}}">
           <view class="source-row">
-            <text class="source-tag">{{isManualCoord ? '📌 当前坐标源：手动地图选点' : (hasRealFix ? '🛰 当前坐标源：手机真实GPS定位' : '⏳ 正在等待真实GPS定位')}}</text>
-            <text wx:if="{{isManualCoord}}" class="source-restore-btn" bindtap="restoreRealGpsCoordinates">↺ 恢复真实GPS</text>
+            <text class="source-tag">{{isManualCoord ? '手动地图选点' : (hasRealFix ? '真实 GPS 定位已就绪' : '正在获取定位...')}}</text>
+            <text wx:if="{{isManualCoord}}" class="source-restore-btn" bindtap="restoreRealGpsCoordinates">恢复真实定位</text>
+            <text wx:else class="source-restore-btn" bindtap="refreshRealGpsNow">刷新定位</text>
           </view>
-          <view class="source-coord-line mono">WGS84/CGCS2000: {{wgsLat}}°N, {{wgsLon}}°E</view>
-          <view class="source-coord-line sub mono">高德跳转 GCJ-02: {{gcjLat}}°N, {{gcjLon}}°E</view>
+          <view wx:if="{{hasRealFix || isManualCoord}}" class="source-coord-line mono">WGS-84: {{wgsLat}}°N, {{wgsLon}}°E</view>
+          <view wx:if="{{hasRealFix || isManualCoord}}" class="source-coord-line sub mono">GCJ-02: {{gcjLat}}°N, {{gcjLon}}°E</view>
         </view>
 
-        <view class="input-group">
-          <view class="label-with-action">
-            <text class="input-label">地点简称 {{antiTamperMode ? '(🔒防伪已锁)' : '(显示在 📍 后的名称)'}}</text>
-            <view wx:if="{{!antiTamperMode}}" class="btn-pick-name-only" bindtap="choosePoiNameOnlyOnMap">🏷 地图选名(不改坐标)</view>
-          </view>
-          <input class="text-input {{antiTamperMode ? 'locked' : ''}}" value="{{shortPoi}}" disabled="{{antiTamperMode}}" bindinput="onInputPoi" placeholder="默认：实拍点位" />
+        <view class="setting-section-label">
+          {{poiLoading ? '正在识别周边店铺与小区...' : '周边推荐地点（点击一键切换）'}}
         </view>
-
-        <view wx:if="{{!antiTamperMode}}" class="setting-section-label">快捷点位词 (点击一秒填入简称)</view>
-        <view wx:if="{{!antiTamperMode}}" class="chip-wrap">
+        <view class="chip-wrap">
           <view
             wx:for="{{nearbyPois}}"
             wx:key="*this"
@@ -228,51 +240,55 @@
             data-poi="{{item}}"
             bindtap="selectQuickPoi"
           >
-            📍 {{item}}
+            {{item}}
           </view>
+        </view>
+
+        <view class="input-group" style="margin-top: 20rpx;">
+          <view class="label-with-action">
+            <text class="input-label">地点简称 {{antiTamperMode ? '(防伪锁定，仅可点选周边)' : ''}}</text>
+            <view wx:if="{{!antiTamperMode}}" class="btn-pick-name-only" bindtap="choosePoiNameOnlyOnMap">地图选名</view>
+          </view>
+          <input class="text-input {{antiTamperMode ? 'locked' : ''}}" value="{{shortPoi}}" disabled="{{antiTamperMode}}" bindinput="onInputPoi" placeholder="输入地点简称" />
         </view>
 
         <view class="input-group">
           <view class="switch-row compact">
-            <text class="input-label-inline">在水印中显示详细地址行</text>
+            <text class="input-label-inline">水印显示详细地址行</text>
             <switch checked="{{showAddress}}" bindchange="onToggleShowAddress" color="#0284c7" />
           </view>
-          <input wx:if="{{showAddress}}" class="text-input" value="{{fullAddr}}" bindinput="onInputFullAddr" placeholder="选填：输入详细街道或工区描述" />
+          <input wx:if="{{showAddress}}" class="text-input" value="{{fullAddr}}" bindinput="onInputFullAddr" placeholder="选填：详细街道或工区地址" />
         </view>
 
-        <view class="map-relocate-box">
-          <view class="relocate-header">
-            <text class="relocate-title">📌 坐标偏移校准</text>
-            <text wx:if="{{antiTamperMode}}" class="relocate-lock-badge">🛡防伪模式已锁定</text>
-          </view>
-          <view class="relocate-desc">
-            {{antiTamperMode ? '当前已开启「外业防篡改验真模式」，系统已强制锁定真实 GPS 坐标、点位名称与备注，防止篡改。' : '若室内 GPS 信号漂移，可手动指定地图坐标点（开启防伪模式时将自动回滚为真实 GPS）。'}}
-          </view>
-          <view class="sub-action-grid">
-            <button size="mini" class="btn-sub" bindtap="refreshRealGpsNow">🛰 刷新真实GPS</button>
-            <button size="mini" class="btn-sub relocate-btn" disabled="{{antiTamperMode}}" bindtap="choosePoiOnMap">📌 地图选点</button>
-          </view>
+        <view wx:if="{{!antiTamperMode}}" class="sub-action-grid">
+          <button class="btn-sub" bindtap="choosePoiOnMap">在地图上微调坐标点</button>
         </view>
 
-        <button class="btn-confirm" bindtap="closePoiQuickModal">确认并关闭</button>
+        <button class="btn-confirm" bindtap="closePoiQuickModal">完成</button>
       </view>
     </view>
 
-    <!-- ==================== 弹窗 2：相机引擎与防伪设置（与水印设置完全去重） ==================== -->
+    <!-- ==================== 弹窗 2：相机与工具设置 ==================== -->
     <view wx:if="{{showSettings}}" class="modal-mask" bindtap="closeSettingsModal">
       <view class="dialog-card" catchtap="noop">
+        <view class="dialog-handle"></view>
         <view class="dialog-header-row">
-          <view class="dialog-title">⚙ 相机引擎、防伪与拍摄设置</view>
+          <view class="dialog-title">相机与工具设置</view>
           <view class="dialog-close-x" bindtap="closeSettingsModal">✕</view>
         </view>
 
-        <view class="setting-section-label">📷 核心拍摄引擎</view>
-        <view class="mode-switch-row">
-          <view class="mode-option {{captureMode === 'photo' ? 'selected' : ''}}" data-mode="photo" bindtap="setCaptureMode">📷 光学拍照(高清)</view>
-          <view class="mode-option {{captureMode === 'frame' ? 'selected' : ''}}" data-mode="frame" bindtap="setCaptureMode">⚡ 极速抓拍(轻量)</view>
+        <view class="tool-entry-row">
+          <view class="tool-entry-btn" bindtap="openBatchWatermarkPage">
+            <text class="tool-entry-title">批量加水印</text>
+            <text class="tool-entry-sub">相册选图 · EXIF还原</text>
+          </view>
+          <view class="tool-entry-btn" bindtap="openVerifyEntrySheet">
+            <text class="tool-entry-title">识图验真</text>
+            <text class="tool-entry-sub">扫码 / 选图核验</text>
+          </view>
         </view>
 
-        <view class="setting-section-label">⏱ 延时快门倒计时</view>
+        <view class="setting-section-label">延时快门</view>
         <view class="mode-switch-row">
           <view class="mode-option {{timerSeconds === 0 ? 'selected' : ''}}" data-sec="0" bindtap="selectTimerSeconds">关闭</view>
           <view class="mode-option {{timerSeconds === 3 ? 'selected' : ''}}" data-sec="3" bindtap="selectTimerSeconds">3秒</view>
@@ -282,24 +298,24 @@
 
         <view class="switch-row">
           <view class="switch-label-col">
-            <text class="switch-main">🛡 外业防篡改验真模式</text>
-            <text class="switch-sub">锁定真实 GPS、点位与备注，签发 SHA-256 防伪码</text>
+            <text class="switch-main">外业防篡改锁定</text>
+            <text class="switch-sub">锁定真实 GPS 与备注，签发 SHA-256 摘要</text>
           </view>
           <switch checked="{{antiTamperMode}}" bindchange="onToggleAntiTamper" color="#059669" />
         </view>
 
         <view class="ntp-status-bar">
-          <text class="ntp-status-label">🕒 时钟源状态：{{ntpStatusText}}</text>
+          <text class="ntp-status-label">时钟状态：{{ntpStatusText}}</text>
           <text class="ntp-recal-btn" bindtap="syncTrustedNetworkTime">重新校准</text>
         </view>
 
         <view class="switch-row">
-          <text>⊞ 取景框显示九宫格构图辅助线</text>
+          <text>构图九宫格参考线</text>
           <switch checked="{{showGridLines}}" bindchange="onToggleGridLines" color="#0284c7" />
         </view>
 
         <view class="switch-row">
-          <text>💾 拍照后自动保存至手机系统相册</text>
+          <text>拍照后自动保存至系统相册</text>
           <switch checked="{{autoSaveAlbum}}" bindchange="onToggleAutoSave" color="#0284c7" />
         </view>
 
@@ -307,166 +323,166 @@
       </view>
     </view>
 
-    <!-- ==================== 弹窗 3：半屏实时预览水印定制 ==================== -->
+    <!-- ==================== 弹窗 3：双 Tab 极简水印定制 ==================== -->
     <view wx:if="{{showWmModal}}" class="modal-mask bottom-sheet-mask" bindtap="closeWatermarkModal">
       <view class="dialog-card bottom-sheet-card" catchtap="noop">
+        <view class="dialog-handle"></view>
         <view class="dialog-header-row">
-          <view class="dialog-title">🎨 水印样式、预设与要素定制</view>
+          <view class="wm-tab-bar">
+            <view class="wm-tab-item {{wmTab === 'basic' ? 'active' : ''}}" data-tab="basic" bindtap="switchWmTab">常用样式</view>
+            <view class="wm-tab-item {{wmTab === 'pro' ? 'active' : ''}}" data-tab="pro" bindtap="switchWmTab">专业参数</view>
+          </view>
           <view class="dialog-close-x" bindtap="closeWatermarkModal">✕</view>
         </view>
 
-        <view class="setting-section-label">⚡ 一键场景预设</view>
-        <view class="preset-row">
-          <view class="preset-btn" data-preset="minimal" bindtap="applyQuickScenePreset">极简打卡</view>
-          <view class="preset-btn" data-preset="engineering" bindtap="applyQuickScenePreset">工程全要素</view>
-          <view class="preset-btn" data-preset="gis" bindtap="applyQuickScenePreset">GIS测绘</view>
-          <view class="preset-btn" data-preset="ledger" bindtap="applyQuickScenePreset">标准台账</view>
-        </view>
-
-        <view class="setting-section-label">1. 水印模板样式</view>
-        <view class="chip-wrap">
-          <view
-            wx:for="{{tplNames}}"
-            wx:key="index"
-            class="quick-chip {{styleTemplate === index ? 'active' : ''}}"
-            data-idx="{{index}}"
-            bindtap="selectTemplate"
-          >
-            {{index + 1}}. {{item}}
-          </view>
-        </view>
-
-        <!-- 需求 3：模板 0 底部托底暗影开关（默认关闭） -->
-        <view class="switch-row compact-top">
-          <view class="switch-label-col">
-            <text class="switch-main">🌘 底部托底暗影 (大字时间模板)</text>
-            <text class="switch-sub">默认关闭无暗角；开启后在亮背景提供柔和底部渐变</text>
-          </view>
-          <switch checked="{{showBottomScrim}}" bindchange="onToggleBottomScrim" color="#0284c7" />
-        </view>
-
-        <view class="setting-section-label">2. 水印坐标系与经纬度格式</view>
-        <view class="mode-switch-row">
-          <view class="mode-option {{coordSys === 'WGS-84' ? 'selected' : ''}}" data-sys="WGS-84" bindtap="selectCoordSystem">WGS-84</view>
-          <view class="mode-option {{coordSys === 'CGCS2000' ? 'selected' : ''}}" data-sys="CGCS2000" bindtap="selectCoordSystem">CGCS2000</view>
-          <view class="mode-option {{coordSys === 'GCJ-02' ? 'selected' : ''}}" data-sys="GCJ-02" bindtap="selectCoordSystem">GCJ-02</view>
-        </view>
-        <view class="mode-switch-row">
-          <view class="mode-option {{!useDms ? 'selected' : ''}}" data-dms="0" bindtap="setDmsFormat">十进制 (39.907419°N)</view>
-          <view class="mode-option {{useDms ? 'selected' : ''}}" data-dms="1" bindtap="setDmsFormat">度分秒 (39°54'26.71"N)</view>
-        </view>
-
-        <view class="setting-section-label">3. 主题点缀色、字号缩放与底色透明度</view>
-        <view class="custom-appearance-row">
-          <view class="color-dots-group">
-            <view
-              wx:for="{{accentColors}}"
-              wx:key="name"
-              class="color-dot {{accentColorIndex === index ? 'selected' : ''}}"
-              style="background-color: {{item.hex}};"
-              data-idx="{{index}}"
-              bindtap="selectAccentColor"
-            ></view>
-          </view>
-          <view class="scale-pills-group">
-            <view class="mini-opt {{fontScale === 0.88 ? 'selected' : ''}}" data-scale="0.88" bindtap="selectFontScale">小字</view>
-            <view class="mini-opt {{fontScale === 1 ? 'selected' : ''}}" data-scale="1" bindtap="selectFontScale">标准</view>
-            <view class="mini-opt {{fontScale === 1.14 ? 'selected' : ''}}" data-scale="1.14" bindtap="selectFontScale">大字</view>
-          </view>
-          <view class="scale-pills-group">
-            <view class="mini-opt {{bgAlphaMode === 0 ? 'selected' : ''}}" data-alpha="0" bindtap="selectBgAlpha">通透</view>
-            <view class="mini-opt {{bgAlphaMode === 1 ? 'selected' : ''}}" data-alpha="1" bindtap="selectBgAlpha">标准</view>
-            <view class="mini-opt {{bgAlphaMode === 2 ? 'selected' : ''}}" data-alpha="2" bindtap="selectBgAlpha">深邃</view>
-          </view>
-        </view>
-
-        <view class="input-group" style="margin-top: 12rpx;">
-          <text class="input-label">卡片标题</text>
-          <input class="text-input" value="{{customTitle}}" bindinput="onInputTitle" placeholder="现场点位核验" />
+        <!-- Tab 1: 常用样式（高频操作一屏直达） -->
+        <block wx:if="{{wmTab === 'basic'}}">
+          <view class="setting-section-label">水印模板（取景框左右轻滑也可切换）</view>
           <view class="chip-wrap">
             <view
-              wx:for="{{quickTitleTags}}"
-              wx:key="*this"
-              class="quick-chip {{customTitle === item ? 'active' : ''}}"
-              data-title="{{item}}"
-              bindtap="selectQuickTitle"
+              wx:for="{{tplNames}}"
+              wx:key="index"
+              class="quick-chip {{styleTemplate === index ? 'active' : ''}}"
+              data-idx="{{index}}"
+              bindtap="selectTemplate"
             >
               {{item}}
             </view>
           </view>
-        </view>
 
-        <view class="input-group">
-          <view class="label-with-action">
-            <text class="input-label">地点简称 {{antiTamperMode ? '(🔒防伪已锁)' : ''}}</text>
-            <view wx:if="{{!antiTamperMode}}" class="btn-pick-name-only" bindtap="choosePoiNameOnlyOnMap">🏷 地图选名</view>
+          <view class="setting-section-label">一键场景预设</view>
+          <view class="preset-row">
+            <view class="preset-btn" data-preset="minimal" bindtap="applyQuickScenePreset">极简打卡</view>
+            <view class="preset-btn" data-preset="engineering" bindtap="applyQuickScenePreset">工程巡检</view>
+            <view class="preset-btn" data-preset="gis" bindtap="applyQuickScenePreset">GIS测绘</view>
+            <view class="preset-btn" data-preset="ledger" bindtap="applyQuickScenePreset">标准台账</view>
           </view>
-          <input class="text-input {{antiTamperMode ? 'locked' : ''}}" value="{{shortPoi}}" disabled="{{antiTamperMode}}" bindinput="onInputPoi" placeholder="实拍点位" />
-        </view>
 
-        <view class="input-group">
-          <text class="input-label">详细街道/工区地址</text>
-          <input class="text-input" value="{{fullAddr}}" bindinput="onInputFullAddr" placeholder="选填：输入完整街道或施工区域地址..." />
-        </view>
-
-        <view class="input-group">
-          <text class="input-label">现场巡检备注 {{antiTamperMode ? '(🔒防伪已锁)' : ''}}</text>
-          <input class="text-input {{antiTamperMode ? 'locked' : ''}}" value="{{note}}" disabled="{{antiTamperMode}}" bindinput="onInputNote" placeholder="选填：输入现场备注..." />
-          <view wx:if="{{!antiTamperMode}}" class="chip-wrap">
-            <view
-              wx:for="{{quickNoteTags}}"
-              wx:key="*this"
-              class="quick-chip"
-              data-note="{{item}}"
-              bindtap="appendQuickNote"
-            >
-              + {{item}}
+          <view class="input-group" style="margin-top: 16rpx;">
+            <view class="label-with-action">
+              <text class="input-label">地点简称</text>
+              <view wx:if="{{!antiTamperMode}}" class="btn-pick-name-only" bindtap="choosePoiNameOnlyOnMap">地图选名</view>
             </view>
-            <view wx:if="{{note}}" class="quick-chip clear" bindtap="clearNoteInput">清空备注</view>
+            <input class="text-input {{antiTamperMode ? 'locked' : ''}}" value="{{shortPoi}}" disabled="{{antiTamperMode}}" bindinput="onInputPoi" placeholder="自动识别周边地点" />
           </view>
-        </view>
 
-        <view class="setting-section-label">4. 水印显示要素开关</view>
-        <view class="toggle-matrix">
-          <view class="matrix-chip {{showTime ? 'on' : ''}}" data-field="showTime" bindtap="toggleWatermarkField">✓ 时间与星期</view>
-          <view class="matrix-chip {{showLoc ? 'on' : ''}}" data-field="showLoc" bindtap="toggleWatermarkField">✓ 点位简称(📍)</view>
-          <view class="matrix-chip {{showCoords ? 'on' : ''}}" data-field="showCoords" bindtap="toggleWatermarkField">✓ 经纬度坐标</view>
-          <view class="matrix-chip {{showCoordTag ? 'on' : ''}}" data-field="showCoordTag" bindtap="toggleWatermarkField">✓ 坐标系标签</view>
-          <view class="matrix-chip {{showAccuracy ? 'on' : ''}}" data-field="showAccuracy" bindtap="toggleWatermarkField">✓ 精度误差</view>
-          <view class="matrix-chip {{showAddress ? 'on' : ''}}" data-field="showAddress" bindtap="toggleWatermarkField">✓ 详细地址行</view>
-          <view class="matrix-chip {{showEnv ? 'on' : ''}}" data-field="showEnv" bindtap="toggleWatermarkField">✓ 海拔与方位</view>
-          <view class="matrix-chip {{showQr ? 'on' : ''}}" data-field="showQr" bindtap="toggleWatermarkField">✓ 扫码定位码</view>
-          <view class="matrix-chip {{showMiniMap ? 'on' : ''}}" data-field="showMiniMap" bindtap="toggleWatermarkField">🗺 160px小图</view>
-          <view class="matrix-chip {{bottomRight ? 'on' : ''}}" data-field="bottomRight" bindtap="toggleWatermarkField">⇥ 卡片居右</view>
-        </view>
+          <view class="input-group">
+            <text class="input-label">现场备注</text>
+            <input class="text-input {{antiTamperMode ? 'locked' : ''}}" value="{{note}}" disabled="{{antiTamperMode}}" bindinput="onInputNote" placeholder="选填：输入巡检或打卡备注" />
+            <view wx:if="{{!antiTamperMode}}" class="chip-wrap">
+              <view
+                wx:for="{{quickNoteTags}}"
+                wx:key="*this"
+                class="quick-chip"
+                data-note="{{item}}"
+                bindtap="appendQuickNote"
+              >+ {{item}}</view>
+              <view wx:if="{{note}}" class="quick-chip clear" bindtap="clearNoteInput">清空</view>
+            </view>
+          </view>
 
-        <view wx:if="{{showMiniMap}}" class="mode-switch-row" style="margin-top: 12rpx;">
-          <view class="mode-option {{miniMapPosition === 0 ? 'selected' : ''}}" data-pos="0" bindtap="selectMiniMapPos">小图: 卡片左侧内嵌</view>
-          <view class="mode-option {{miniMapPosition === 1 ? 'selected' : ''}}" data-pos="1" bindtap="selectMiniMapPos">小图: 左上角悬浮</view>
-        </view>
+          <view class="setting-section-label">显示要素</view>
+          <view class="toggle-matrix">
+            <view class="matrix-chip {{showTime ? 'on' : ''}}" data-field="showTime" bindtap="toggleWatermarkField">时间日期</view>
+            <view class="matrix-chip {{showLoc ? 'on' : ''}}" data-field="showLoc" bindtap="toggleWatermarkField">地点简称</view>
+            <view class="matrix-chip {{showCoords ? 'on' : ''}}" data-field="showCoords" bindtap="toggleWatermarkField">经纬度</view>
+            <view class="matrix-chip {{showAddress ? 'on' : ''}}" data-field="showAddress" bindtap="toggleWatermarkField">详细地址</view>
+            <view class="matrix-chip {{showNote ? 'on' : ''}}" data-field="showNote" bindtap="toggleWatermarkField">现场备注</view>
+            <view class="matrix-chip {{showQr ? 'on' : ''}}" data-field="showQr" bindtap="toggleWatermarkField">高德定位码</view>
+          </view>
+        </block>
 
-        <button class="btn-confirm" bindtap="applyWatermarkCustomization">保存并实时生效</button>
+        <!-- Tab 2: 专业参数（按需展开，不干扰日常上手） -->
+        <block wx:else>
+          <view class="setting-section-label">坐标系与经纬度格式</view>
+          <view class="mode-switch-row">
+            <view class="mode-option {{coordSys === 'WGS-84' ? 'selected' : ''}}" data-sys="WGS-84" bindtap="selectCoordSystem">WGS-84</view>
+            <view class="mode-option {{coordSys === 'CGCS2000' ? 'selected' : ''}}" data-sys="CGCS2000" bindtap="selectCoordSystem">CGCS2000</view>
+            <view class="mode-option {{coordSys === 'GCJ-02' ? 'selected' : ''}}" data-sys="GCJ-02" bindtap="selectCoordSystem">GCJ-02</view>
+          </view>
+          <view class="mode-switch-row">
+            <view class="mode-option {{!useDms ? 'selected' : ''}}" data-dms="0" bindtap="setDmsFormat">十进制度</view>
+            <view class="mode-option {{useDms ? 'selected' : ''}}" data-dms="1" bindtap="setDmsFormat">度分秒 (DMS)</view>
+          </view>
+
+          <view class="setting-section-label">配色、字号与背景透明度</view>
+          <view class="custom-appearance-row">
+            <view class="color-dots-group">
+              <view
+                wx:for="{{accentColors}}"
+                wx:key="name"
+                class="color-dot {{accentColorIndex === index ? 'selected' : ''}}"
+                style="background-color: {{item.hex}};"
+                data-idx="{{index}}"
+                bindtap="selectAccentColor"
+              ></view>
+            </view>
+            <view class="scale-pills-group">
+              <view class="mini-opt {{fontScale === 0.88 ? 'selected' : ''}}" data-scale="0.88" bindtap="selectFontScale">小</view>
+              <view class="mini-opt {{fontScale === 1 ? 'selected' : ''}}" data-scale="1" bindtap="selectFontScale">中</view>
+              <view class="mini-opt {{fontScale === 1.14 ? 'selected' : ''}}" data-scale="1.14" bindtap="selectFontScale">大</view>
+            </view>
+            <view class="scale-pills-group">
+              <view class="mini-opt {{bgAlphaMode === 0 ? 'selected' : ''}}" data-alpha="0" bindtap="selectBgAlpha">通透</view>
+              <view class="mini-opt {{bgAlphaMode === 1 ? 'selected' : ''}}" data-alpha="1" bindtap="selectBgAlpha">标准</view>
+              <view class="mini-opt {{bgAlphaMode === 2 ? 'selected' : ''}}" data-alpha="2" bindtap="selectBgAlpha">深邃</view>
+            </view>
+          </view>
+
+          <view class="input-group" style="margin-top: 16rpx;">
+            <text class="input-label">卡片标题</text>
+            <input class="text-input" value="{{customTitle}}" bindinput="onInputTitle" placeholder="现场点位核验" />
+            <view class="chip-wrap">
+              <view
+                wx:for="{{quickTitleTags}}"
+                wx:key="*this"
+                class="quick-chip {{customTitle === item ? 'active' : ''}}"
+                data-title="{{item}}"
+                bindtap="selectQuickTitle"
+              >{{item}}</view>
+            </view>
+          </view>
+
+          <view class="setting-section-label">扩展字段与对齐</view>
+          <view class="toggle-matrix">
+            <view class="matrix-chip {{showCoordTag ? 'on' : ''}}" data-field="showCoordTag" bindtap="toggleWatermarkField">坐标系标签</view>
+            <view class="matrix-chip {{showAccuracy ? 'on' : ''}}" data-field="showAccuracy" bindtap="toggleWatermarkField">定位精度</view>
+            <view class="matrix-chip {{showEnv ? 'on' : ''}}" data-field="showEnv" bindtap="toggleWatermarkField">海拔与方位</view>
+            <view class="matrix-chip {{bottomRight ? 'on' : ''}}" data-field="bottomRight" bindtap="toggleWatermarkField">卡片居右</view>
+          </view>
+
+          <view wx:if="{{styleTemplate === 0}}" class="switch-row compact-top">
+            <view class="switch-label-col">
+              <text class="switch-main">大字时间底部暗影</text>
+              <text class="switch-sub">亮背景时提供柔和托底渐变，默认关闭</text>
+            </view>
+            <switch checked="{{showBottomScrim}}" bindchange="onToggleBottomScrim" color="#0284c7" />
+          </view>
+        </block>
+
+        <button class="btn-confirm" bindtap="applyWatermarkCustomization">完成</button>
       </view>
     </view>
 
     <!-- ==================== 弹窗 4：识图验真核验中心 ==================== -->
     <view wx:if="{{showVerifyModal}}" class="modal-mask" bindtap="closeVerifyModal">
       <view class="dialog-card verify-report-card" catchtap="noop">
+        <view class="dialog-handle"></view>
         <view class="dialog-header-row">
-          <view class="dialog-title">🛡 高德水印识图验真中心 v9.0</view>
+          <view class="dialog-title">识图验真中心 v1.0</view>
           <view class="dialog-close-x" bindtap="closeVerifyModal">✕</view>
         </view>
 
         <view class="verify-channel-row">
-          <view class="verify-ch-btn primary" bindtap="verifyPhotoFromAlbum">🖼 相册选图验真</view>
-          <view class="verify-ch-btn emerald" bindtap="verifyByLiveCameraScan">📷 镜头扫码验真</view>
+          <view class="verify-ch-btn primary" bindtap="verifyPhotoFromAlbum">相册选图验真</view>
+          <view class="verify-ch-btn emerald" bindtap="verifyByLiveCameraScan">镜头扫码验真</view>
         </view>
 
         <block wx:if="{{verifyReport}}">
           <view class="verify-seal-banner {{verifyReport.status}}">
             <view class="seal-badge-row">
               <text class="seal-badge-tag">{{verifyReport.statusBadge}}</text>
-              <text class="seal-source-tag">来源: {{verifyReport.sourceLabel}}</text>
+              <text class="seal-source-tag">{{verifyReport.sourceLabel}}</text>
             </view>
             <view class="seal-main-title">{{verifyReport.statusTitle}}</view>
             <view class="seal-desc">{{verifyReport.statusDesc}}</view>
@@ -476,49 +492,49 @@
             <view wx:if="{{verifyReport.imagePath}}" class="verify-img-row">
               <image src="{{verifyReport.imagePath}}" mode="aspectFill" class="verify-thumb-img" bindtap="previewVerifiedPhoto" />
               <view class="verify-img-meta">
-                <view class="v-meta-poi">📍 {{verifyReport.shortPoi}}</view>
-                <view class="v-meta-ts">🕒 {{verifyReport.timestamp}}</view>
-                <view class="v-meta-ntp">{{verifyReport.ntpSynced ? '✅ 权威授时锁定' : 'ℹ️ 本地校准时间戳'}}</view>
+                <view class="v-meta-poi">{{verifyReport.shortPoi}}</view>
+                <view class="v-meta-ts">{{verifyReport.timestamp}}</view>
+                <view class="v-meta-ntp">{{verifyReport.ntpSynced ? '权威授时锁定' : '本地校准时间'}}</view>
               </view>
             </view>
 
             <view class="verify-kv-table">
               <view class="v-kv-row">
-                <text class="v-k">高德坐标 (GCJ-02)</text>
+                <text class="v-k">高德 GCJ-02</text>
                 <text class="v-v accent mono">{{verifyReport.gcjLat}}°N, {{verifyReport.gcjLon}}°E</text>
               </view>
               <view class="v-kv-row">
-                <text class="v-k">大地坐标 (WGS-84)</text>
+                <text class="v-k">大地 WGS-84</text>
                 <text class="v-v mono">{{verifyReport.wgsLat}}°N, {{verifyReport.wgsLon}}°E</text>
               </view>
               <view wx:if="{{verifyReport.note}}" class="v-kv-row">
-                <text class="v-k">内嵌现场备注</text>
+                <text class="v-k">内嵌备注</text>
                 <text class="v-v amber">{{verifyReport.note}}</text>
               </view>
               <view class="v-kv-row">
-                <text class="v-k">照片内嵌签名</text>
+                <text class="v-k">内嵌签名</text>
                 <text class="v-v mono">{{verifyReport.actualSig}}</text>
               </view>
               <view class="v-kv-row">
-                <text class="v-k">重算期望签名</text>
+                <text class="v-k">期望签名</text>
                 <text class="v-v mono {{verifyReport.status === 'VERIFIED' ? 'emerald' : (verifyReport.status === 'TAMPERED' ? 'danger' : '')}}">{{verifyReport.expectedSig}}</text>
               </view>
             </view>
           </view>
 
           <view class="action-grid-two" style="margin-top: 18rpx;">
-            <button class="btn-primary-nav half" bindtap="openVerifiedLocationInMap">🧭 跳高德地图导航</button>
-            <button class="btn-share-friend half" bindtap="copyVerifyReportText">📋 复制验真报告</button>
+            <button class="btn-primary-nav half" bindtap="openVerifiedLocationInMap">高德导航</button>
+            <button class="btn-share-friend half" bindtap="copyVerifyReportText">复制报告</button>
           </view>
         </block>
 
         <view wx:else class="verify-empty-guide">
-          <view class="v-guide-title">🔍 三大零假阳性防伪验真通道：</view>
-          <view class="v-guide-item">1. 「🖼 相册选图验真」：独立离屏 1:1 等比裁切右下/左下双角，调用 VisionKit 静态解码并重算 SHA-256。</view>
-          <view class="v-guide-item">2. 「📷 镜头扫码验真」：直接扫描他人手机屏幕或纸质台账上的高德定位二维码。</view>
-          <view class="v-guide-item">3. 粘贴二维码链接或包含 sig= 参数的文本进行离线核验：</view>
+          <view class="v-guide-title">支持三种核验方式：</view>
+          <view class="v-guide-item">1. 相册选图：自动等比识别照片四角二维码并重算 SHA-256。</view>
+          <view class="v-guide-item">2. 镜头扫码：直接扫描他人屏幕或纸质台账上的定位码。</view>
+          <view class="v-guide-item">3. 文本核验：粘贴二维码链接或包含 sig= 参数的文本：</view>
           <view class="v-manual-row">
-            <input class="text-input v-manual-input" value="{{manualVerifyInput}}" bindinput="onInputManualVerify" placeholder="粘贴高德定位链接或二维码文本..." />
+            <input class="text-input v-manual-input" value="{{manualVerifyInput}}" bindinput="onInputManualVerify" placeholder="粘贴高德定位链接或文本..." />
             <view class="v-manual-btn" bindtap="runManualTextVerify">核验</view>
           </view>
         </view>

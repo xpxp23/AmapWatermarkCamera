@@ -1,5 +1,5 @@
 /**
- * 极速高德水印相机 v9.0.0 · 独立离屏识图验真核心引擎
+ * 极速高德水印相机 v1.0 · 独立离屏识图验真核心引擎
  * 修复要点：
  * 1. 使用独立 wx.createOffscreenCanvas 彻底与水印渲染隔离
  * 2. VKSession 放入 try-finally 确保任何异常或超时均调用 session.destroy() 防止内存泄漏
@@ -18,7 +18,7 @@ const VK_REGION_TIMEOUT_MS = 1800;
 const VK_CANVAS_SIZE = 520;
 
 /**
- * 构建标准化《识图验真核验报告》数据模型 (v9.0.0)
+ * 构建标准化《识图验真核验报告》数据模型 (v1.0)
  */
 function buildVerificationReport(parsed, imagePath, sourceLabel) {
   if (!parsed || isNaN(parsed.gcjLat) || isNaN(parsed.gcjLon)) return null;
@@ -57,7 +57,7 @@ function buildVerificationReport(parsed, imagePath, sourceLabel) {
   }
 
   return {
-    version: '9.0.0',
+    version: '1.0',
     imagePath: imagePath || '',
     sourceLabel: sourceLabel || '二维码核验',
     status,
@@ -79,12 +79,12 @@ function buildVerificationReport(parsed, imagePath, sourceLabel) {
 }
 
 /**
- * 格式化验真报告纯文本（v9.0.0）
+ * 格式化验真报告纯文本（v1.0）
  */
 function formatVerifyReportText(r) {
   if (!r) return '';
   return [
-    '【极速高德水印相机 v9.0.0 · 识图验真报告】',
+    '【极速高德水印相机 v1.0 · 识图验真报告】',
     `核验结论：${r.statusBadge} (${r.statusTitle})`,
     `核验来源：${r.sourceLabel}`,
     `实拍点位：${r.shortPoi}`,

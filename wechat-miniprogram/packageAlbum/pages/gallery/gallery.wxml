@@ -35,6 +35,15 @@
       </view>
     </view>
 
+    <!-- 离线拍摄待补签横幅（仅存在离线待补签照片时显示） -->
+    <view wx:if="{{offlinePendingCount > 0}}" class="offline-sync-banner" bindtap="handleReconcileOffline">
+      <view class="offline-sync-text">
+        <text class="offline-sync-title">有 {{offlinePendingCount}} 张离线照片待补签授时与地名</text>
+        <text class="offline-sync-sub">联网后点击即可自动补齐周边地点与权威时间并无损重绘</text>
+      </view>
+      <view class="offline-sync-btn">{{isReconcilingOffline ? '补签中...' : '一键补签'}}</view>
+    </view>
+
     <!-- 双轨存储空间估算进度条 + 一键清理底图 -->
     <view class="storage-card">
       <view class="storage-head">
@@ -79,7 +88,8 @@
             </view>
 
             <!-- 极简左下角标：防伪盾牌 / 可编辑标记 -->
-            <view wx:if="{{photo.antiTamper}}" class="corner-badge bl shield">🛡</view>
+            <view wx:if="{{photo.offlinePending}}" class="corner-badge bl offline">待补签</view>
+            <view wx:elif="{{photo.antiTamper}}" class="corner-badge bl shield">🛡</view>
             <view wx:elif="{{photo.hasRaw}}" class="corner-badge bl edit">✎</view>
 
             <!-- 极简右下角标：拍摄时间 -->
@@ -106,7 +116,7 @@
   <view wx:if="{{showVerifyModal && verifyReport}}" class="verify-mask" bindtap="closeVerifyModal">
     <view class="verify-dialog" catchtap="noop">
       <view class="verify-head">
-        <text class="verify-title">🛡 识图验真报告 v9.0</text>
+        <text class="verify-title">🛡 识图验真报告 v1.0</text>
         <text class="verify-close" bindtap="closeVerifyModal">✕</text>
       </view>
 

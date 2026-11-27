@@ -1,10 +1,10 @@
 /**
- * 极速高德水印相机 v9.0.0 · 独立离屏高清 Canvas 2D 水印渲染引擎
- * 特性：
- * 1. 优先使用 wx.createOffscreenCanvas({ type: '2d' })，兼容回退页面 Canvas，彻底隔离识图引擎
- * 2. 串行并发互斥锁，杜绝连续快门或批量渲染时的 Canvas 竞态污染
- * 3. 长边钳制 <= 2400px，根治 iOS 4096px 纹理崩溃与 Jetsam 闪退
- * 4. 模板 0 底部托底暗影默认关闭（showBottomScrim: false），支持按需开启与 240px 缩略图同步导出
+ * 极速高德水印相机 v1.0 · 独立离屏高清 Canvas 2D 水印渲染引擎
+ * v1.0 核心重构：
+ * 1. 先测原图尺寸再一次性按目标尺寸创建离屏画布，导出时省略逻辑裁切框，彻底根治裁切与丢水印 Bug
+ * 2. 彻底移除伪造的 160px 矢量假小图，大幅拓宽巡检卡片与网格测绘文字排版空间
+ * 3. 无真实 GPS 或无海拔时优雅展示占位/隐藏，绝不印出假天安门坐标或假 46.5m 海拔
+ * 4. 串行并发互斥锁 + 240px 缩略图导出 + 长边钳制 <= 2400px，杜绝 iOS Jetsam 闪退
  */
 
 const {
@@ -16,6 +16,7 @@ const {
 } = require('./coord_qr.js');
 
 const MAX_EXPORT_EDGE = 2400;
+const MIN_SHORT_EDGE = 1080;
 const THUMB_WIDTH = 240;
 
 let _renderLock = Promise.resolve();
@@ -62,134 +63,10 @@ function drawRoundedRect(ctx, x, y, w, h, r) {
   }
 }
 
-/**
- * 绘制 160x160 高德高清矢量缩略地图画中画
- */
-function drawCanvasVectorMiniMap(ctx, boxX, boxY, boxSize, scale, cfg) {
-  const cornerR = 14 * scale;
-  ctx.save();
-  drawRoundedRect(ctx, boxX, boxY, boxSize, boxSize, cornerR);
-  ctx.clip();
-
-  ctx.fillStyle = '#0c1629';
-  ctx.fillRect(boxX, boxY, boxSize, boxSize);
-
-  const latSeed = Math.abs(Math.floor(Number(cfg.gcjLat || 39.9) * 10000)) % 100;
-  const lonSeed = Math.abs(Math.floor(Number(cfg.gcjLon || 116.4) * 10000)) % 100;
-  const shiftX = ((lonSeed - 50) / 100) * (boxSize * 0.22);
-  const shiftY = ((latSeed - 50) / 100) * (boxSize * 0.22);
-
-  ctx.fillStyle = 'rgba(16, 185, 129, 0.16)';
-  drawRoundedRect(
-    ctx,
-    boxX + 8 * scale + shiftX,
-    boxY + 10 * scale + shiftY,
-    boxSize * 0.35,
-    boxSize * 0.28,
-    6 * scale
-  );
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(14, 165, 233, 0.18)';
-  ctx.beginPath();
-  ctx.moveTo(boxX, boxY + boxSize * 0.72 + shiftY * 0.5);
-  ctx.quadraticCurveTo(
-    boxX + boxSize * 0.48,
-    boxY + boxSize * 0.56 + shiftX * 0.4,
-    boxX + boxSize,
-    boxY + boxSize * 0.82
-  );
-  ctx.lineTo(boxX + boxSize, boxY + boxSize);
-  ctx.lineTo(boxX, boxY + boxSize);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.15)';
-  ctx.lineWidth = 1 * scale;
-  const step = boxSize / 4;
-  for (let i = 1; i <= 3; i++) {
-    ctx.beginPath();
-    ctx.moveTo(boxX + i * step, boxY);
-    ctx.lineTo(boxX + i * step, boxY + boxSize);
-    ctx.moveTo(boxX, boxY + i * step);
-    ctx.lineTo(boxX + boxSize, boxY + i * step);
-    ctx.stroke();
-  }
-
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.32)';
-  ctx.lineWidth = 3.5 * scale;
-  ctx.beginPath();
-  ctx.moveTo(boxX, boxY + boxSize * 0.32 + shiftY);
-  ctx.lineTo(boxX + boxSize, boxY + boxSize * 0.27 + shiftY);
-  ctx.moveTo(boxX + boxSize * 0.28 + shiftX, boxY);
-  ctx.lineTo(boxX + boxSize * 0.33 + shiftX, boxY + boxSize);
-  ctx.stroke();
-
-  ctx.strokeStyle = 'rgba(245, 158, 11, 0.52)';
-  ctx.lineWidth = 5 * scale;
-  ctx.beginPath();
-  ctx.moveTo(boxX, boxY + boxSize * 0.56 + shiftY * 0.7);
-  ctx.lineTo(boxX + boxSize, boxY + boxSize * 0.48 + shiftY * 0.7);
-  ctx.moveTo(boxX + boxSize * 0.52 + shiftX * 0.7, boxY);
-  ctx.lineTo(boxX + boxSize * 0.47 + shiftX * 0.7, boxY + boxSize);
-  ctx.stroke();
-
-  const cx = boxX + boxSize / 2;
-  const cy = boxY + boxSize / 2;
-
-  ctx.fillStyle = 'rgba(56, 189, 248, 0.14)';
-  ctx.beginPath();
-  ctx.arc(cx, cy, boxSize * 0.24, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.48)';
-  ctx.lineWidth = 1.2 * scale;
-  ctx.stroke();
-
-  const startRad = (((Number(cfg.azimuthDeg) || 0) - 90 - 28) * Math.PI) / 180;
-  const endRad = (((Number(cfg.azimuthDeg) || 0) - 90 + 28) * Math.PI) / 180;
-  ctx.fillStyle = 'rgba(56, 189, 248, 0.30)';
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.arc(cx, cy, boxSize * 0.36, startRad, endRad);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.strokeStyle = '#dc2626';
-  ctx.lineWidth = 2.8 * scale;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - 8 * scale);
-  ctx.lineTo(cx, cy + 2 * scale);
-  ctx.stroke();
-
-  ctx.fillStyle = '#ef4444';
-  ctx.beginPath();
-  ctx.arc(cx, cy - 10 * scale, 6.5 * scale, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1.5 * scale;
-  ctx.stroke();
-
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.86)';
-  drawRoundedRect(ctx, boxX + 6 * scale, boxY + 6 * scale, 38 * scale, 19 * scale, 5 * scale);
-  ctx.fill();
-  ctx.fillStyle = '#38bdf8';
-  ctx.font = `bold ${Math.round(11.5 * scale)}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.fillText('▲N', boxX + 25 * scale, boxY + 19.5 * scale);
-
-  ctx.fillStyle = 'rgba(11, 19, 43, 0.88)';
-  ctx.fillRect(boxX, boxY + boxSize - 24 * scale, boxSize, 24 * scale);
-  ctx.fillStyle = '#e2e8f0';
-  ctx.font = `bold ${Math.round(12 * scale)}px sans-serif`;
-  const poiTxt = '📍' + (cfg.shortPoi || '实拍点位');
-  ctx.fillText(ellipsizeCanvasText(ctx, poiTxt, boxSize - 10 * scale), cx, boxY + boxSize - 7.5 * scale);
-
-  ctx.restore();
-
-  ctx.strokeStyle = cfg.accentHex || '#38bdf8';
-  ctx.lineWidth = 1.8 * scale;
-  drawRoundedRect(ctx, boxX, boxY, boxSize, boxSize, cornerR);
-  ctx.stroke();
+function hasValidCoords(cfg) {
+  const lat = Number(cfg && cfg.gcjLat);
+  const lon = Number(cfg && cfg.gcjLon);
+  return !isNaN(lat) && !isNaN(lon) && !(lat === 0 && lon === 0) && Boolean(cfg.hasRealFix || cfg.isManualCoord || Math.abs(lat) > 0.0001 || Math.abs(lon) > 0.0001);
 }
 
 /**
@@ -198,34 +75,43 @@ function drawCanvasVectorMiniMap(ctx, boxX, boxY, boxSize, scale, cfg) {
 function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
   const scaleFactor = Math.min(w, h) / 1080;
   const fScale = (Number(cfg.fontScale) || 1.0) * scaleFactor;
-  const resolved = resolveDisplayCoordinates(cfg.coordSys, cfg.gcjLat, cfg.gcjLon, cfg.wgsLat, cfg.wgsLon);
-  const coordOnly = formatCoords(resolved.lat, resolved.lon, cfg.useDms);
-  const tagStr = cfg.showCoordTag !== false ? ` [${resolved.tag}]` : '';
-  const accStr = cfg.showAccuracy !== false ? ` ±${cfg.accuracy || '2.4'}m` : '';
+  const validCoord = hasValidCoords(cfg);
+  const resolved = validCoord
+    ? resolveDisplayCoordinates(cfg.coordSys, cfg.gcjLat, cfg.gcjLon, cfg.wgsLat, cfg.wgsLon)
+    : { lat: 0, lon: 0, tag: cfg.coordSys || 'WGS-84' };
+
+  const coordOnly = validCoord ? formatCoords(resolved.lat, resolved.lon, cfg.useDms) : '定位校准中';
+  const tagStr = validCoord && cfg.showCoordTag !== false ? ` [${resolved.tag}]` : '';
+  const accStr = validCoord && cfg.showAccuracy !== false && cfg.accuracy ? ` ±${cfg.accuracy}m` : '';
   const coordLine = `${coordOnly}${tagStr}${accStr}`;
 
-  const envLine = cfg.showEnv ? `海拔 ${cfg.altitude || '46.5'}m · 方位 ${cfg.azimuthText || '正北 000°'}` : '';
+  const envParts = [];
+  if (cfg.showEnv) {
+    if (cfg.altitude !== undefined && cfg.altitude !== null && String(cfg.altitude).trim() !== '') {
+      envParts.push(`海拔 ${cfg.altitude}m`);
+    }
+    if (cfg.azimuthText) {
+      envParts.push(`方位 ${cfg.azimuthText}`);
+    }
+  }
+  const envLine = envParts.join(' · ');
+
   const sigHash =
-    cfg.antiTamperHash || computeAntiTamperHash(cfg.gcjLat, cfg.gcjLon, cfg.fullTs, cfg.shortPoi, cfg.note);
-  const antiLine = cfg.antiTamperMode
-    ? `🛡 ${cfg.ntpSynced ? 'NTP真时已锁' : '防伪锁定'} · SHA256:${sigHash.slice(0, 12)}`
-    : '';
+    cfg.antiTamperHash ||
+    (validCoord ? computeAntiTamperHash(cfg.gcjLat, cfg.gcjLon, cfg.fullTs, cfg.shortPoi, cfg.note) : '');
+  const timeBadge = cfg.retroSynced ? '补签授时' : (cfg.ntpSynced ? '权威授时' : '防伪锁定');
+  const antiLine = cfg.antiTamperMode && sigHash
+    ? `🛡 ${timeBadge} · SHA256:${sigHash.slice(0, 12)}`
+    : (cfg.offlinePending ? '⏳ 离线拍摄 · 待联网补签授时' : '');
 
   const accentColor = cfg.accentHex || '#38bdf8';
   const cardBg = cfg.cardBgRgba || 'rgba(11, 19, 43, 0.84)';
   const cleanPoi = cfg.shortPoi || '实拍点位';
   const weekPart = cfg.weekStr || (cfg.dateWeek ? cfg.dateWeek.split(' ')[1] : '') || '';
   const placeCardRight = Boolean(cfg.bottomRight && cfg.styleTemplate !== 0 && cfg.styleTemplate !== 3);
-
-  // 左上角独立悬浮 160x160 缩略图模式
-  if (cfg.showMiniMap && cfg.miniMapPosition === 1 && (cfg.styleTemplate === 1 || cfg.styleTemplate === 2)) {
-    const mapSz = Math.round(160 * fScale);
-    const margin = Math.round(28 * scaleFactor);
-    drawCanvasVectorMiniMap(ctx, margin, margin + Math.round(52 * scaleFactor), mapSz, fScale, cfg);
-  }
+  const showQrNow = Boolean(cfg.showQr && validCoord);
 
   if (cfg.styleTemplate === 0) {
-    // 需求 3：底部暗幕默认关闭；仅当显式开启 showBottomScrim 时绘制柔和渐变
     if (cfg.showBottomScrim === true) {
       const gradH = Math.round(360 * scaleFactor);
       const grad = ctx.createLinearGradient(0, h - gradH, 0, h);
@@ -235,10 +121,10 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
       ctx.fillRect(0, h - gradH, w, gradH);
     }
 
-    const qrReserveRight = cfg.showQr ? Math.round(186 * scaleFactor) : Math.round(28 * scaleFactor);
+    const qrReserveRight = showQrNow ? Math.round(186 * scaleFactor) : Math.round(28 * scaleFactor);
     const leftMargin = Math.round(28 * scaleFactor);
     const safeZoneW = w - leftMargin - qrReserveRight;
-    const cx = cfg.showQr ? leftMargin + safeZoneW / 2 : w / 2;
+    const cx = showQrNow ? leftMargin + safeZoneW / 2 : w / 2;
     const maxLineW = safeZoneW - Math.round(16 * scaleFactor);
     let curY = h - Math.round(40 * scaleFactor);
 
@@ -260,7 +146,7 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
 
     if (antiLine) {
       ctx.font = `bold ${Math.round(20 * fScale)}px monospace`;
-      ctx.fillStyle = '#34d399';
+      ctx.fillStyle = cfg.offlinePending && !cfg.antiTamperMode ? '#fbbf24' : '#34d399';
       ctx.textAlign = 'center';
       ctx.fillText(ellipsizeCanvasText(ctx, antiLine, maxLineW), cx, curY);
       curY -= Math.round(34 * fScale);
@@ -315,8 +201,8 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
       ctx.font = `bold ${Math.round(30 * fScale)}px sans-serif`;
       ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'center';
-      const lineRaw = `${cfg.showTime ? (cfg.dateWeek || '') + '  ' : ''}${cfg.showLoc ? '📍' + cleanPoi : ''}`;
-      ctx.fillText(ellipsizeCanvasText(ctx, lineRaw, maxLineW), cx, curY);
+      const lineRaw = `${cfg.showTime ? (cfg.dateWeek || '') + '  ' : ''}${cfg.showLoc ? cleanPoi : ''}`;
+      ctx.fillText(ellipsizeCanvasText(ctx, lineRaw.trim(), maxLineW), cx, curY);
       curY -= Math.round(56 * fScale);
     }
     if (cfg.showTime) {
@@ -328,17 +214,17 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     ctx.restore();
   } else if (cfg.styleTemplate === 1) {
     const margin = Math.round(28 * scaleFactor);
-    const boxW = Math.min(w - margin * 2 - (cfg.showQr ? Math.round(170 * scaleFactor) : 0), Math.round((cfg.showQr ? 856 : 1024) * scaleFactor));
+    const boxW = Math.min(
+      w - margin * 2 - (showQrNow ? Math.round(170 * scaleFactor) : 0),
+      Math.round((showQrNow ? 856 : 1024) * scaleFactor)
+    );
     const boxLeft = placeCardRight ? w - boxW - margin : margin;
     const padX = Math.round(24 * scaleFactor);
     const padY = Math.round(18 * scaleFactor);
     const headerH = Math.round(44 * fScale);
-    const lineGap = Math.round(35 * fScale);
-    const embedMiniMap = Boolean(cfg.showMiniMap && (cfg.miniMapPosition || 0) === 0);
-    const mapSize = embedMiniMap ? Math.round(156 * fScale) : 0;
-    const mapGap = embedMiniMap ? Math.round(18 * scaleFactor) : 0;
-    const textStartX = boxLeft + padX + mapSize + mapGap;
-    const maxTextW = Math.max(80, boxW - padX * 2 - mapSize - mapGap);
+    const lineGap = Math.round(36 * fScale);
+    const textStartX = boxLeft + padX;
+    const maxTextW = Math.max(120, boxW - padX * 2);
 
     const rowFontPx = Math.round((cfg.useDms ? 20 : 22) * fScale);
     ctx.font = `bold ${rowFontPx}px monospace`;
@@ -354,12 +240,14 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     if (envLine) rows.push(['环境', envLine, '#a7f3d0']);
     if (cfg.showTime) rows.push(['时间', `${cfg.fullTs} ${weekPart}`, '#e2e8f0']);
     if (cfg.showNote && cfg.note) rows.push(['备注', cfg.note, '#fde68a']);
-    if (cfg.antiTamperMode) {
-      rows.push(['验真', `SHA256:${sigHash.slice(0, 12)} (${cfg.ntpSynced ? 'NTP真时' : '已锁'})`, '#34d399']);
+    if (cfg.antiTamperMode && sigHash) {
+      rows.push(['验真', `SHA256:${sigHash.slice(0, 12)} (${timeBadge})`, '#34d399']);
+    } else if (cfg.offlinePending) {
+      rows.push(['状态', '离线拍摄 · 待联网补签授时', '#fbbf24']);
     }
 
     const contentH = headerH + rows.length * lineGap;
-    const boxH = padY * 2 + Math.max(contentH, embedMiniMap ? headerH + mapSize + 6 * scaleFactor : contentH);
+    const boxH = padY * 2 + contentH;
     const boxTop = h - boxH - margin;
 
     ctx.fillStyle = cardBg;
@@ -374,7 +262,7 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     ctx.fillStyle = '#ffffff';
     ctx.font = `bold ${Math.round(25 * fScale)}px sans-serif`;
     ctx.textAlign = 'left';
-    const titleStr = `${cfg.customTitle || '现场点位核验'} · ${cfg.antiTamperMode ? '🛡防伪已锁' : resolved.tag}`;
+    const titleStr = `${cfg.customTitle || '现场点位核验'} · ${cfg.antiTamperMode ? timeBadge : resolved.tag}`;
     ctx.fillText(
       ellipsizeCanvasText(ctx, titleStr, boxW - padX * 2 - 24 * scaleFactor),
       boxLeft + padX + 18 * scaleFactor,
@@ -387,10 +275,6 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     ctx.moveTo(boxLeft + padX, boxTop + padY + headerH - 8 * scaleFactor);
     ctx.lineTo(boxLeft + boxW - padX, boxTop + padY + headerH - 8 * scaleFactor);
     ctx.stroke();
-
-    if (embedMiniMap) {
-      drawCanvasVectorMiniMap(ctx, boxLeft + padX, boxTop + padY + headerH, mapSize, fScale, cfg);
-    }
 
     ctx.font = `bold ${rowFontPx}px monospace`;
     ctx.textAlign = 'left';
@@ -405,35 +289,21 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     });
   } else if (cfg.styleTemplate === 2) {
     const margin = Math.round(28 * scaleFactor);
-    const boxW = Math.min(w - margin * 2 - (cfg.showQr ? Math.round(170 * scaleFactor) : 0), Math.round((cfg.showQr ? 856 : 1024) * scaleFactor));
+    const boxW = Math.min(
+      w - margin * 2 - (showQrNow ? Math.round(170 * scaleFactor) : 0),
+      Math.round((showQrNow ? 856 : 1024) * scaleFactor)
+    );
     const boxLeft = placeCardRight ? w - boxW - margin : margin;
-    const embedMiniMap = Boolean(cfg.showMiniMap && (cfg.miniMapPosition || 0) === 0);
-    const mapSize = embedMiniMap ? Math.round(156 * fScale) : 0;
     const hasFooter = Boolean(antiLine || (cfg.showNote && cfg.note) || (cfg.showAddress && cfg.fullAddr) || envLine);
-    const baseH = Math.round((hasFooter ? 192 : 150) * fScale);
-    const boxH = embedMiniMap ? Math.max(baseH, mapSize + Math.round(24 * scaleFactor)) : baseH;
+    const boxH = Math.round((hasFooter ? 192 : 150) * fScale);
     const boxTop = h - boxH - margin;
 
     ctx.fillStyle = cardBg;
     drawRoundedRect(ctx, boxLeft, boxTop, boxW, boxH, 16 * scaleFactor);
     ctx.fill();
 
-    const gridLeft = embedMiniMap ? boxLeft + mapSize + Math.round(22 * scaleFactor) : boxLeft;
-    const gridW = boxLeft + boxW - gridLeft;
-
-    if (embedMiniMap) {
-      drawCanvasVectorMiniMap(
-        ctx,
-        boxLeft + Math.round(12 * scaleFactor),
-        boxTop + (boxH - mapSize) / 2,
-        mapSize,
-        fScale,
-        cfg
-      );
-    }
-
     ctx.fillStyle = 'rgba(56, 189, 248, 0.20)';
-    drawRoundedRect(ctx, gridLeft, boxTop, gridW, Math.round(52 * fScale), 14 * scaleFactor);
+    drawRoundedRect(ctx, boxLeft, boxTop, boxW, Math.round(52 * fScale), 14 * scaleFactor);
     ctx.fill();
 
     ctx.strokeStyle = accentColor;
@@ -447,42 +317,42 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     ctx.textAlign = 'left';
     const topText = cfg.showCoords ? coordLine : `${cfg.customTitle || '经纬网格测绘'} · ${resolved.tag}`;
     ctx.fillText(
-      ellipsizeCanvasText(ctx, topText, gridW - 32 * scaleFactor),
-      gridLeft + 16 * scaleFactor,
+      ellipsizeCanvasText(ctx, topText, boxW - 32 * scaleFactor),
+      boxLeft + 16 * scaleFactor,
       boxTop + Math.round(34 * fScale)
     );
 
-    const midX = gridLeft + gridW * 0.48;
+    const midX = boxLeft + boxW * 0.48;
     const headerBottom = boxTop + Math.round(52 * fScale);
     const row2Bottom = boxTop + Math.round(140 * fScale);
     ctx.strokeStyle = 'rgba(148, 163, 184, 0.32)';
     ctx.lineWidth = 1.2 * scaleFactor;
     ctx.beginPath();
-    ctx.moveTo(gridLeft, headerBottom);
+    ctx.moveTo(boxLeft, headerBottom);
     ctx.lineTo(boxLeft + boxW, headerBottom);
     ctx.moveTo(midX, headerBottom);
     ctx.lineTo(midX, row2Bottom);
     if (hasFooter) {
-      ctx.moveTo(gridLeft, row2Bottom);
+      ctx.moveTo(boxLeft, row2Bottom);
       ctx.lineTo(boxLeft + boxW, row2Bottom);
     }
     ctx.stroke();
 
     ctx.fillStyle = '#94a3b8';
     ctx.font = `normal ${Math.round(18 * fScale)}px sans-serif`;
-    ctx.fillText(`测绘点位 (${resolved.tag})`, gridLeft + 16 * scaleFactor, boxTop + Math.round(80 * fScale));
+    ctx.fillText(`测绘点位 (${resolved.tag})`, boxLeft + 16 * scaleFactor, boxTop + Math.round(80 * fScale));
     ctx.fillText(`采样时间 (${weekPart})`, midX + 16 * scaleFactor, boxTop + Math.round(80 * fScale));
 
     ctx.fillStyle = '#ffffff';
     ctx.font = `bold ${Math.round(23 * fScale)}px sans-serif`;
     ctx.fillText(
-      ellipsizeCanvasText(ctx, cleanPoi, gridW * 0.48 - 28 * scaleFactor),
-      gridLeft + 16 * scaleFactor,
+      ellipsizeCanvasText(ctx, cleanPoi, boxW * 0.48 - 28 * scaleFactor),
+      boxLeft + 16 * scaleFactor,
       boxTop + Math.round(120 * fScale)
     );
     ctx.font = `bold ${Math.round(21 * fScale)}px monospace`;
     ctx.fillText(
-      ellipsizeCanvasText(ctx, cfg.fullTs, gridW * 0.52 - 28 * scaleFactor),
+      ellipsizeCanvasText(ctx, cfg.fullTs, boxW * 0.52 - 28 * scaleFactor),
       midX + 16 * scaleFactor,
       boxTop + Math.round(120 * fScale)
     );
@@ -496,8 +366,8 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
       else if (cfg.showAddress && cfg.fullAddr) footParts.push(cfg.fullAddr);
       else if (envLine) footParts.push(envLine);
       ctx.fillText(
-        ellipsizeCanvasText(ctx, footParts.join(' · '), gridW - 32 * scaleFactor),
-        gridLeft + 16 * scaleFactor,
+        ellipsizeCanvasText(ctx, footParts.join(' · '), boxW - 32 * scaleFactor),
+        boxLeft + 16 * scaleFactor,
         boxTop + Math.round(172 * fScale)
       );
     }
@@ -516,7 +386,7 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#ffffff';
     ctx.font = `bold ${Math.round(27 * fScale)}px sans-serif`;
-    ctx.fillText(ellipsizeCanvasText(ctx, '📍 ' + cleanPoi, w * 0.5), 26 * scaleFactor, barTop + Math.round(44 * fScale));
+    ctx.fillText(ellipsizeCanvasText(ctx, cleanPoi, w * 0.5), 26 * scaleFactor, barTop + Math.round(44 * fScale));
 
     if (cfg.showTime) {
       ctx.textAlign = 'right';
@@ -546,7 +416,10 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     }
   } else {
     const margin = Math.round(28 * scaleFactor);
-    const boxW = Math.min(w - margin * 2 - (cfg.showQr ? Math.round(170 * scaleFactor) : 0), Math.round((cfg.showQr ? 856 : 1024) * scaleFactor));
+    const boxW = Math.min(
+      w - margin * 2 - (showQrNow ? Math.round(170 * scaleFactor) : 0),
+      Math.round((showQrNow ? 856 : 1024) * scaleFactor)
+    );
     const boxLeft = placeCardRight ? w - boxW - margin : margin;
     const rows = [];
     if (cfg.showCoords) rows.push(['经纬坐标', coordLine, accentColor]);
@@ -557,8 +430,10 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     if (cfg.showTime) rows.push(['记录时间', `${cfg.fullTs} ${weekPart}`, '#ffffff']);
     if (envLine) rows.push(['高程方位', envLine, '#a7f3d0']);
     if (cfg.showNote && cfg.note) rows.push(['现场备注', cfg.note, '#fde68a']);
-    if (cfg.antiTamperMode) {
-      rows.push(['防伪签名', `SHA256:${sigHash.slice(0, 16)} (${cfg.ntpSynced ? 'NTP' : '已锁'})`, '#34d399']);
+    if (cfg.antiTamperMode && sigHash) {
+      rows.push(['防伪签名', `SHA256:${sigHash.slice(0, 16)} (${timeBadge})`, '#34d399']);
+    } else if (cfg.offlinePending) {
+      rows.push(['授时状态', '离线待补签', '#fbbf24']);
     }
 
     const headerH = Math.round(44 * fScale);
@@ -580,7 +455,7 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#ffffff';
     ctx.font = `bold ${Math.round(23 * fScale)}px sans-serif`;
-    const titleStr = `${cfg.customTitle || '外业定点巡检台账'} · ${cfg.antiTamperMode ? '🛡防伪台账' : resolved.tag}`;
+    const titleStr = `${cfg.customTitle || '外业定点巡检台账'} · ${cfg.antiTamperMode ? timeBadge : resolved.tag}`;
     ctx.fillText(
       ellipsizeCanvasText(ctx, titleStr, boxW - 28 * scaleFactor),
       boxLeft + 14 * scaleFactor,
@@ -615,7 +490,7 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     });
   }
 
-  if (cfg.showQr) {
+  if (showQrNow) {
     const qrUrl = buildAmapJumpUrl(cfg.gcjLat, cfg.gcjLon, cleanPoi, {
       enabled: cfg.antiTamperMode,
       timestamp: cfg.fullTs,
@@ -670,22 +545,45 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
 }
 
 /**
- * 计算钳制后的安全输出尺寸（长边 <= 2400px，防止 iOS 4096px 纹理崩溃）
+ * 预读取图片真实尺寸（避免先建固定 1080x1440 画布再动态改尺寸触发裁切）
  */
-function computeSafeExportDimensions(naturalW, naturalH, fastFrame) {
+function getImageInfoAsync(src) {
+  return new Promise(resolve => {
+    if (!src || typeof wx.getImageInfo !== 'function') {
+      resolve(null);
+      return;
+    }
+    wx.getImageInfo({
+      src,
+      success: res => {
+        if (res && res.width > 0 && res.height > 0) {
+          resolve({ width: res.width, height: res.height });
+        } else {
+          resolve(null);
+        }
+      },
+      fail: () => resolve(null)
+    });
+  });
+}
+
+/**
+ * 计算钳制后的安全输出尺寸：
+ * - 长边严格 <= 2400px，防止 iOS 4096px 纹理崩溃
+ * - 短边保底 >= 1080px（不超过长边上限），彻底杜绝低分辨率照片导致裁切与二维码糊码
+ */
+function computeSafeExportDimensions(naturalW, naturalH) {
   const nw = Math.max(1, Math.round(Number(naturalW) || 1080));
   const nh = Math.max(1, Math.round(Number(naturalH) || 1440));
-  const maxLongEdge = fastFrame ? 1280 : MAX_EXPORT_EDGE;
   let w = nw;
   let h = nh;
   const longEdge = Math.max(w, h);
-  if (longEdge > maxLongEdge) {
-    const ratio = maxLongEdge / longEdge;
+  if (longEdge > MAX_EXPORT_EDGE) {
+    const ratio = MAX_EXPORT_EDGE / longEdge;
     w = Math.max(1, Math.round(w * ratio));
     h = Math.max(1, Math.round(h * ratio));
-  } else if (!fastFrame && Math.min(w, h) < 1080 && longEdge < maxLongEdge) {
-    // 低分辨率底图适度放大至 1080 短边以保证水印锐利，同时仍严守长边 <= 2400px
-    const upRatio = Math.min(1080 / Math.min(w, h), maxLongEdge / longEdge);
+  } else if (Math.min(w, h) < MIN_SHORT_EDGE && longEdge < MAX_EXPORT_EDGE) {
+    const upRatio = Math.min(MIN_SHORT_EDGE / Math.min(w, h), MAX_EXPORT_EDGE / longEdge);
     w = Math.max(1, Math.round(w * upRatio));
     h = Math.max(1, Math.round(h * upRatio));
   }
@@ -709,14 +607,14 @@ function createCanvasInstance(width, height, fallbackCanvas) {
   return { canvas: null, isOffscreen: false };
 }
 
+/**
+ * 全画幅安全导出 JPG：
+ * 省略 x/y/width/height 逻辑裁切矩形，仅指定 destWidth/destHeight，彻底杜绝左上角裁切与丢水印
+ */
 function exportCanvasToJpg(canvas, width, height, quality) {
   return new Promise((resolve, reject) => {
     wx.canvasToTempFilePath({
       canvas,
-      x: 0,
-      y: 0,
-      width,
-      height,
       destWidth: width,
       destHeight: height,
       fileType: 'jpg',
@@ -755,7 +653,14 @@ function renderWatermarkToTempFile(rawImagePath, cfg, options) {
       if (!rawImagePath) {
         throw new Error('缺少待合成原图路径');
       }
-      const { canvas, isOffscreen } = createCanvasInstance(1080, 1440, opts.fallbackCanvas);
+
+      // 关键修复：先读取原图真实宽高并算好目标尺寸，再按精确尺寸一次性创建离屏画布
+      const info = await getImageInfoAsync(rawImagePath);
+      const initialDims = info
+        ? computeSafeExportDimensions(info.width, info.height)
+        : { w: 1080, h: 1440 };
+
+      let { canvas, isOffscreen } = createCanvasInstance(initialDims.w, initialDims.h, opts.fallbackCanvas);
       if (!canvas) {
         throw new Error('当前环境无法创建离屏画布');
       }
@@ -764,15 +669,31 @@ function renderWatermarkToTempFile(rawImagePath, cfg, options) {
       let thumbCanvas = null;
       try {
         img = await loadCanvasImage(canvas, rawImagePath);
-        const { w, h } = computeSafeExportDimensions(img.width, img.height, Boolean(cfg && cfg.fastFrame));
-        canvas.width = w;
-        canvas.height = h;
+        const { w, h } = computeSafeExportDimensions(img.width || initialDims.w, img.height || initialDims.h);
+
+        // 若 getImageInfo 缺失导致预估尺寸不符，重新按精确尺寸新建 OffscreenCanvas（禁止二次缩放旧离屏表面）
+        if (w !== canvas.width || h !== canvas.height) {
+          if (isOffscreen) {
+            try {
+              canvas.width = 1;
+              canvas.height = 1;
+            } catch (e) {}
+            const rebuilt = createCanvasInstance(w, h, opts.fallbackCanvas);
+            canvas = rebuilt.canvas;
+            isOffscreen = rebuilt.isOffscreen;
+            img = await loadCanvasImage(canvas, rawImagePath);
+          } else {
+            canvas.width = w;
+            canvas.height = h;
+          }
+        }
+
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
         drawCanvasWatermarkAndQr(ctx, w, h, cfg || {});
 
-        const quality = opts.quality || (cfg && cfg.fastFrame ? 0.88 : 0.94);
+        const quality = opts.quality || 0.92;
         const tempFilePath = await exportCanvasToJpg(canvas, w, h, quality);
 
         let thumbTempFilePath = '';
@@ -788,14 +709,7 @@ function renderWatermarkToTempFile(rawImagePath, cfg, options) {
               tCtx.drawImage(canvas, 0, 0, w, h, 0, 0, tw, th);
               thumbTempFilePath = await exportCanvasToJpg(thumbCanvas, tw, th, 0.78);
             } else {
-              // 兼容不支持 OffscreenCanvas 的旧基础库：用主 canvas 缩绘一次
-              canvas.width = tw;
-              canvas.height = th;
-              const fallbackImg = await loadCanvasImage(canvas, tempFilePath);
-              ctx.clearRect(0, 0, tw, th);
-              ctx.drawImage(fallbackImg, 0, 0, tw, th);
-              fallbackImg.src = '';
-              thumbTempFilePath = await exportCanvasToJpg(canvas, tw, th, 0.78);
+              thumbTempFilePath = tempFilePath;
             }
           } catch (thumbErr) {
             thumbTempFilePath = tempFilePath;
@@ -809,7 +723,6 @@ function renderWatermarkToTempFile(rawImagePath, cfg, options) {
           height: h
         };
       } finally {
-        // 显式释放原生位图与纹理显存，防 iOS Jetsam 闪退
         if (img) {
           try {
             img.src = '';
@@ -838,10 +751,11 @@ function renderWatermarkToTempFile(rawImagePath, cfg, options) {
 module.exports = {
   MAX_EXPORT_EDGE,
   THUMB_WIDTH,
+  getImageInfoAsync,
+  computeSafeExportDimensions,
   createCanvasInstance,
   loadCanvasImage,
   exportCanvasToJpg,
-  drawCanvasVectorMiniMap,
   drawCanvasWatermarkAndQr,
   renderWatermarkToTempFile
 };

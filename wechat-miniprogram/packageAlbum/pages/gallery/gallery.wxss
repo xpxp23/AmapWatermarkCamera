@@ -397,3 +397,46 @@
 
 .v-btn.blue { background-color: #0284c7; }
 .v-btn.emerald { background-color: #059669; }
+
+.offline-sync-banner {
+  margin: 0 24rpx 18rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 18rpx;
+  background-color: rgba(180, 83, 9, 0.22);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+.offline-sync-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.offline-sync-title {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #fde68a;
+}
+.offline-sync-sub {
+  font-size: 19rpx;
+  color: #cbd5e1;
+}
+.offline-sync-btn {
+  padding: 10rpx 20rpx;
+  border-radius: 14rpx;
+  background-color: #d97706;
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.corner-badge.offline {
+  background-color: rgba(180, 83, 9, 0.9);
+  color: #fef3c7;
+  font-size: 17rpx;
+  padding: 2rpx 8rpx;
+}

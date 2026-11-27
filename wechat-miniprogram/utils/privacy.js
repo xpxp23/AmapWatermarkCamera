@@ -1,49 +1,52 @@
 /**
- * 极速高德水印相机 v9.0.0 · 微信隐私合规与系统权限统一管理模块
- * 兼容封装 wx.requirePrivacyAuthorize / wx.onNeedPrivacyAuthorization 及相机/定位/相册授权引导
+ * 极速高德水印相机 v1.0 · 微信隐私合规与系统权限统一管理模块
+ * 严格对接 wx.onNeedPrivacyAuthorization + 原生 <button open-type="agreePrivacyAuthorization"> 组件
  */
 
 let _privacyListenerBound = false;
+let _privacyUiHandler = null;
 let _pendingPrivacyResolvers = [];
+
+/**
+ * 供 <privacy-popup> 组件注册展示回调
+ */
+function setPrivacyUiHandler(handler) {
+  _privacyUiHandler = typeof handler === 'function' ? handler : null;
+  if (_privacyUiHandler && _pendingPrivacyResolvers.length > 0) {
+    _privacyUiHandler(true);
+  }
+}
+
+/**
+ * 供 <privacy-popup> 组件在用户点击官方 agreePrivacyAuthorization 按钮或拒绝按钮后结算
+ */
+function resolvePendingPrivacy(agreed, buttonId) {
+  const event = agreed ? 'agree' : 'disagree';
+  while (_pendingPrivacyResolvers.length > 0) {
+    const fn = _pendingPrivacyResolvers.shift();
+    try {
+      fn(agreed ? { buttonId: buttonId || 'agree-privacy-btn', event } : { event });
+    } catch (e) {}
+  }
+}
 
 /**
  * 注册全局隐私授权拦截回调（基础库 >= 2.32.3 生效）
  */
 function registerPrivacyListener(onNeedAuth) {
+  if (typeof onNeedAuth === 'function') {
+    _privacyUiHandler = onNeedAuth;
+  }
   if (_privacyListenerBound || typeof wx.onNeedPrivacyAuthorization !== 'function') {
     return;
   }
   _privacyListenerBound = true;
   try {
     wx.onNeedPrivacyAuthorization(resolve => {
-      if (typeof onNeedAuth === 'function') {
-        onNeedAuth(resolve);
-        return;
-      }
       _pendingPrivacyResolvers.push(resolve);
-      wx.showModal({
-        title: '隐私保护指引',
-        content: '为使用相机拍摄、定位水印与保存相册功能，请先阅读并同意《用户隐私保护指引》。',
-        confirmText: '同意并继续',
-        cancelText: '暂不同意',
-        success: res => {
-          const event = res.confirm ? 'agree' : 'disagree';
-          while (_pendingPrivacyResolvers.length > 0) {
-            const fn = _pendingPrivacyResolvers.shift();
-            try {
-              fn({ buttonId: 'agree-btn', event });
-            } catch (e) {}
-          }
-        },
-        fail: () => {
-          while (_pendingPrivacyResolvers.length > 0) {
-            const fn = _pendingPrivacyResolvers.shift();
-            try {
-              fn({ event: 'disagree' });
-            } catch (e) {}
-          }
-        }
-      });
+      if (typeof _privacyUiHandler === 'function') {
+        _privacyUiHandler(true);
+      }
     });
   } catch (e) {}
 }
@@ -68,9 +71,6 @@ function ensurePrivacyAuthorized() {
   });
 }
 
-/**
- * 统一引导用户打开小程序设置页开启指定权限
- */
 function promptOpenSetting(scope, title, content) {
   return new Promise(resolve => {
     wx.showModal({
@@ -96,10 +96,6 @@ function promptOpenSetting(scope, title, content) {
   });
 }
 
-/**
- * 预检并申请系统相册写入权限（scope.writePhotosAlbum）
- * @param {boolean} interactive 拒绝后是否弹窗引导去设置
- */
 function ensureAlbumWritePermission(interactive) {
   return new Promise(resolve => {
     wx.getSetting({
@@ -127,7 +123,6 @@ function ensureAlbumWritePermission(interactive) {
           });
           return;
         }
-        // status === false (曾拒绝)
         if (!interactive) {
           resolve(false);
           return;
@@ -143,9 +138,6 @@ function ensureAlbumWritePermission(interactive) {
   });
 }
 
-/**
- * 静默预请求相册写入权限（仅在从未询问时触发）
- */
 function preRequestAlbumPermissionSilently() {
   try {
     wx.getSetting({
@@ -161,9 +153,6 @@ function preRequestAlbumPermissionSilently() {
   } catch (e) {}
 }
 
-/**
- * 安全写入系统相册（带权限预检与二次设置引导）
- */
 function saveImageToAlbumWithPermission(filePath, successToastTitle, silentSuccess) {
   return new Promise((resolve, reject) => {
     if (!filePath) {
@@ -223,6 +212,8 @@ function saveImageToAlbumWithPermission(filePath, successToastTitle, silentSucce
 }
 
 module.exports = {
+  setPrivacyUiHandler,
+  resolvePendingPrivacy,
   registerPrivacyListener,
   ensurePrivacyAuthorized,
   promptOpenSetting,

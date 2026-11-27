@@ -1,18 +1,20 @@
 /**
- * 极速高德水印相机 v9.0.0 · 双轨相册存储、分级回收与孤儿文件 GC 管理引擎
+ * 极速高德水印相机 v1.0 · 双轨相册存储、异步持久化与孤儿文件 GC 管理引擎
  * - 水印成品 (wmPath) + 240px 缩略图 (thumbPath)：长期保留最多 120 张
  * - 无损底图 (rawPath)：仅保留最近 25 张，超限时仅回收最旧的 rawPath 而不删整张照片
- * - 冷启动异步扫描 USER_DATA_PATH 清理孤儿文件与旧版残留
+ * - 内存缓存 + 异步 wx.setStorage 落盘，彻底消除大 JSON 同步写入主线程卡顿
  */
 
-const STORAGE_KEY_CFG_V9 = 'amap_wm_wx_cfg_v9_0';
-const STORAGE_KEY_PHOTOS_V9 = 'amap_wm_wx_photos_v9_0';
-const LEGACY_CFG_KEYS = ['amap_wm_wx_cfg_v8_0', 'amap_wm_wx_cfg_v7_1'];
-const LEGACY_PHOTO_KEYS = ['amap_wm_wx_photos_v8_0', 'amap_wm_wx_photos_v7_1'];
+const STORAGE_KEY_CFG = 'amap_wm_wx_cfg_v1_0';
+const STORAGE_KEY_PHOTOS = 'amap_wm_wx_photos_v1_0';
+const LEGACY_CFG_KEYS = ['amap_wm_wx_cfg_v9_0', 'amap_wm_wx_cfg_v8_0', 'amap_wm_wx_cfg_v7_1'];
+const LEGACY_PHOTO_KEYS = ['amap_wm_wx_photos_v9_0', 'amap_wm_wx_photos_v8_0', 'amap_wm_wx_photos_v7_1'];
 
 const MAX_PHOTOS = 120;
 const MAX_RAW_ORIGINALS = 25;
-const STORAGE_QUOTA_BYTES = 200 * 1024 * 1024; // 微信 USER_DATA_PATH 200MB 上限
+const STORAGE_QUOTA_BYTES = 200 * 1024 * 1024;
+
+let _photosCache = null;
 
 function getUserDataPath() {
   return (wx.env && wx.env.USER_DATA_PATH) || '';
@@ -31,9 +33,6 @@ function safeUnlinkFile(filePath) {
   } catch (e) {}
 }
 
-/**
- * 使用 fs.copyFile 将临时文件持久化到 USER_DATA_PATH（避免 fs.saveFile 移动源文件）
- */
 function copyTempToUserData(tempPath, prefix) {
   return new Promise(resolve => {
     if (!tempPath) {
@@ -65,16 +64,16 @@ function copyTempToUserData(tempPath, prefix) {
 
 function loadUserConfig() {
   try {
-    const v9 = wx.getStorageSync(STORAGE_KEY_CFG_V9);
-    if (v9 && typeof v9 === 'object') return v9;
+    const cur = wx.getStorageSync(STORAGE_KEY_CFG);
+    if (cur && typeof cur === 'object') return cur;
     for (let i = 0; i < LEGACY_CFG_KEYS.length; i++) {
       const legacy = wx.getStorageSync(LEGACY_CFG_KEYS[i]);
       if (legacy && typeof legacy === 'object') {
-        const migrated = {
-          ...legacy,
-          showBottomScrim: false
-        };
-        wx.setStorageSync(STORAGE_KEY_CFG_V9, migrated);
+        const migrated = { ...legacy };
+        delete migrated.showMiniMap;
+        delete migrated.miniMapPosition;
+        delete migrated.captureMode;
+        wx.setStorage({ key: STORAGE_KEY_CFG, data: migrated });
         return migrated;
       }
     }
@@ -84,14 +83,23 @@ function loadUserConfig() {
 
 function saveUserConfig(cfg) {
   try {
-    wx.setStorageSync(STORAGE_KEY_CFG_V9, cfg);
+    wx.setStorage({
+      key: STORAGE_KEY_CFG,
+      data: cfg
+    });
   } catch (e) {}
 }
 
-function loadPhotos() {
+function loadPhotos(forceReload) {
+  if (!forceReload && Array.isArray(_photosCache)) {
+    return _photosCache;
+  }
   try {
-    const v9 = wx.getStorageSync(STORAGE_KEY_PHOTOS_V9);
-    if (Array.isArray(v9)) return v9;
+    const cur = wx.getStorageSync(STORAGE_KEY_PHOTOS);
+    if (Array.isArray(cur)) {
+      _photosCache = cur;
+      return _photosCache;
+    }
     for (let i = 0; i < LEGACY_PHOTO_KEYS.length; i++) {
       const legacy = wx.getStorageSync(LEGACY_PHOTO_KEYS[i]);
       if (Array.isArray(legacy) && legacy.length > 0) {
@@ -100,20 +108,16 @@ function loadPhotos() {
           thumbPath: item.thumbPath || item.wmPath || '',
           createdAt: item.createdAt || Date.now()
         }));
-        wx.setStorageSync(STORAGE_KEY_PHOTOS_V9, migrated);
-        return migrated;
+        _photosCache = migrated;
+        wx.setStorage({ key: STORAGE_KEY_PHOTOS, data: migrated });
+        return _photosCache;
       }
     }
   } catch (e) {}
-  return [];
+  _photosCache = [];
+  return _photosCache;
 }
 
-/**
- * 分级持久化相册列表：
- * 1. 超出 MAX_PHOTOS(120) 的最旧记录彻底回收 wmPath / thumbPath / rawPath
- * 2. 超出 MAX_RAW_ORIGINALS(25) 的记录仅回收 rawPath，保留 wmPath / thumbPath
- * 3. 返回与磁盘 100% 一致的裁剪后数组，彻底杜绝内存与磁盘不一致导致的裂图
- */
 function savePhotos(nextPhotos) {
   const input = Array.isArray(nextPhotos) ? nextPhotos : [];
   const kept = input.slice(0, MAX_PHOTOS).map(item => ({ ...item }));
@@ -126,7 +130,6 @@ function savePhotos(nextPhotos) {
     safeUnlinkFile(p.thumbPath);
   });
 
-  // 仅保留最新 25 张的无损底图 rawPath
   let rawCount = 0;
   for (let i = 0; i < kept.length; i++) {
     const p = kept[i];
@@ -141,16 +144,19 @@ function savePhotos(nextPhotos) {
     }
   }
 
+  _photosCache = kept;
   try {
-    wx.setStorageSync(STORAGE_KEY_PHOTOS_V9, kept);
+    wx.setStorage({
+      key: STORAGE_KEY_PHOTOS,
+      data: kept
+    });
   } catch (e) {}
   return kept;
 }
 
 function addPhotoEntry(entry) {
   const list = loadPhotos();
-  const next = savePhotos([entry, ...list]);
-  return next;
+  return savePhotos([entry, ...list]);
 }
 
 function updatePhotoEntry(photoId, updater) {
@@ -180,9 +186,6 @@ function deletePhotosByIds(ids) {
   return savePhotos(remaining);
 }
 
-/**
- * 一键清理全部无损底图（释放空间，保留全部 120 张水印成品与缩略图）
- */
 function clearAllRawOriginals() {
   const list = loadPhotos();
   let freedCount = 0;
@@ -200,9 +203,6 @@ function clearAllRawOriginals() {
   return { photos: saved, freedCount };
 }
 
-/**
- * 冷启动异步孤儿文件 GC：扫描 USER_DATA_PATH，清理未被当前相册引用的 amap_* 残留文件
- */
 function runOrphanFileGC() {
   return new Promise(resolve => {
     const root = getUserDataPath();
@@ -245,9 +245,6 @@ function runOrphanFileGC() {
   });
 }
 
-/**
- * 异步估算已用本地存储空间（扫描 USER_DATA_PATH 下 amap_* 文件体积）
- */
 function estimateStorageUsage() {
   return new Promise(resolve => {
     const list = loadPhotos();
@@ -336,8 +333,8 @@ function estimateStorageUsage() {
 module.exports = {
   MAX_PHOTOS,
   MAX_RAW_ORIGINALS,
-  STORAGE_KEY_CFG_V9,
-  STORAGE_KEY_PHOTOS_V9,
+  STORAGE_KEY_CFG,
+  STORAGE_KEY_PHOTOS,
   safeUnlinkFile,
   copyTempToUserData,
   loadUserConfig,

@@ -20,8 +20,9 @@
   >
     <swiper-item wx:for="{{photos}}" wx:key="id" class="swiper-slide">
       <image
-        src="{{item.wmPath}}"
+        src="{{(index >= currentIndex - 1 && index <= currentIndex + 1) ? item.wmPath : (item.thumbPath || '')}}"
         mode="aspectFit"
+        lazy-load="{{true}}"
         class="detail-full-img"
         bindtap="previewCurrentFullImage"
       />
@@ -165,10 +166,7 @@
           <text>▣ 显示高德定位二维码</text>
           <switch checked="{{editDraft.showQr}}" data-field="showQr" bindchange="onDraftToggleBool" color="#0284c7" />
         </view>
-        <view class="toggle-row">
-          <text>🗺 显示 160px 高德缩略图</text>
-          <switch checked="{{editDraft.showMiniMap}}" data-field="showMiniMap" bindchange="onDraftToggleBool" color="#0284c7" />
-        </view>
+
       </scroll-view>
 
       <button class="confirm-redraw-btn" bindtap="confirmRedrawWatermark">确认并全尺寸无损重绘</button>

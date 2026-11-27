@@ -1,0 +1,9 @@
+{
+  "name": "regeoPoi",
+  "version": "1.0.0",
+  "description": "极速高德水印相机 v1.0 逆地理编码周边 POI 自动识别与权威授时云函数",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

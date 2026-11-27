@@ -97,8 +97,8 @@
     </block>
     <block wx:else>
       <button wx:if="{{failedCount > 0}}" class="footer-btn amber" bindtap="retryFailedItems">↻ 重试失败项 ({{failedCount}})</button>
-      <button class="footer-btn primary" bindtap="{{items.length > 0 ? 'startBatchQueue' : 'chooseAlbumImages'}}">
-        {{items.length > 0 ? ('⚡ 开始批量加水印 (' + items.length + '张)') : '🖼 从系统相册选图'}}
+      <button class="footer-btn primary" bindtap="{{pendingCount > 0 ? 'startBatchQueue' : 'chooseAlbumImages'}}">
+        {{pendingCount > 0 ? ('开始批量加水印 (' + pendingCount + '张)') : '从系统相册选图'}}
       </button>
     </block>
   </view>

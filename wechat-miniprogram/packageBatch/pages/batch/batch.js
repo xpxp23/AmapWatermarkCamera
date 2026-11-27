@@ -1,26 +1,21 @@
 /**
- * 极速高德水印相机 v9.0.0 · 批量相册加水印分包页面
- * 特性：
- * - 复用 utils/watermark_renderer.js + wx.createOffscreenCanvas 离屏合成
- * - 轻量纯 JS EXIF 64KB 解析 DateTimeOriginal 与 GPS，支持一键切换「优先 EXIF」/「统一当前」
- * - 并发度 = 1 串行队列调度器，直存系统相册不占 USER_DATA_PATH 配额，每张间隙释放纹理防 iOS Jetsam 闪退
+ * 极速高德水印相机 v1.0 · 批量相册加水印分包页面
+ * v1.0 核心升级：
+ * - 选图瞬间解析 64KB EXIF 并立即展示队列，彻底消除选图期 20 次串行云函数阻塞
+ * - 优先 EXIF 模式下自动按每张照片自身 EXIF 坐标调用 regeoPoi 解析真实周边地名（网格缓存防重复请求）
+ * - 修复部分完成后按钮数量显示偏差（精准展示待处理张数 pendingCount）
+ * - 移除 160px 假小图与假默认坐标/海拔
  */
 
 const {
-  getTimeStrings,
-  inferSmartPoiFromCoords,
-  gcj02ToWgs84
+  getTimeStrings
 } = require('../../../utils/coord_qr.js');
 
+const { resolveNearbyPoi } = require('../../../utils/poi_service.js');
 const { readImageExifLite } = require('../../utils/exif_lite.js');
 const { renderWatermarkToTempFile } = require('../../../utils/watermark_renderer.js');
 const { ensureAlbumWritePermission } = require('../../../utils/privacy.js');
 const { loadUserConfig } = require('../../../utils/photo_store.js');
-const {
-  checkImageSecurity,
-  checkTextsSecurity,
-  showViolationModal
-} = require('../../../utils/sec_check.js');
 
 const TPL_NAMES = ['大字时间', '巡检卡片', '网格测绘', '胶片底栏', '标准台账'];
 
@@ -55,12 +50,13 @@ Page({
     styleTemplate: 0,
     showBottomScrim: false,
     useExifPriority: true,
-    shortPoi: '实拍点位',
+    shortPoi: '',
     note: '',
     coordSys: 'WGS-84',
-    items: [], // { id, path, status: 'pending'|'processing'|'success'|'failed', errorMsg, exif, exifLabel }
+    items: [],
     isRunning: false,
     isCancelling: false,
+    pendingCount: 0,
     doneCount: 0,
     successCount: 0,
     failedCount: 0,
@@ -69,6 +65,7 @@ Page({
 
   onLoad(query) {
     this._cancelRequested = false;
+    this._userEditedPoi = false;
     this._baseCfg = this.loadBaseWatermarkConfig();
 
     let menuBtnTop = 48;
@@ -93,15 +90,13 @@ Page({
       menuBtnRightSpace,
       styleTemplate: this._baseCfg.styleTemplate || 0,
       showBottomScrim: Boolean(this._baseCfg.showBottomScrim),
-      shortPoi: this._baseCfg.shortPoi || '实拍点位',
+      shortPoi: this._baseCfg.shortPoi || '',
       note: this._baseCfg.note || '',
       coordSys: this._baseCfg.coordSys || 'WGS-84'
     });
-    this._safeShortPoi = this._baseCfg.shortPoi || '实拍点位';
-    this._safeNote = this._baseCfg.note || '';
 
     if (query && query.autoPick === '1') {
-      setTimeout(() => this.chooseAlbumImages(), 180);
+      setTimeout(() => this.chooseAlbumImages(), 160);
     }
   },
 
@@ -118,9 +113,6 @@ Page({
       return { ...app.globalData.liveConfigSnapshot };
     }
     const saved = loadUserConfig() || {};
-    const gcjLat = 39.908823;
-    const gcjLon = 116.397470;
-    const wgs = gcj02ToWgs84(gcjLat, gcjLon);
     return {
       styleTemplate: saved.styleTemplate !== undefined ? Number(saved.styleTemplate) : 0,
       showBottomScrim: Boolean(saved.showBottomScrim),
@@ -130,20 +122,20 @@ Page({
       accentHex: '#38bdf8',
       fontScale: Number(saved.fontScale) || 1,
       cardBgRgba: 'rgba(11, 19, 43, 0.84)',
-      gcjLat,
-      gcjLon,
-      wgsLat: wgs.lat,
-      wgsLon: wgs.lon,
-      accuracy: '2.4',
-      altitude: '46.5',
+      hasRealFix: false,
+      isManualCoord: false,
+      gcjLat: 0,
+      gcjLon: 0,
+      wgsLat: 0,
+      wgsLon: 0,
+      accuracy: '',
+      altitude: '',
       azimuthDeg: 0,
-      azimuthText: '正北 000°',
+      azimuthText: '',
       shortPoi: '实拍点位',
       fullAddr: '',
       note: saved.note || '',
       showQr: saved.showQr !== false,
-      showMiniMap: saved.showMiniMap !== false,
-      miniMapPosition: Number(saved.miniMapPosition) || 0,
       bottomRight: Boolean(saved.bottomRight),
       showTime: saved.showTime !== false,
       showLoc: saved.showLoc !== false,
@@ -193,6 +185,7 @@ Page({
   },
 
   onInputPoi(e) {
+    this._userEditedPoi = true;
     this.setData({ shortPoi: e.detail.value });
   },
 
@@ -214,46 +207,34 @@ Page({
         const files = (res && res.tempFiles) || [];
         if (files.length === 0) return;
 
-        wx.showLoading({ title: `内容安全检测 (${files.length}张)...` });
-        const fallbackCanvas = await this.getFallbackCanvasNode();
-        const newItems = [];
-        let blockedCount = 0;
-        let blockedMsg = '';
+        wx.showLoading({ title: `解析 EXIF (${files.length}张)...` });
+        let newItems = [];
+        try {
+          newItems = await Promise.all(
+            files.map(async (f, i) => {
+              const exif = await readImageExifLite(f.tempFilePath);
+              let exifLabel = '无EXIF·用当前';
+              if (exif.hasTime && exif.hasGps) exifLabel = 'EXIF 时间+GPS';
+              else if (exif.hasTime) exifLabel = 'EXIF 拍摄时间';
+              else if (exif.hasGps) exifLabel = 'EXIF GPS坐标';
 
-        for (let i = 0; i < files.length; i++) {
-          const f = files[i];
-          wx.showLoading({ title: `安全检测 (${i + 1}/${files.length})...` });
-          const sec = await checkImageSecurity(f.tempFilePath, fallbackCanvas);
-          if (!sec.pass) {
-            blockedCount++;
-            if (!blockedMsg && sec.message) blockedMsg = sec.message;
-            continue;
-          }
-
-          const exif = await readImageExifLite(f.tempFilePath);
-          let exifLabel = '无EXIF·用当前';
-          if (exif.hasTime && exif.hasGps) exifLabel = 'EXIF 时间+GPS';
-          else if (exif.hasTime) exifLabel = 'EXIF 拍摄时间';
-          else if (exif.hasGps) exifLabel = 'EXIF GPS坐标';
-
-          newItems.push({
-            id: `batch_${Date.now()}_${i}_${Math.floor(Math.random() * 1000)}`,
-            path: f.tempFilePath,
-            status: 'pending',
-            errorMsg: '',
-            exif,
-            exifLabel,
-            secChecked: true
-          });
+              return {
+                id: `batch_${Date.now()}_${i}_${Math.floor(Math.random() * 1000)}`,
+                path: f.tempFilePath,
+                status: 'pending',
+                errorMsg: '',
+                exif,
+                exifLabel
+              };
+            })
+          );
+        } finally {
+          wx.hideLoading();
         }
-        wx.hideLoading();
 
         if (newItems.length > 0) {
           const merged = [...this.data.items, ...newItems];
           this.setData({ items: merged }, () => this.recomputeStats());
-        }
-        if (blockedCount > 0) {
-          showViolationModal(blockedMsg);
         }
       }
     });
@@ -270,6 +251,7 @@ Page({
     if (this.data.isRunning) return;
     this.setData({
       items: [],
+      pendingCount: 0,
       doneCount: 0,
       successCount: 0,
       failedCount: 0,
@@ -282,16 +264,22 @@ Page({
     const total = items.length;
     let successCount = 0;
     let failedCount = 0;
+    let pendingCount = 0;
     items.forEach(it => {
       if (it.status === 'success') successCount++;
-      else if (it.status === 'failed') failedCount++;
+      else if (it.status === 'failed') {
+        failedCount++;
+        pendingCount++;
+      } else {
+        pendingCount++;
+      }
     });
     const doneCount = successCount + failedCount;
     const progressPercent = total > 0 ? Math.round((doneCount / total) * 100) : 0;
-    this.setData({ doneCount, successCount, failedCount, progressPercent });
+    this.setData({ pendingCount, doneCount, successCount, failedCount, progressPercent });
   },
 
-  buildCfgForItem(item) {
+  async buildCfgForItem(item) {
     const base = this._baseCfg;
     const nowT = getTimeStrings(base.ntpOffsetMs || 0);
     const useExif = this.data.useExifPriority && item && item.exif;
@@ -303,13 +291,20 @@ Page({
     const gcjLon = useGpsFromExif ? item.exif.gcjLon : base.gcjLon;
     const wgsLat = useGpsFromExif ? item.exif.wgsLat : base.wgsLat;
     const wgsLon = useGpsFromExif ? item.exif.wgsLon : base.wgsLon;
+    const hasRealFix = useGpsFromExif ? true : Boolean(base.hasRealFix);
     const altitude =
-      useGpsFromExif && item.exif.altitude !== null ? String(item.exif.altitude) : base.altitude || '46.5';
+      useGpsFromExif && item.exif.altitude !== null ? String(item.exif.altitude) : base.altitude || '';
 
     let shortPoi = (this.data.shortPoi || '').trim() || base.shortPoi || '实拍点位';
-    if (useGpsFromExif && (!this.data.shortPoi || this.data.shortPoi === '实拍点位')) {
-      const inferred = inferSmartPoiFromCoords(gcjLat, gcjLon);
-      shortPoi = inferred.shortPoi;
+    let fullAddr = base.fullAddr || '';
+
+    // 修复 EXIF 地名覆盖 Bug：当优先 EXIF 且照片自带 GPS 且用户未手动锁定统一地名时，自动识别该照片自身坐标的周边 POI
+    if (useGpsFromExif && !this._userEditedPoi) {
+      const poiRes = await resolveNearbyPoi(gcjLat, gcjLon);
+      if (poiRes && poiRes.ok && poiRes.resolved && poiRes.shortPoi) {
+        shortPoi = poiRes.shortPoi;
+        if (poiRes.fullAddr) fullAddr = poiRes.fullAddr;
+      }
     }
 
     return {
@@ -317,7 +312,9 @@ Page({
       styleTemplate: this.data.styleTemplate,
       showBottomScrim: this.data.showBottomScrim,
       shortPoi,
+      fullAddr,
       note: (this.data.note || '').trim(),
+      hasRealFix,
       gcjLat,
       gcjLon,
       wgsLat,
@@ -330,8 +327,7 @@ Page({
       dateWeek: useTimeFromExif ? item.exif.dateWeek : nowT.dateWeek,
       fullTs: useTimeFromExif ? item.exif.timestamp : nowT.fullTs,
       antiTamperMode: false,
-      antiTamperHash: '',
-      fastFrame: false
+      antiTamperHash: ''
     };
   },
 
@@ -373,10 +369,6 @@ Page({
     });
   },
 
-  /**
-   * 并发度 = 1 串行队列调度器：
-   * 预检相册权限 -> 屏幕常亮 -> 逐张离屏合成 -> 直存系统相册 -> 立即清理临时文件 + 50ms 冷却防 Jetsam 闪退
-   */
   async startBatchQueue() {
     if (this.data.isRunning) return;
     const pendingIndices = [];
@@ -386,25 +378,9 @@ Page({
       }
     });
     if (pendingIndices.length === 0) {
-      wx.showToast({ title: '请先从相册选择待处理照片', icon: 'none' });
+      wx.showToast({ title: '没有待处理的照片', icon: 'none' });
       return;
     }
-
-    wx.showLoading({ title: '内容安全检测中...' });
-    const txtSec = await checkTextsSecurity([this.data.shortPoi, this.data.note], 3);
-    wx.hideLoading();
-    if (!txtSec.pass) {
-      if (txtSec.risky) {
-        this.setData({
-          shortPoi: this._safeShortPoi || '实拍点位',
-          note: this._safeNote || ''
-        });
-      }
-      showViolationModal(txtSec.message);
-      return;
-    }
-    this._safeShortPoi = this.data.shortPoi;
-    this._safeNote = this.data.note;
 
     const granted = await ensureAlbumWritePermission(true);
     if (!granted) {
@@ -432,13 +408,7 @@ Page({
 
         let exportedTempPath = '';
         try {
-          if (!currentItem.secChecked) {
-            const sec = await checkImageSecurity(currentItem.path, fallbackCanvas);
-            if (!sec.pass) {
-              throw new Error(sec.message || '所发布内容含违规信息');
-            }
-          }
-          const cfg = this.buildCfgForItem(currentItem);
+          const cfg = await this.buildCfgForItem(currentItem);
           const out = await renderWatermarkToTempFile(currentItem.path, cfg, {
             fallbackCanvas,
             generateThumb: false
@@ -458,7 +428,6 @@ Page({
             tryUnlinkTemp(exportedTempPath);
           }
           this.recomputeStats();
-          // 50ms 冷却间隔让 iOS 原生图形管线回收纹理内存，杜绝 Jetsam 闪退
           await delay(50);
         }
       }

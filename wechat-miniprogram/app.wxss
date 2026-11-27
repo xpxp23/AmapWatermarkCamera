@@ -1,19 +1,21 @@
-/* 极速高德水印相机 v9.0.0 · 全局 Design Token 与基础样式 */
+/* 极速高德水印相机 v1.0 · 极简现代相机 Design Token */
 page {
-  --bg-page: #000000;
-  --bg-surface: #0b132b;
-  --bg-elevated: #0f172a;
-  --bg-pill: rgba(30, 41, 59, 0.82);
-  --border-subtle: rgba(148, 163, 184, 0.24);
-  --border-accent: rgba(56, 189, 248, 0.55);
+  --bg-page: #05070b;
+  --bg-surface: #0e131d;
+  --bg-elevated: #141a26;
+  --bg-pill: rgba(255, 255, 255, 0.08);
+  --bg-pill-hover: rgba(255, 255, 255, 0.14);
+  --border-subtle: rgba(255, 255, 255, 0.12);
+  --border-accent: rgba(56, 189, 248, 0.52);
   --accent-blue: #38bdf8;
-  --accent-blue-bg: rgba(2, 132, 199, 0.25);
+  --accent-blue-solid: #0284c7;
+  --accent-blue-bg: rgba(14, 165, 233, 0.18);
   --accent-emerald: #34d399;
-  --accent-emerald-bg: rgba(5, 150, 105, 0.25);
+  --accent-emerald-bg: rgba(16, 185, 129, 0.16);
   --accent-amber: #fbbf24;
-  --accent-amber-bg: rgba(217, 119, 6, 0.25);
+  --accent-amber-bg: rgba(245, 158, 11, 0.16);
   --accent-danger: #f87171;
-  --text-primary: #ffffff;
+  --text-primary: #f8fafc;
   --text-secondary: #cbd5e1;
   --text-muted: #94a3b8;
 

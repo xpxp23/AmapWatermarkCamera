@@ -35,113 +35,6 @@
   color: #cbd5e1 !important;
 }
 
-/* 160x160 高德矢量缩略图 */
-.floating-minimap-box {
-  position: absolute;
-  top: 84rpx;
-  left: 20rpx;
-  width: 156rpx;
-  height: 156rpx;
-  background-color: rgba(12, 22, 41, 0.92);
-  border: 2rpx solid #38bdf8;
-  border-radius: 18rpx;
-  overflow: hidden;
-  pointer-events: auto;
-  z-index: 9;
-}
-
-.embedded-minimap-box {
-  width: 136rpx;
-  height: 136rpx;
-  background-color: rgba(12, 22, 41, 0.94);
-  border: 2rpx solid #38bdf8;
-  border-radius: 14rpx;
-  margin-right: 14rpx;
-  position: relative;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.embedded-minimap-box.small {
-  width: 96rpx;
-  height: 82rpx;
-  margin: 6rpx 0 6rpx 10rpx;
-}
-
-.minimap-north-tag {
-  position: absolute;
-  top: 6rpx;
-  left: 6rpx;
-  background-color: rgba(15, 23, 42, 0.86);
-  color: #38bdf8;
-  font-size: 15rpx;
-  font-weight: bold;
-  padding: 2rpx 8rpx;
-  border-radius: 6rpx;
-  z-index: 3;
-}
-
-.minimap-road-h {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 48%;
-  height: 6rpx;
-  background-color: rgba(245, 158, 11, 0.55);
-  transform: rotate(-8deg);
-}
-
-.minimap-road-v {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 52%;
-  width: 5rpx;
-  background-color: rgba(148, 163, 184, 0.42);
-  transform: rotate(6deg);
-}
-
-.minimap-radar-circle {
-  position: absolute;
-  left: 50%;
-  top: 46%;
-  width: 56rpx;
-  height: 56rpx;
-  margin-left: -28rpx;
-  margin-top: -28rpx;
-  border-radius: 28rpx;
-  background-color: rgba(56, 189, 248, 0.18);
-  border: 1px solid rgba(56, 189, 248, 0.65);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.minimap-center-pin {
-  width: 14rpx;
-  height: 14rpx;
-  border-radius: 7rpx;
-  background-color: #ef4444;
-  border: 2rpx solid #ffffff;
-}
-
-.minimap-poi-bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 28rpx;
-  line-height: 28rpx;
-  background-color: rgba(11, 19, 43, 0.90);
-  color: #e2e8f0;
-  font-size: 16rpx;
-  text-align: center;
-  padding: 0 6rpx;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* 悬浮水印主容器 */
 .live-wm-container {
   position: absolute;
@@ -306,12 +199,6 @@
   padding: 2rpx 10rpx;
   border-radius: 8rpx;
   background-color: rgba(15, 23, 42, 0.72);
-}
-
-.wm-card-body-row {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
 }
 
 .wm-card-lines {

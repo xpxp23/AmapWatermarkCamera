@@ -1,24 +1,35 @@
 /**
- * 极速高德水印相机 v9.0.0 · 主取景页控制器
- * 架构升级：
- * - 实时预览交由 <watermark-overlay> 独立组件局部刷新
- * - 水印合成交由 utils/watermark_renderer.js 独立离屏引擎
- * - 识图验真交由 utils/photo_verifier.js（零假阳性）
- * - 相册浏览与批量加水印拆分至独立分包 packageAlbum / packageBatch，离页自动卸载 <camera> 释放显存
+ * 极速高德水印相机 v1.0 · 主取景页控制器
+ * 核心升级：
+ * - 快门零云函数阻塞，支持纯离线秒拍 + 后台异步合成队列连拍
+ * - 接入云函数 regeoPoi 自动识别周边店铺/小区/地标（50m 空间缓存 + 权威授时）
+ * - 离线拍摄队列 + 联网自动/一键补签授时与补齐周边地名
+ * - 彻底移除 160px 假小图与极速裁切模式，统一高清水印全画幅导出
+ * - 极简相机交互：顶 3 键 + 沉浸取景（点击对焦/横滑切模板）+ 底 3 槽 + 双 Tab 水印设置
  */
 
 const {
-  DEFAULT_FALLBACK_LAT,
-  DEFAULT_FALLBACK_LON,
   gcj02ToWgs84,
   canSignAntiTamper,
   formatAzimuthText,
   getTimeStrings,
   computeAntiTamperHash,
   verifyAntiTamperHash,
-  parseLocationPayload,
-  inferSmartPoiFromCoords
+  parseLocationPayload
 } = require('../../utils/coord_qr.js');
+
+const {
+  FALLBACK_QUICK_POIS,
+  resolveNearbyPoi,
+  syncCloudServerTime
+} = require('../../utils/poi_service.js');
+
+const {
+  getOfflinePendingCount,
+  enqueueOfflinePhoto,
+  reconcileOfflineQueue,
+  initOfflineNetworkListener
+} = require('../../utils/offline_queue.js');
 
 const {
   buildVerificationReport,
@@ -44,12 +55,6 @@ const {
   saveImageToAlbumWithPermission
 } = require('../../utils/privacy.js');
 
-const {
-  checkImageSecurity,
-  checkTextsSecurity,
-  showViolationModal
-} = require('../../utils/sec_check.js');
-
 const ACCENT_PALETTE = [
   { name: '天际蓝', hex: '#38bdf8' },
   { name: '翡翠绿', hex: '#34d399' },
@@ -71,16 +76,24 @@ Page({
     menuBtnRightSpace: 104,
     pageActive: true,
     cameraReady: false,
-    captureMode: 'photo',
     devicePosition: 'back',
     flashMode: 'off',
-    flashLabel: '⚡关',
+    flashLabel: '关',
     timerSeconds: 0,
     countdownRemaining: 0,
     shutterFlashVisible: false,
     zoomRatio: 1.0,
-    zoomRatioStr: '1.0X',
+    zoomSteps: [
+      { val: 1.0, label: '1x' },
+      { val: 1.5, label: '1.5x' },
+      { val: 2.0, label: '2x' },
+      { val: 3.0, label: '3x' }
+    ],
     showGridLines: false,
+    focusRingVisible: false,
+    focusX: 0,
+    focusY: 0,
+    templateToastText: '',
     styleTemplate: 0,
     showBottomScrim: false,
     tplNames: ['大字时间', '巡检卡片', '网格测绘', '胶片底栏', '标准台账'],
@@ -98,32 +111,33 @@ Page({
     hasRealFix: false,
     locationDenied: false,
     hasCustomPoi: false,
+    poiResolved: false,
+    poiLoading: false,
     isManualCoord: false,
-    rawGcjLat: DEFAULT_FALLBACK_LAT,
-    rawGcjLon: DEFAULT_FALLBACK_LON,
-    rawWgsLat: 39.907419,
-    rawWgsLon: 116.391228,
-    rawAccuracy: '2.4',
-    gcjLat: DEFAULT_FALLBACK_LAT,
-    gcjLon: DEFAULT_FALLBACK_LON,
-    wgsLat: 39.907419,
-    wgsLon: 116.391228,
-    accuracy: '2.4',
-    altitude: '46.5',
+    rawGcjLat: 0,
+    rawGcjLon: 0,
+    rawWgsLat: 0,
+    rawWgsLon: 0,
+    rawAccuracy: '',
+    gcjLat: 0,
+    gcjLon: 0,
+    wgsLat: 0,
+    wgsLon: 0,
+    accuracy: '',
+    altitude: '',
     azimuthDeg: 0,
-    azimuthText: '正北 000°',
-    shortPoi: '实拍点位',
+    azimuthText: '',
+    shortPoi: '定位中...',
     fullAddr: '',
-    nearbyPois: ['实拍点位', '1号巡检点', '施工现场', '隐蔽工程验收点', '测绘控制点A', '外业打卡现场'],
+    nearbyPois: FALLBACK_QUICK_POIS,
+    nearbyPoiDetails: [],
     note: '',
     showQr: true,
-    showMiniMap: true,
-    miniMapPosition: 0,
     bottomRight: false,
     antiTamperMode: false,
     ntpSynced: false,
     ntpOffsetMs: 0,
-    ntpStatusText: '本地单调时钟校准',
+    ntpStatusText: '待授时校准',
     showTime: true,
     showLoc: true,
     showCoords: true,
@@ -135,6 +149,10 @@ Page({
     autoSaveAlbum: true,
     photoCount: 0,
     latestPhotoThumb: '',
+    pendingComposeCount: 0,
+    offlinePendingCount: 0,
+    isReconcilingOffline: false,
+    wmTab: 'basic', // 'basic' | 'pro'
     showSettings: false,
     showWmModal: false,
     showPoiModal: false,
@@ -150,9 +168,15 @@ Page({
     this._deferredDone = false;
     this._locationDenied = false;
     this._compassBound = false;
+    this._compassRunning = false;
     this._lastCompassTs = 0;
     this._inputBuffers = {};
     this._inputTimers = {};
+    this._captureQueue = [];
+    this._drainingQueue = false;
+    this._touchStartX = 0;
+    this._touchStartY = 0;
+    this._poiReqSeq = 0;
 
     registerPrivacyListener();
 
@@ -175,13 +199,8 @@ Page({
     } catch (e) {}
 
     const mergedInit = this.buildMergedStartupPatch(statusBarHeight, menuBtnTop, menuBtnHeight, menuBtnRightSpace);
+    mergedInit.offlinePendingCount = getOfflinePendingCount();
     this.setData(mergedInit);
-    this._safeTextSnapshot = {
-      customTitle: mergedInit.customTitle !== undefined ? mergedInit.customTitle : this.data.customTitle,
-      shortPoi: this.data.shortPoi,
-      fullAddr: this.data.fullAddr,
-      note: mergedInit.note !== undefined ? mergedInit.note : this.data.note
-    };
 
     this.consumeLaunchQuery(query);
 
@@ -191,12 +210,18 @@ Page({
       }
     });
 
+    initOfflineNetworkListener(() => {
+      if (this.data.pageActive) {
+        this.triggerOfflineReconcile(true);
+      }
+    });
+
     this._bootFallbackTimer = setTimeout(() => {
       if (!this.data.cameraReady) {
         this.setData({ cameraReady: true });
       }
       this.runDeferredStartupTasks();
-    }, 700);
+    }, 650);
   },
 
   onCameraInitDone() {
@@ -216,10 +241,15 @@ Page({
 
     this.refreshPhotoSummary();
     this.syncTrustedNetworkTime();
-    this.startCompassTracking();
+    if (this.data.showEnv) {
+      this.startCompassTracking();
+    }
     this.startContinuousLocationTracking();
     if (this.data.autoSaveAlbum) {
       preRequestAlbumPermissionSilently();
+    }
+    if (getOfflinePendingCount() > 0) {
+      this.triggerOfflineReconcile(true);
     }
   },
 
@@ -228,7 +258,6 @@ Page({
       this.setData({ pageActive: true });
     }
 
-    // 热启动丢参修复：消费 app.globalData.launchQuery
     const app = getApp();
     if (app && app.globalData && app.globalData.launchQuery) {
       const q = app.globalData.launchQuery;
@@ -236,11 +265,12 @@ Page({
       this.consumeLaunchQuery(q);
     }
 
-    // 从相册/批量分包返回时同步最新相册缩略图和数量
     this.refreshPhotoSummary();
 
     if (this._deferredDone) {
-      this.startCompassTracking();
+      if (this.data.showEnv) {
+        this.startCompassTracking();
+      }
       if (!this._locationDenied && !this.locRefreshTimer) {
         this.startContinuousLocationTracking();
       }
@@ -257,7 +287,6 @@ Page({
 
   onHide() {
     this.flushInputBuffers();
-    // 离页时立即卸载 <camera> 并停止罗盘与定位轮询，释放 100MB+ 显存
     this.setData({ pageActive: false });
     this.stopLocationPolling();
     this.stopCompassTracking();
@@ -270,6 +299,8 @@ Page({
     this.stopCompassTracking();
     if (this._countdownTimer) clearInterval(this._countdownTimer);
     if (this._bootFallbackTimer) clearTimeout(this._bootFallbackTimer);
+    if (this._focusTimer) clearTimeout(this._focusTimer);
+    if (this._tplToastTimer) clearTimeout(this._tplToastTimer);
   },
 
   clearAllInputTimers() {
@@ -282,9 +313,6 @@ Page({
     });
   },
 
-  /**
-   * 立即刷入所有未防抖的输入框缓冲值，杜绝点击保存/拍照时丢失最后 120ms 文本
-   */
   flushInputBuffers() {
     this.clearAllInputTimers();
     if (!this._inputBuffers) return;
@@ -324,7 +352,6 @@ Page({
     if (savedCfg && typeof savedCfg === 'object') {
       const idx = Number(savedCfg.accentColorIndex) || 0;
       const alphaIdx = savedCfg.bgAlphaMode !== undefined ? Number(savedCfg.bgAlphaMode) : 1;
-      patch.captureMode = savedCfg.captureMode || 'photo';
       patch.styleTemplate = savedCfg.styleTemplate !== undefined ? Number(savedCfg.styleTemplate) : 0;
       patch.showBottomScrim = Boolean(savedCfg.showBottomScrim);
       patch.coordSys = savedCfg.coordSys || 'WGS-84';
@@ -337,8 +364,6 @@ Page({
       patch.bgAlphaMode = alphaIdx;
       patch.cardBgRgba = BG_ALPHA_PRESETS[alphaIdx] || BG_ALPHA_PRESETS[1];
       patch.showQr = savedCfg.showQr !== false;
-      patch.showMiniMap = savedCfg.showMiniMap !== false;
-      patch.miniMapPosition = Number(savedCfg.miniMapPosition) || 0;
       patch.bottomRight = Boolean(savedCfg.bottomRight);
       patch.showGridLines = Boolean(savedCfg.showGridLines);
       patch.antiTamperMode = Boolean(savedCfg.antiTamperMode);
@@ -359,17 +384,22 @@ Page({
     const list = loadPhotos();
     const first = list[0] || null;
     const latestThumb = first ? first.thumbPath || first.wmPath || '' : '';
-    if (list.length !== this.data.photoCount || latestThumb !== this.data.latestPhotoThumb) {
+    const offlinePendingCount = getOfflinePendingCount();
+    if (
+      list.length !== this.data.photoCount ||
+      latestThumb !== this.data.latestPhotoThumb ||
+      offlinePendingCount !== this.data.offlinePendingCount
+    ) {
       this.setData({
         photoCount: list.length,
-        latestPhotoThumb: latestThumb
+        latestPhotoThumb: latestThumb,
+        offlinePendingCount
       });
     }
   },
 
   persistUserConfig() {
     saveUserConfig({
-      captureMode: this.data.captureMode,
       styleTemplate: this.data.styleTemplate,
       showBottomScrim: this.data.showBottomScrim,
       coordSys: this.data.coordSys,
@@ -380,8 +410,6 @@ Page({
       fontScale: this.data.fontScale,
       bgAlphaMode: this.data.bgAlphaMode,
       showQr: this.data.showQr,
-      showMiniMap: this.data.showMiniMap,
-      miniMapPosition: this.data.miniMapPosition,
       bottomRight: this.data.bottomRight,
       showGridLines: this.data.showGridLines,
       antiTamperMode: this.data.antiTamperMode,
@@ -397,9 +425,6 @@ Page({
     });
   },
 
-  /**
-   * 导出当前相机水印配置快照，供批量加水印分包与相册分包读取
-   */
   syncLiveConfigToGlobal() {
     this.flushInputBuffers();
     const app = getApp();
@@ -415,6 +440,8 @@ Page({
       fontScale: this.data.fontScale,
       bgAlphaMode: this.data.bgAlphaMode,
       cardBgRgba: this.data.cardBgRgba,
+      hasRealFix: this.data.hasRealFix,
+      isManualCoord: this.data.isManualCoord,
       gcjLat: this.data.gcjLat,
       gcjLon: this.data.gcjLon,
       wgsLat: this.data.wgsLat,
@@ -423,12 +450,10 @@ Page({
       altitude: this.data.altitude,
       azimuthDeg: this.data.azimuthDeg,
       azimuthText: this.data.azimuthText,
-      shortPoi: this.data.shortPoi || '实拍点位',
+      shortPoi: this.data.shortPoi === '定位中...' ? '实拍点位' : this.data.shortPoi || '实拍点位',
       fullAddr: this.data.fullAddr || '',
       note: this.data.note || '',
       showQr: this.data.showQr,
-      showMiniMap: this.data.showMiniMap,
-      miniMapPosition: this.data.miniMapPosition,
       bottomRight: this.data.bottomRight,
       showTime: this.data.showTime,
       showLoc: this.data.showLoc,
@@ -444,79 +469,79 @@ Page({
   },
 
   /**
-   * 线上授时兼容修复：
-   * - 若 app.globalData.ntpConfig.endpoint 配置了自有合法域名授时端点，则发 HEAD 获取权威 Date 头
-   * - 否则优雅降级为本地单调时钟校准，绝不硬连正式版会被拦截的 uri.amap.com
+   * 权威授时同步：
+   * 1. 若配置了自有 HTTPS endpoint 则发 HEAD 校准
+   * 2. 否则自动通过云函数 regeoPoi 获取服务端权威时间（无需额外合法域名）
+   * 3. 离线时优雅降级为本地时钟
    */
-  syncTrustedNetworkTime() {
+  async syncTrustedNetworkTime() {
     const app = getApp();
     const endpoint =
       app && app.globalData && app.globalData.ntpConfig && app.globalData.ntpConfig.endpoint
         ? String(app.globalData.ntpConfig.endpoint).trim()
         : '';
 
-    const applyLocalMonotonicFallback = reasonLabel => {
-      try {
-        if (typeof wx.getPerformance === 'function') {
-          const perf = wx.getPerformance();
-          if (perf && typeof perf.now === 'function') {
-            this._monoAnchorPerf = perf.now();
-            this._monoAnchorWall = Date.now();
+    if (endpoint && endpoint.indexOf('https://') === 0) {
+      const t0 = Date.now();
+      wx.request({
+        url: endpoint,
+        method: 'HEAD',
+        timeout: 2500,
+        success: res => {
+          const dateHdr = res.header && (res.header.Date || res.header.date);
+          if (dateHdr) {
+            const srvTime = Date.parse(dateHdr);
+            if (!isNaN(srvTime) && srvTime > 1700000000000) {
+              const rttHalf = Math.round((Date.now() - t0) / 2);
+              const offset = srvTime + rttHalf - Date.now();
+              this.setData({
+                ntpSynced: true,
+                ntpOffsetMs: offset,
+                ntpStatusText: `权威授时已同步 (${offset >= 0 ? '+' : ''}${offset}ms)`
+              });
+              return;
+            }
           }
-        }
-      } catch (e) {}
-      this.setData({
-        ntpSynced: false,
-        ntpOffsetMs: 0,
-        ntpStatusText: reasonLabel || '本地单调时钟校准'
+          this._fallbackCloudServerTime();
+        },
+        fail: () => this._fallbackCloudServerTime()
       });
-    };
-
-    if (!endpoint || endpoint.indexOf('https://') !== 0) {
-      applyLocalMonotonicFallback('本地单调时钟校准（未配置自有授时域名）');
       return;
     }
 
-    const t0 = Date.now();
-    wx.request({
-      url: endpoint,
-      method: 'HEAD',
-      timeout: 2500,
-      success: res => {
-        const dateHdr = res.header && (res.header.Date || res.header.date);
-        if (dateHdr) {
-          const srvTime = Date.parse(dateHdr);
-          if (!isNaN(srvTime) && srvTime > 1700000000000) {
-            const rttHalf = Math.round((Date.now() - t0) / 2);
-            const offset = srvTime + rttHalf - Date.now();
-            this.setData({
-              ntpSynced: true,
-              ntpOffsetMs: offset,
-              ntpStatusText: `权威授时已同步 (${offset >= 0 ? '+' : ''}${offset}ms)`
-            });
-            return;
-          }
-        }
-        applyLocalMonotonicFallback('本地单调时钟校准（授时响应无 Date 头）');
-      },
-      fail: () => {
-        applyLocalMonotonicFallback('本地单调时钟校准（授时端点暂不可达）');
-      }
-    });
+    await this._fallbackCloudServerTime();
   },
 
+  async _fallbackCloudServerTime() {
+    const cloudTime = await syncCloudServerTime();
+    if (cloudTime.ok) {
+      this.setData({
+        ntpSynced: true,
+        ntpOffsetMs: cloudTime.offsetMs,
+        ntpStatusText: `云端权威授时 (${cloudTime.offsetMs >= 0 ? '+' : ''}${cloudTime.offsetMs}ms)`
+      });
+    } else {
+      this.setData({
+        ntpSynced: false,
+        ntpOffsetMs: 0,
+        ntpStatusText: '离线本地时钟（联网自动补签）'
+      });
+    }
+  },
+
+  // ==================== 仅在需要方位角时按需启停罗盘 ====================
   startCompassTracking() {
+    if (!this.data.showEnv || this._compassRunning) return;
     try {
       if (!this._compassBound) {
         this._compassBound = true;
         wx.onCompassChange(res => {
-          if (!this.data.pageActive) return;
+          if (!this.data.pageActive || !this.data.showEnv) return;
           const now = Date.now();
-          // 250ms 节流，降低高频罗盘回调引发的通信开销
-          if (now - this._lastCompassTs < 250) return;
+          if (now - this._lastCompassTs < 280) return;
           this._lastCompassTs = now;
           const deg = Math.round(res.direction || 0);
-          if (Math.abs(deg - this.data.azimuthDeg) >= 5) {
+          if (Math.abs(deg - this.data.azimuthDeg) >= 5 || !this.data.azimuthText) {
             this.setData({
               azimuthDeg: deg,
               azimuthText: formatAzimuthText(deg)
@@ -525,13 +550,16 @@ Page({
         });
       }
       wx.startCompass();
+      this._compassRunning = true;
     } catch (e) {}
   },
 
   stopCompassTracking() {
+    if (!this._compassRunning) return;
     try {
       wx.stopCompass();
     } catch (e) {}
+    this._compassRunning = false;
   },
 
   startContinuousLocationTracking() {
@@ -563,6 +591,7 @@ Page({
       const ts = query.ts ? decodeURIComponent(query.ts) : '';
       const sig = query.sig || '';
       const note = query.note ? decodeURIComponent(query.note) : '';
+      const ntpSynced = query.ntp === '1';
       if (!isNaN(gcjLat) && !isNaN(gcjLon)) {
         parsed = {
           gcjLat,
@@ -571,6 +600,7 @@ Page({
           timestamp: ts,
           signature: sig,
           note,
+          ntpSynced,
           hasAntiTamper: Boolean(sig),
           verified: sig ? verifyAntiTamperHash(gcjLat, gcjLon, ts, shortPoi, sig, note) : false
         };
@@ -609,13 +639,845 @@ Page({
   },
 
   openBatchWatermarkPage() {
+    this.setData({ showSettings: false });
     this.syncLiveConfigToGlobal();
     wx.navigateTo({
       url: '/packageBatch/pages/batch/batch'
     });
   },
 
-  // ==================== 识图验真（彻底修复假阳性漏洞） ====================
+  // ==================== 取景器手势：点击对焦 & 左右轻滑切换模板 ====================
+  onViewfinderTouchStart(e) {
+    const touch = e.touches && e.touches[0];
+    if (!touch) return;
+    this._touchStartX = touch.clientX;
+    this._touchStartY = touch.clientY;
+    this._touchStartTime = Date.now();
+  },
+
+  onViewfinderTouchEnd(e) {
+    if (
+      this.data.showPoiModal ||
+      this.data.showWmModal ||
+      this.data.showSettings ||
+      this.data.showVerifyModal ||
+      this.data.sharedBannerVisible
+    ) {
+      return;
+    }
+    const touch = e.changedTouches && e.changedTouches[0];
+    if (!touch) return;
+    const dx = touch.clientX - this._touchStartX;
+    const dy = touch.clientY - this._touchStartY;
+    const dt = Date.now() - (this._touchStartTime || 0);
+
+    // 水平轻滑切换水印模板
+    if (dt < 450 && Math.abs(dx) > 58 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      const count = this.data.tplNames.length;
+      const next = dx < 0 ? (this.data.styleTemplate + 1) % count : (this.data.styleTemplate - 1 + count) % count;
+      this.applyTemplateIndex(next, true);
+      return;
+    }
+
+    // 轻点显示对焦框反馈
+    if (dt < 260 && Math.abs(dx) < 12 && Math.abs(dy) < 12) {
+      this.showFocusReticle(touch.clientX, touch.clientY);
+    }
+  },
+
+  showFocusReticle(x, y) {
+    if (this._focusTimer) clearTimeout(this._focusTimer);
+    this.setData({
+      focusRingVisible: true,
+      focusX: Math.round(x),
+      focusY: Math.round(y)
+    });
+    this._focusTimer = setTimeout(() => {
+      this.setData({ focusRingVisible: false });
+    }, 850);
+  },
+
+  applyTemplateIndex(idx, showHudToast) {
+    if (wx.vibrateShort) {
+      try {
+        wx.vibrateShort({ type: 'light' });
+      } catch (err) {}
+    }
+    const patch = { styleTemplate: idx };
+    if (showHudToast) {
+      patch.templateToastText = this.data.tplNames[idx] || '';
+    }
+    this.setData(patch, () => this.persistUserConfig());
+    if (showHudToast) {
+      if (this._tplToastTimer) clearTimeout(this._tplToastTimer);
+      this._tplToastTimer = setTimeout(() => {
+        this.setData({ templateToastText: '' });
+      }, 1100);
+    }
+  },
+
+  // ==================== 定位与自动周边微信地点 (POI) 识别 ====================
+  startHighAccuracyLocation(forceOverwriteManual, interactive) {
+    wx.getLocation({
+      type: 'gcj02',
+      altitude: true,
+      isHighAccuracy: true,
+      highAccuracyExpireTime: 3200,
+      success: res => {
+        if (this._locationDenied) {
+          this._locationDenied = false;
+          this.setData({ locationDenied: false });
+          this.startContinuousLocationTracking();
+        }
+        this.recordHardwareGpsFix(
+          res.latitude,
+          res.longitude,
+          res.accuracy,
+          res.altitude,
+          Boolean(forceOverwriteManual)
+        );
+      },
+      fail: err => {
+        const msg = (err && err.errMsg) || '';
+        const isDenied =
+          msg.indexOf('auth deny') !== -1 ||
+          msg.indexOf('authorize') !== -1 ||
+          msg.indexOf('denied') !== -1;
+        if (isDenied) {
+          this._locationDenied = true;
+          this.stopLocationPolling();
+          this.setData({ locationDenied: true, shortPoi: '未开启定位' });
+          if (interactive) {
+            promptOpenSetting(
+              'scope.userLocation',
+              '需要位置信息权限',
+              '定位权限已关闭，无法获取真实 GPS 经纬度与周边地点。请在设置中开启「位置信息」权限。'
+            ).then(granted => {
+              if (granted) {
+                this._locationDenied = false;
+                this.setData({ locationDenied: false });
+                this.startHighAccuracyLocation(true, false);
+                this.startContinuousLocationTracking();
+              }
+            });
+          }
+          return;
+        }
+        if (!this.data.hasRealFix && this.data.shortPoi === '定位中...') {
+          this.setData({ shortPoi: '实拍点位' });
+        }
+      }
+    });
+  },
+
+  recordHardwareGpsFix(lat, lon, accuracy, altitude, forceOverwriteManual) {
+    const gcjLat = Number(Number(lat).toFixed(6));
+    const gcjLon = Number(Number(lon).toFixed(6));
+    const wgs = gcj02ToWgs84(gcjLat, gcjLon);
+    const acc = accuracy && Number(accuracy) > 0 ? Number(accuracy).toFixed(1) : '';
+    const alt =
+      altitude !== undefined && altitude !== null && Number(altitude) !== 0 && !isNaN(Number(altitude))
+        ? Number(altitude).toFixed(1)
+        : this.data.altitude;
+
+    const shouldApplyActive = forceOverwriteManual || this.data.antiTamperMode || !this.data.isManualCoord;
+    const patch = {
+      hasRealFix: true,
+      locationDenied: false,
+      rawGcjLat: gcjLat,
+      rawGcjLon: gcjLon,
+      rawWgsLat: wgs.lat,
+      rawWgsLon: wgs.lon,
+      rawAccuracy: acc,
+      altitude: alt
+    };
+
+    if (shouldApplyActive) {
+      patch.isManualCoord = false;
+      patch.gcjLat = gcjLat;
+      patch.gcjLon = gcjLon;
+      patch.wgsLat = wgs.lat;
+      patch.wgsLon = wgs.lon;
+      patch.accuracy = acc;
+      if (this.data.shortPoi === '定位中...' || this.data.shortPoi === '未开启定位') {
+        patch.shortPoi = '识别周边地点...';
+      }
+    }
+
+    this.setData(patch);
+
+    if (shouldApplyActive) {
+      this.autoResolveNearbyPoi(gcjLat, gcjLon, forceOverwriteManual);
+    }
+  },
+
+  /**
+   * 自动调用云函数逆地理编码识别最近商铺/小区/地标（带 50m 空间缓存）
+   */
+  async autoResolveNearbyPoi(gcjLat, gcjLon, forceRefresh) {
+    const reqId = ++this._poiReqSeq;
+    this.setData({ poiLoading: true });
+    const res = await resolveNearbyPoi(gcjLat, gcjLon, { forceRefresh: Boolean(forceRefresh) });
+    if (reqId !== this._poiReqSeq) return;
+
+    const patch = {
+      poiLoading: false,
+      nearbyPois: res.nearbyPois && res.nearbyPois.length > 0 ? res.nearbyPois : FALLBACK_QUICK_POIS,
+      nearbyPoiDetails: res.nearbyPoiDetails || []
+    };
+
+    if (typeof res.serverOffsetMs === 'number') {
+      patch.ntpSynced = true;
+      patch.ntpOffsetMs = res.serverOffsetMs;
+      patch.ntpStatusText = `云端权威授时 (${res.serverOffsetMs >= 0 ? '+' : ''}${res.serverOffsetMs}ms)`;
+    }
+
+    if (res.ok && res.resolved && res.shortPoi) {
+      patch.poiResolved = true;
+      if (!this.data.hasCustomPoi || forceRefresh) {
+        patch.shortPoi = res.shortPoi;
+        patch.fullAddr = res.fullAddr || this.data.fullAddr;
+      }
+    } else {
+      patch.poiResolved = false;
+      if (this.data.shortPoi === '识别周边地点...' || this.data.shortPoi === '定位中...') {
+        patch.shortPoi = '实拍点位';
+      }
+    }
+
+    this.setData(patch);
+  },
+
+  restoreRealGpsCoordinates() {
+    this.setData(
+      {
+        isManualCoord: false,
+        hasCustomPoi: false,
+        gcjLat: this.data.rawGcjLat,
+        gcjLon: this.data.rawGcjLon,
+        wgsLat: this.data.rawWgsLat,
+        wgsLon: this.data.rawWgsLon,
+        accuracy: this.data.rawAccuracy
+      },
+      () => {
+        this.startHighAccuracyLocation(true, true);
+        wx.showToast({ title: '已恢复真实 GPS 定位', icon: 'none' });
+      }
+    );
+  },
+
+  refreshRealGpsNow() {
+    this.setData({ hasCustomPoi: false, isManualCoord: false });
+    this._locationDenied = false;
+    this.startHighAccuracyLocation(true, true);
+    wx.showToast({ title: '正在刷新定位与周边地点...', icon: 'none' });
+  },
+
+  choosePoiNameOnlyOnMap() {
+    if (this.data.antiTamperMode) {
+      wx.showToast({ title: '防伪模式请直接点选下方周边真实地点', icon: 'none' });
+      return;
+    }
+    const applyPoiName = (name, address) => {
+      const pickedName = (name || address || '').trim();
+      if (!pickedName) return;
+      const nextCands = [pickedName, ...this.data.nearbyPois]
+        .filter(Boolean)
+        .filter((v, i, a) => a.indexOf(v) === i)
+        .slice(0, 8);
+      this.setData({
+        hasCustomPoi: true,
+        poiResolved: true,
+        shortPoi: pickedName,
+        fullAddr: address || this.data.fullAddr,
+        nearbyPois: nextCands
+      });
+      wx.showToast({ title: '已选用地名（GPS坐标不变）', icon: 'none' });
+    };
+
+    if (wx.choosePoi) {
+      wx.choosePoi({
+        success: res => applyPoiName(res.name, res.address),
+        fail: () => {
+          wx.chooseLocation({
+            latitude: this.data.gcjLat || undefined,
+            longitude: this.data.gcjLon || undefined,
+            success: res => applyPoiName(res.name, res.address),
+            fail: err => this.handleChooseLocationFail(err)
+          });
+        }
+      });
+    } else {
+      wx.chooseLocation({
+        latitude: this.data.gcjLat || undefined,
+        longitude: this.data.gcjLon || undefined,
+        success: res => applyPoiName(res.name, res.address),
+        fail: err => this.handleChooseLocationFail(err)
+      });
+    }
+  },
+
+  choosePoiOnMap() {
+    if (this.data.antiTamperMode) {
+      wx.showToast({ title: '防伪模式下已锁定真实 GPS 坐标', icon: 'none' });
+      return;
+    }
+    wx.chooseLocation({
+      latitude: this.data.gcjLat || undefined,
+      longitude: this.data.gcjLon || undefined,
+      success: res => {
+        const gcjLat = Number(res.latitude.toFixed(6));
+        const gcjLon = Number(res.longitude.toFixed(6));
+        const wgs = gcj02ToWgs84(gcjLat, gcjLon);
+        const pickedName = (res.name || '').trim() || '实拍点位';
+        this.setData({
+          hasCustomPoi: true,
+          poiResolved: true,
+          isManualCoord: true,
+          gcjLat,
+          gcjLon,
+          wgsLat: wgs.lat,
+          wgsLon: wgs.lon,
+          shortPoi: pickedName,
+          fullAddr: res.address || this.data.fullAddr,
+          showPoiModal: false
+        });
+        wx.showToast({ title: '已切换至所选地图点位', icon: 'none' });
+      },
+      fail: err => this.handleChooseLocationFail(err)
+    });
+  },
+
+  handleChooseLocationFail(err) {
+    if (err && err.errMsg && err.errMsg.indexOf('auth deny') !== -1) {
+      promptOpenSetting(
+        'scope.userLocation',
+        '需要位置权限',
+        '请在设置中开启位置信息权限以打开地图选点。'
+      );
+    }
+  },
+
+  // ==================== 相机控制 ====================
+  selectTimerSeconds(e) {
+    const sec = Number(e.currentTarget.dataset.sec) || 0;
+    this.setData({ timerSeconds: sec });
+  },
+
+  selectZoomRatio(e) {
+    const nextZoom = Number(e.currentTarget.dataset.zoom) || 1.0;
+    if (nextZoom === this.data.zoomRatio) return;
+    try {
+      const camCtx = wx.createCameraContext();
+      if (camCtx && typeof camCtx.setZoom === 'function') {
+        camCtx.setZoom({
+          zoom: nextZoom,
+          success: () => {
+            this.setData({ zoomRatio: nextZoom });
+          },
+          fail: () => {
+            wx.showToast({ title: '当前镜头不支持该变焦倍率', icon: 'none' });
+          }
+        });
+        return;
+      }
+    } catch (err) {}
+    wx.showToast({ title: '当前设备暂不支持变焦调节', icon: 'none' });
+  },
+
+  cycleFlashMode() {
+    const modes = ['off', 'on', 'auto', 'torch'];
+    const labels = ['关', '开', '自动', '常亮'];
+    const nextIdx = (modes.indexOf(this.data.flashMode) + 1) % modes.length;
+    this.setData({
+      flashMode: modes[nextIdx],
+      flashLabel: labels[nextIdx]
+    });
+  },
+
+  flipCamera() {
+    this.setData({
+      devicePosition: this.data.devicePosition === 'back' ? 'front' : 'back',
+      zoomRatio: 1.0
+    });
+  },
+
+  selectTemplate(e) {
+    const idx = Number(e.currentTarget.dataset.idx);
+    this.applyTemplateIndex(idx, false);
+  },
+
+  switchWmTab(e) {
+    const tab = e.currentTarget.dataset.tab || 'basic';
+    if (tab !== this.data.wmTab) {
+      this.setData({ wmTab: tab });
+    }
+  },
+
+  applyQuickScenePreset(e) {
+    const preset = e.currentTarget.dataset.preset;
+    let patch = {};
+    if (preset === 'minimal') {
+      patch = {
+        styleTemplate: 0,
+        showTime: true,
+        showLoc: true,
+        showCoords: true,
+        showCoordTag: true,
+        showAccuracy: true,
+        showAddress: false,
+        showNote: false,
+        showEnv: false,
+        showQr: true
+      };
+    } else if (preset === 'engineering') {
+      patch = {
+        styleTemplate: 1,
+        showTime: true,
+        showLoc: true,
+        showCoords: true,
+        showCoordTag: true,
+        showAccuracy: true,
+        showAddress: true,
+        showNote: true,
+        showEnv: true,
+        showQr: true
+      };
+    } else if (preset === 'gis') {
+      patch = {
+        styleTemplate: 2,
+        useDms: true,
+        showTime: true,
+        showLoc: true,
+        showCoords: true,
+        showCoordTag: true,
+        showAccuracy: true,
+        showAddress: true,
+        showEnv: true,
+        showQr: true
+      };
+    } else if (preset === 'ledger') {
+      patch = {
+        styleTemplate: 4,
+        showTime: true,
+        showLoc: true,
+        showCoords: true,
+        showCoordTag: true,
+        showAccuracy: true,
+        showAddress: true,
+        showNote: true,
+        showEnv: false,
+        showQr: true
+      };
+    }
+    this.setData(patch, () => {
+      if (this.data.showEnv) this.startCompassTracking();
+      else this.stopCompassTracking();
+      this.persistUserConfig();
+      wx.showToast({ title: '已应用预设方案', icon: 'none' });
+    });
+  },
+
+  selectCoordSystem(e) {
+    const sys = e.currentTarget.dataset.sys;
+    if (!sys) return;
+    this.setData({ coordSys: sys }, () => {
+      this.persistUserConfig();
+      wx.showToast({ title: `坐标系已切换：${sys}`, icon: 'none' });
+    });
+  },
+
+  setDmsFormat(e) {
+    const useDms = e.currentTarget.dataset.dms === '1';
+    this.setData({ useDms }, () => this.persistUserConfig());
+  },
+
+  selectAccentColor(e) {
+    const idx = Number(e.currentTarget.dataset.idx) || 0;
+    const hex = (ACCENT_PALETTE[idx] || ACCENT_PALETTE[0]).hex;
+    this.setData({ accentColorIndex: idx, accentHex: hex }, () => this.persistUserConfig());
+  },
+
+  selectFontScale(e) {
+    const sc = Number(e.currentTarget.dataset.scale) || 1;
+    this.setData({ fontScale: sc }, () => this.persistUserConfig());
+  },
+
+  selectBgAlpha(e) {
+    const idx = Number(e.currentTarget.dataset.alpha);
+    const rgba = BG_ALPHA_PRESETS[idx] || BG_ALPHA_PRESETS[1];
+    this.setData({ bgAlphaMode: idx, cardBgRgba: rgba }, () => this.persistUserConfig());
+  },
+
+  toggleWatermarkField(e) {
+    const field = e.currentTarget.dataset.field;
+    if (!field) return;
+    const nextVal = !this.data[field];
+    this.setData({ [field]: nextVal }, () => {
+      if (field === 'showEnv') {
+        if (nextVal) this.startCompassTracking();
+        else this.stopCompassTracking();
+      }
+      this.persistUserConfig();
+    });
+  },
+
+  selectQuickPoi(e) {
+    const poi = e.currentTarget.dataset.poi;
+    if (!poi) return;
+    // 防伪模式下仅允许从真实周边 250m 内的官方 POI 列表中点选，兼顾真实性与防篡改
+    const detail = (this.data.nearbyPoiDetails || []).find(d => d && d.name === poi);
+    if (this.data.antiTamperMode) {
+      if (!detail || (detail.distance !== null && detail.distance > 250)) {
+        wx.showToast({ title: '防伪模式仅允许选择周边 250m 内真实地点', icon: 'none' });
+        return;
+      }
+    }
+    const patch = { shortPoi: poi, hasCustomPoi: true, poiResolved: true };
+    if (detail && detail.address) {
+      patch.fullAddr = detail.address;
+    }
+    this.setData(patch);
+  },
+
+  selectQuickTitle(e) {
+    const title = e.currentTarget.dataset.title;
+    if (title) {
+      this.setData({ customTitle: title }, () => this.persistUserConfig());
+    }
+  },
+
+  appendQuickNote(e) {
+    if (this.data.antiTamperMode) {
+      wx.showToast({ title: '防伪模式下备注已锁定', icon: 'none' });
+      return;
+    }
+    const tag = e.currentTarget.dataset.note;
+    if (!tag) return;
+    const next = this.data.note ? `${this.data.note} · ${tag}` : tag;
+    this.setData({ note: next, showNote: true }, () => this.persistUserConfig());
+  },
+
+  clearNoteInput() {
+    if (this.data.antiTamperMode) {
+      wx.showToast({ title: '防伪模式下备注已锁定', icon: 'none' });
+      return;
+    }
+    this.setData({ note: '' }, () => this.persistUserConfig());
+  },
+
+  // ==================== 快门拍摄（零云函数检测 + 离线秒拍 + 后台异步合成队列） ====================
+  handleShutterTap() {
+    if (this.data.countdownRemaining > 0) {
+      if (this._countdownTimer) clearInterval(this._countdownTimer);
+      this._countdownTimer = null;
+      this.setData({ countdownRemaining: 0 });
+      wx.showToast({ title: '已取消延时拍摄', icon: 'none' });
+      return;
+    }
+    if (this._takingRawPhoto) return;
+
+    this.flushInputBuffers();
+
+    // 防伪模式门禁：未获真实 GPS 严禁签发防伪哈希
+    if (this.data.antiTamperMode && !canSignAntiTamper(this.data.hasRealFix, this.data.rawGcjLat, this.data.rawGcjLon)) {
+      wx.showModal({
+        title: '防伪模式等待真实 GPS',
+        content: '当前尚未获取到手机真实 GPS 定位，防伪模式需等待定位成功后再签发防伪码。',
+        confirmText: '刷新定位',
+        cancelText: '暂不拍摄',
+        success: r => {
+          if (r.confirm) this.refreshRealGpsNow();
+        }
+      });
+      return;
+    }
+
+    if (this.data.timerSeconds > 0) {
+      let rem = this.data.timerSeconds;
+      this.setData({ countdownRemaining: rem });
+      this._countdownTimer = setInterval(() => {
+        rem--;
+        if (rem <= 0) {
+          clearInterval(this._countdownTimer);
+          this._countdownTimer = null;
+          this.setData({ countdownRemaining: 0 });
+          this.executeImmediateCapture();
+        } else {
+          this.setData({ countdownRemaining: rem });
+        }
+      }, 1000);
+      return;
+    }
+
+    this.executeImmediateCapture();
+  },
+
+  executeImmediateCapture() {
+    if (this._takingRawPhoto) return;
+    this._takingRawPhoto = true;
+
+    const camCtx = wx.createCameraContext();
+    this.setData({ shutterFlashVisible: true });
+    if (wx.vibrateShort) {
+      try {
+        wx.vibrateShort({ type: 'medium' });
+      } catch (e) {}
+    }
+    setTimeout(() => {
+      this.setData({ shutterFlashVisible: false });
+    }, 120);
+
+    camCtx.takePhoto({
+      quality: 'high',
+      success: res => {
+        this._takingRawPhoto = false;
+        const localCapturedAt = Date.now();
+        const t = getTimeStrings(this.data.ntpOffsetMs);
+        const canSign =
+          this.data.antiTamperMode &&
+          canSignAntiTamper(this.data.hasRealFix, this.data.rawGcjLat, this.data.rawGcjLon);
+        const activeGcjLat = canSign ? this.data.rawGcjLat : this.data.gcjLat;
+        const activeGcjLon = canSign ? this.data.rawGcjLon : this.data.gcjLon;
+        const activeWgsLat = canSign ? this.data.rawWgsLat : this.data.wgsLat;
+        const activeWgsLon = canSign ? this.data.rawWgsLon : this.data.wgsLon;
+        const rawPoiText =
+          this.data.shortPoi === '定位中...' || this.data.shortPoi === '识别周边地点...' || this.data.shortPoi === '未开启定位'
+            ? '实拍点位'
+            : this.data.shortPoi || '实拍点位';
+
+        const needPoi = Boolean(this.data.hasRealFix && !this.data.poiResolved && !this.data.hasCustomPoi);
+        const needTime = !this.data.ntpSynced;
+        const offlinePending = needPoi || needTime;
+
+        const antiHash = canSign
+          ? computeAntiTamperHash(activeGcjLat, activeGcjLon, t.fullTs, rawPoiText, this.data.note)
+          : '';
+
+        const snapshotCfg = {
+          styleTemplate: this.data.styleTemplate,
+          showBottomScrim: this.data.showBottomScrim,
+          customTitle: this.data.customTitle,
+          coordSys: this.data.coordSys,
+          useDms: this.data.useDms,
+          accentColorIndex: this.data.accentColorIndex,
+          accentHex: this.data.accentHex,
+          fontScale: this.data.fontScale,
+          bgAlphaMode: this.data.bgAlphaMode,
+          cardBgRgba: this.data.cardBgRgba,
+          hasRealFix: this.data.hasRealFix,
+          isManualCoord: this.data.isManualCoord,
+          gcjLat: activeGcjLat,
+          gcjLon: activeGcjLon,
+          wgsLat: activeWgsLat,
+          wgsLon: activeWgsLon,
+          origGcjLat: activeGcjLat,
+          origGcjLon: activeGcjLon,
+          accuracy: this.data.accuracy,
+          altitude: this.data.altitude,
+          azimuthDeg: this.data.azimuthDeg,
+          azimuthText: this.data.azimuthText,
+          shortPoi: rawPoiText,
+          fullAddr: this.data.fullAddr,
+          note: this.data.note,
+          hm: t.hm,
+          hms: t.hms,
+          dateOnlyStr: t.datePart,
+          weekStr: t.weekStr,
+          dateWeek: t.dateWeek,
+          fullTs: t.fullTs,
+          showQr: this.data.showQr,
+          bottomRight: this.data.bottomRight,
+          antiTamperMode: canSign,
+          ntpSynced: this.data.ntpSynced,
+          retroSynced: false,
+          offlinePending,
+          poiResolved: this.data.poiResolved,
+          antiTamperHash: antiHash,
+          showTime: this.data.showTime,
+          showLoc: this.data.showLoc,
+          showCoords: this.data.showCoords,
+          showCoordTag: this.data.showCoordTag,
+          showAccuracy: this.data.showAccuracy,
+          showAddress: this.data.showAddress,
+          showNote: this.data.showNote,
+          showEnv: this.data.showEnv
+        };
+
+        // 立即入后台合成队列，不阻塞连续拍照
+        this._captureQueue.push({
+          rawImagePath: res.tempImagePath,
+          cfg: snapshotCfg,
+          localCapturedAt,
+          needPoi,
+          needTime
+        });
+        this.setData({ pendingComposeCount: this._captureQueue.length });
+        this.drainCaptureQueue();
+      },
+      fail: () => {
+        this._takingRawPhoto = false;
+        promptOpenSetting(
+          'scope.camera',
+          '无法调用相机拍照',
+          '请确认已授予小程序摄像头权限，或点击下方去设置开启。'
+        );
+      }
+    });
+  },
+
+  async drainCaptureQueue() {
+    if (this._drainingQueue) return;
+    this._drainingQueue = true;
+
+    try {
+      const fallbackCanvas = await this.getFallbackCanvasNodeAsync();
+      while (this._captureQueue.length > 0) {
+        const job = this._captureQueue.shift();
+        try {
+          const out = await renderWatermarkToTempFile(job.rawImagePath, job.cfg, {
+            fallbackCanvas,
+            generateThumb: true
+          });
+
+          const savedRawPath = await copyTempToUserData(job.rawImagePath, 'amap_raw');
+          const savedWmPath = await copyTempToUserData(out.tempFilePath, 'amap_wm');
+          const savedThumbPath = out.thumbTempFilePath
+            ? await copyTempToUserData(out.thumbTempFilePath, 'amap_thumb')
+            : savedWmPath;
+
+          const photoId = 'wx_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+          const entry = {
+            id: photoId,
+            createdAt: job.localCapturedAt,
+            rawPath: savedRawPath,
+            wmPath: savedWmPath,
+            thumbPath: savedThumbPath,
+            cfg: job.cfg
+          };
+
+          const savedList = addPhotoEntry(entry);
+
+          // 离线/未授时/未解析地点自动加入离线补签队列
+          let offlinePendingCount = this.data.offlinePendingCount;
+          if (job.needPoi || job.needTime) {
+            offlinePendingCount = enqueueOfflinePhoto({
+              photoId,
+              gcjLat: job.cfg.gcjLat,
+              gcjLon: job.cfg.gcjLon,
+              localCapturedAt: job.localCapturedAt,
+              needPoi: job.needPoi,
+              needTime: job.needTime
+            });
+          }
+
+          this.setData({
+            photoCount: savedList.length,
+            latestPhotoThumb: savedThumbPath,
+            pendingComposeCount: this._captureQueue.length,
+            offlinePendingCount
+          });
+
+          if (this.data.autoSaveAlbum) {
+            saveImageToAlbumWithPermission(savedWmPath, '', true).catch(() => {});
+          }
+        } catch (err) {
+          this.setData({ pendingComposeCount: this._captureQueue.length });
+          wx.showToast({
+            title: (err && err.message) || '水印合成失败，请重试',
+            icon: 'none'
+          });
+        }
+      }
+    } finally {
+      this._drainingQueue = false;
+      this.setData({ pendingComposeCount: 0 });
+    }
+  },
+
+  // ==================== 离线队列一键补签授时与补齐地名 ====================
+  async triggerOfflineReconcile(silent) {
+    if (this.data.isReconcilingOffline) return;
+    const count = getOfflinePendingCount();
+    if (count === 0) return;
+
+    this.setData({ isReconcilingOffline: true });
+    if (!silent) {
+      wx.showLoading({ title: `正在补签授时 (0/${count})...` });
+    }
+
+    try {
+      const fallbackCanvas = await this.getFallbackCanvasNodeAsync();
+      const res = await reconcileOfflineQueue({
+        fallbackCanvas,
+        onProgress: ({ current, total }) => {
+          if (!silent) {
+            wx.showLoading({ title: `正在补签 (${current}/${total})...` });
+          }
+        }
+      });
+      if (!silent) wx.hideLoading();
+
+      this.refreshPhotoSummary();
+      if (!silent) {
+        if (res.offline) {
+          wx.showToast({ title: '当前仍无网络，联网后将自动补签', icon: 'none' });
+        } else if (res.reconciled > 0) {
+          wx.showToast({ title: `已补签授时并更新 ${res.reconciled} 张照片`, icon: 'success' });
+        } else {
+          wx.showToast({ title: '暂无需更新或云服务未就绪', icon: 'none' });
+        }
+      }
+    } catch (e) {
+      if (!silent) {
+        wx.hideLoading();
+        wx.showToast({ title: '补签失败，请稍后重试', icon: 'none' });
+      }
+    } finally {
+      this.setData({
+        isReconcilingOffline: false,
+        offlinePendingCount: getOfflinePendingCount()
+      });
+    }
+  },
+
+  onTapOfflineReconcile() {
+    this.triggerOfflineReconcile(false);
+  },
+
+  getFallbackCanvasNodeAsync() {
+    return new Promise(resolve => {
+      if (this._cachedCanvasNode) {
+        resolve(this._cachedCanvasNode);
+        return;
+      }
+      const query = wx.createSelectorQuery();
+      query
+        .select('#compositeCanvas')
+        .fields({ node: true, size: true })
+        .exec(res => {
+          const node = res && res[0] && res[0].node;
+          if (node) this._cachedCanvasNode = node;
+          resolve(node || null);
+        });
+    });
+  },
+
+  openCurrentInWeChatMap() {
+    if (!this.data.hasRealFix && !this.data.isManualCoord) {
+      wx.showToast({ title: '正在等待定位完成', icon: 'none' });
+      return;
+    }
+    wx.openLocation({
+      latitude: Number(this.data.gcjLat),
+      longitude: Number(this.data.gcjLon),
+      name: this.data.shortPoi || '实拍点位',
+      address: this.data.fullAddr || `高德 GCJ-02: ${this.data.gcjLat}, ${this.data.gcjLon}`,
+      scale: 18
+    });
+  },
+
+  // ==================== 识图验真 ====================
   openVerifyEntrySheet() {
     this.setData({
       showPoiModal: false,
@@ -633,15 +1495,10 @@ Page({
     wx.scanCode({
       scanType: ['qrCode'],
       onlyFromCamera: false,
-      success: async res => {
+      success: res => {
         const parsed = parseLocationPayload(res.result);
         const report = buildVerificationReport(parsed, '', '镜头扫码核验');
         if (report) {
-          const sec = await checkTextsSecurity([report.shortPoi, parsed && parsed.note], 3);
-          if (!sec.pass) {
-            showViolationModal(sec.message);
-            return;
-          }
           this.setData({
             showVerifyModal: true,
             verifyReport: report,
@@ -660,40 +1517,31 @@ Page({
       count: 1,
       mediaType: ['image'],
       sourceType: ['album'],
-      success: res => {
+      success: async res => {
         const file = res.tempFiles && res.tempFiles[0];
         if (!file) return;
         const path = file.tempFilePath;
-        wx.showLoading({ title: '内容安全检测中...' });
-
-        this.getFallbackCanvasNode(async fallbackCanvas => {
-          try {
-            const sec = await checkImageSecurity(path, fallbackCanvas);
-            if (!sec.pass) {
-              wx.hideLoading();
-              showViolationModal(sec.message);
-              return;
-            }
-            wx.showLoading({ title: '1:1双角识码验真中...' });
-            const result = await verifyImageFile(path, fallbackCanvas);
-            wx.hideLoading();
-            if (result && result.ok && result.report) {
-              this.setData({
-                showVerifyModal: true,
-                verifyReport: result.report
-              });
-            } else {
-              wx.showToast({
-                title: (result && result.reason) || '未检测到有效防伪定位码',
-                icon: 'none',
-                duration: 2400
-              });
-            }
-          } catch (err) {
-            wx.hideLoading();
-            wx.showToast({ title: '未检测到有效防伪定位码', icon: 'none' });
+        wx.showLoading({ title: '1:1双角识码验真中...' });
+        try {
+          const fallbackCanvas = await this.getFallbackCanvasNodeAsync();
+          const result = await verifyImageFile(path, fallbackCanvas);
+          wx.hideLoading();
+          if (result && result.ok && result.report) {
+            this.setData({
+              showVerifyModal: true,
+              verifyReport: result.report
+            });
+          } else {
+            wx.showToast({
+              title: (result && result.reason) || '未检测到有效防伪定位码',
+              icon: 'none',
+              duration: 2400
+            });
           }
-        });
+        } catch (err) {
+          wx.hideLoading();
+          wx.showToast({ title: '未检测到有效防伪定位码', icon: 'none' });
+        }
       }
     });
   },
@@ -702,20 +1550,10 @@ Page({
     this.setData({ manualVerifyInput: e.detail.value });
   },
 
-  async runManualTextVerify() {
+  runManualTextVerify() {
     const raw = (this.data.manualVerifyInput || '').trim();
     if (!raw) {
       wx.showToast({ title: '请粘贴链接或二维码文本', icon: 'none' });
-      return;
-    }
-    wx.showLoading({ title: '内容安全检测中...' });
-    const sec = await checkTextsSecurity([raw], 3);
-    wx.hideLoading();
-    if (!sec.pass) {
-      if (sec.risky) {
-        this.setData({ manualVerifyInput: '' });
-      }
-      showViolationModal(sec.message);
       return;
     }
     const parsed = parseLocationPayload(raw);
@@ -752,674 +1590,12 @@ Page({
     wx.setClipboardData({ data: text });
   },
 
-  // ==================== 定位管理与拒绝后停轮询 ====================
-  startHighAccuracyLocation(forceOverwriteManual, interactive) {
-    wx.getLocation({
-      type: 'gcj02',
-      isHighAccuracy: true,
-      highAccuracyExpireTime: 3200,
-      success: res => {
-        if (this._locationDenied) {
-          this._locationDenied = false;
-          this.setData({ locationDenied: false });
-          this.startContinuousLocationTracking();
-        }
-        this.recordHardwareGpsFix(
-          res.latitude,
-          res.longitude,
-          res.accuracy,
-          res.altitude,
-          Boolean(forceOverwriteManual)
-        );
-      },
-      fail: err => {
-        const msg = (err && err.errMsg) || '';
-        const isDenied =
-          msg.indexOf('auth deny') !== -1 ||
-          msg.indexOf('authorize') !== -1 ||
-          msg.indexOf('denied') !== -1;
-        if (isDenied) {
-          // 定位权限被拒：立即停止 15 秒无意义轮询
-          this._locationDenied = true;
-          this.stopLocationPolling();
-          this.setData({ locationDenied: true });
-          if (interactive) {
-            promptOpenSetting(
-              'scope.userLocation',
-              '需要位置信息权限',
-              '定位权限已关闭，无法获取真实 GPS 经纬度。请在设置中开启「位置信息」权限。'
-            ).then(granted => {
-              if (granted) {
-                this._locationDenied = false;
-                this.setData({ locationDenied: false });
-                this.startHighAccuracyLocation(true, false);
-                this.startContinuousLocationTracking();
-              }
-            });
-          }
-          return;
-        }
-        const smart = inferSmartPoiFromCoords(this.data.gcjLat, this.data.gcjLon);
-        this.setData({
-          shortPoi: this.data.hasCustomPoi ? this.data.shortPoi : smart.shortPoi,
-          fullAddr: this.data.hasCustomPoi ? this.data.fullAddr : smart.fullAddr,
-          nearbyPois: smart.nearbyPois
-        });
-      }
-    });
-  },
-
-  recordHardwareGpsFix(lat, lon, accuracy, altitude, forceOverwriteManual) {
-    const gcjLat = Number(Number(lat).toFixed(6));
-    const gcjLon = Number(Number(lon).toFixed(6));
-    const wgs = gcj02ToWgs84(gcjLat, gcjLon);
-    const acc = Number(accuracy || 2.8).toFixed(1);
-    const alt = altitude ? Number(altitude).toFixed(1) : this.data.altitude;
-    const smart = inferSmartPoiFromCoords(gcjLat, gcjLon);
-
-    const shouldApplyActive = forceOverwriteManual || this.data.antiTamperMode || !this.data.isManualCoord;
-    const patch = {
-      hasRealFix: true,
-      locationDenied: false,
-      rawGcjLat: gcjLat,
-      rawGcjLon: gcjLon,
-      rawWgsLat: wgs.lat,
-      rawWgsLon: wgs.lon,
-      rawAccuracy: acc,
-      altitude: alt,
-      nearbyPois: smart.nearbyPois
-    };
-
-    if (shouldApplyActive) {
-      patch.isManualCoord = false;
-      patch.gcjLat = gcjLat;
-      patch.gcjLon = gcjLon;
-      patch.wgsLat = wgs.lat;
-      patch.wgsLon = wgs.lon;
-      patch.accuracy = acc;
-      if (!this.data.hasCustomPoi || this.data.antiTamperMode) {
-        patch.shortPoi = smart.shortPoi;
-        patch.fullAddr = smart.fullAddr;
-      }
-    }
-
-    this.setData(patch);
-  },
-
-  restoreRealGpsCoordinates() {
-    this.setData(
-      {
-        isManualCoord: false,
-        gcjLat: this.data.rawGcjLat,
-        gcjLon: this.data.rawGcjLon,
-        wgsLat: this.data.rawWgsLat,
-        wgsLon: this.data.rawWgsLon,
-        accuracy: this.data.rawAccuracy
-      },
-      () => {
-        this.startHighAccuracyLocation(true, true);
-        wx.showToast({ title: '已恢复手机真实GPS坐标', icon: 'none' });
-      }
-    );
-  },
-
-  refreshRealGpsNow() {
-    this.setData({ hasCustomPoi: false, isManualCoord: false });
-    this._locationDenied = false;
-    this.startHighAccuracyLocation(true, true);
-    wx.showToast({ title: '正在刷新真实GPS定位...', icon: 'none' });
-  },
-
-  choosePoiNameOnlyOnMap() {
-    if (this.data.antiTamperMode) {
-      wx.showToast({ title: '🛡 防伪模式下点位名称已锁定，不可篡改', icon: 'none' });
-      return;
-    }
-    const applyPoiName = (name, address) => {
-      const pickedName = (name || address || '').trim();
-      if (!pickedName) return;
-      const nextCands = [pickedName, ...this.data.nearbyPois]
-        .filter(Boolean)
-        .filter((v, i, a) => a.indexOf(v) === i)
-        .slice(0, 6);
-      this.setData({
-        hasCustomPoi: true,
-        shortPoi: pickedName,
-        fullAddr: address || this.data.fullAddr,
-        nearbyPois: nextCands
-      });
-      wx.showToast({ title: '🏷 已选用地名(GPS坐标未变)', icon: 'none' });
-    };
-
-    if (wx.choosePoi) {
-      wx.choosePoi({
-        success: res => applyPoiName(res.name, res.address),
-        fail: () => {
-          wx.chooseLocation({
-            latitude: this.data.gcjLat,
-            longitude: this.data.gcjLon,
-            success: res => applyPoiName(res.name, res.address),
-            fail: err => this.handleChooseLocationFail(err)
-          });
-        }
-      });
-    } else {
-      wx.chooseLocation({
-        latitude: this.data.gcjLat,
-        longitude: this.data.gcjLon,
-        success: res => applyPoiName(res.name, res.address),
-        fail: err => this.handleChooseLocationFail(err)
-      });
-    }
-  },
-
-  choosePoiOnMap() {
-    if (this.data.antiTamperMode) {
-      wx.showToast({ title: '🛡 防伪模式下坐标与点位均已锁定', icon: 'none' });
-      return;
-    }
-    wx.chooseLocation({
-      latitude: this.data.gcjLat,
-      longitude: this.data.gcjLon,
-      success: res => {
-        const gcjLat = Number(res.latitude.toFixed(6));
-        const gcjLon = Number(res.longitude.toFixed(6));
-        const wgs = gcj02ToWgs84(gcjLat, gcjLon);
-        const pickedName = (res.name || '').trim() || this.data.shortPoi;
-        this.setData({
-          hasCustomPoi: true,
-          isManualCoord: true,
-          gcjLat,
-          gcjLon,
-          wgsLat: wgs.lat,
-          wgsLon: wgs.lon,
-          shortPoi: pickedName,
-          fullAddr: res.address || this.data.fullAddr,
-          showPoiModal: false
-        });
-        wx.showToast({ title: '📌 已迁移至地图选点坐标', icon: 'none' });
-      },
-      fail: err => this.handleChooseLocationFail(err)
-    });
-  },
-
-  handleChooseLocationFail(err) {
-    if (err && err.errMsg && err.errMsg.indexOf('auth deny') !== -1) {
-      promptOpenSetting(
-        'scope.userLocation',
-        '需要位置权限',
-        '请在设置中开启位置信息权限以打开地图选点。'
-      );
-    }
-  },
-
-  // ==================== 相机控制与样式切换 ====================
-  toggleCaptureMode() {
-    const next = this.data.captureMode === 'photo' ? 'frame' : 'photo';
-    this.setData({ captureMode: next }, () => this.persistUserConfig());
-    wx.showToast({
-      title: next === 'photo' ? '📷 光学拍照模式' : '⚡ 极速抓拍模式',
-      icon: 'none'
-    });
-  },
-
-  setCaptureMode(e) {
-    const mode = e.currentTarget.dataset.mode;
-    this.setData({ captureMode: mode }, () => this.persistUserConfig());
-  },
-
-  selectTimerSeconds(e) {
-    const sec = Number(e.currentTarget.dataset.sec) || 0;
-    this.setData({ timerSeconds: sec });
-  },
-
-  cycleCameraZoom() {
-    const zooms = [1.0, 1.5, 2.0, 3.0];
-    const curIdx = zooms.indexOf(this.data.zoomRatio);
-    const nextZoom = zooms[(curIdx + 1) % zooms.length];
-    try {
-      const camCtx = wx.createCameraContext();
-      if (camCtx && typeof camCtx.setZoom === 'function') {
-        camCtx.setZoom({
-          zoom: nextZoom,
-          success: () => {
-            this.setData({ zoomRatio: nextZoom, zoomRatioStr: nextZoom.toFixed(1) + 'X' });
-          },
-          fail: () => {
-            // 修复：setZoom 失败时绝不假更新倍率
-            wx.showToast({ title: '当前镜头不支持该变焦倍率', icon: 'none' });
-          }
-        });
-        return;
-      }
-    } catch (e) {}
-    wx.showToast({ title: '当前设备暂不支持变焦调节', icon: 'none' });
-  },
-
-  cycleFlashMode() {
-    const modes = ['off', 'on', 'auto', 'torch'];
-    const labels = ['⚡关', '⚡开', '⚡自', '⚡常'];
-    const nextIdx = (modes.indexOf(this.data.flashMode) + 1) % modes.length;
-    this.setData({
-      flashMode: modes[nextIdx],
-      flashLabel: labels[nextIdx]
-    });
-  },
-
-  flipCamera() {
-    this.setData({
-      devicePosition: this.data.devicePosition === 'back' ? 'front' : 'back',
-      zoomRatio: 1.0,
-      zoomRatioStr: '1.0X'
-    });
-  },
-
-  selectTemplate(e) {
-    const idx = Number(e.currentTarget.dataset.idx);
-    if (wx.vibrateShort) {
-      try {
-        wx.vibrateShort({ type: 'light' });
-      } catch (err) {}
-    }
-    this.setData({ styleTemplate: idx }, () => this.persistUserConfig());
-  },
-
-  applyQuickScenePreset(e) {
-    const preset = e.currentTarget.dataset.preset;
-    let patch = {};
-    if (preset === 'minimal') {
-      patch = {
-        styleTemplate: 0,
-        showTime: true,
-        showLoc: true,
-        showCoords: true,
-        showCoordTag: true,
-        showAccuracy: true,
-        showAddress: false,
-        showNote: false,
-        showEnv: false,
-        showQr: true,
-        showMiniMap: false
-      };
-    } else if (preset === 'engineering') {
-      patch = {
-        styleTemplate: 1,
-        showTime: true,
-        showLoc: true,
-        showCoords: true,
-        showCoordTag: true,
-        showAccuracy: true,
-        showAddress: true,
-        showNote: true,
-        showEnv: true,
-        showQr: true,
-        showMiniMap: true
-      };
-    } else if (preset === 'gis') {
-      patch = {
-        styleTemplate: 2,
-        useDms: true,
-        showTime: true,
-        showLoc: true,
-        showCoords: true,
-        showCoordTag: true,
-        showAccuracy: true,
-        showAddress: true,
-        showEnv: true,
-        showQr: true,
-        showMiniMap: true
-      };
-    } else if (preset === 'ledger') {
-      patch = {
-        styleTemplate: 4,
-        showTime: true,
-        showLoc: true,
-        showCoords: true,
-        showCoordTag: true,
-        showAccuracy: true,
-        showAddress: true,
-        showNote: true,
-        showEnv: false,
-        showQr: true
-      };
-    }
-    this.setData(patch, () => {
-      this.persistUserConfig();
-      wx.showToast({ title: '⚡ 已应用预设方案', icon: 'none' });
-    });
-  },
-
-  selectCoordSystem(e) {
-    const sys = e.currentTarget.dataset.sys;
-    if (!sys) return;
-    this.setData({ coordSys: sys }, () => {
-      this.persistUserConfig();
-      wx.showToast({ title: `水印坐标：${sys} (高德跳转零偏差)`, icon: 'none' });
-    });
-  },
-
-  setDmsFormat(e) {
-    const useDms = e.currentTarget.dataset.dms === '1';
-    this.setData({ useDms }, () => this.persistUserConfig());
-  },
-
-  selectAccentColor(e) {
-    const idx = Number(e.currentTarget.dataset.idx) || 0;
-    const hex = (ACCENT_PALETTE[idx] || ACCENT_PALETTE[0]).hex;
-    this.setData({ accentColorIndex: idx, accentHex: hex }, () => this.persistUserConfig());
-  },
-
-  selectFontScale(e) {
-    const sc = Number(e.currentTarget.dataset.scale) || 1;
-    this.setData({ fontScale: sc }, () => this.persistUserConfig());
-  },
-
-  selectBgAlpha(e) {
-    const idx = Number(e.currentTarget.dataset.alpha);
-    const rgba = BG_ALPHA_PRESETS[idx] || BG_ALPHA_PRESETS[1];
-    this.setData({ bgAlphaMode: idx, cardBgRgba: rgba }, () => this.persistUserConfig());
-  },
-
-  selectMiniMapPos(e) {
-    const pos = Number(e.currentTarget.dataset.pos) || 0;
-    this.setData({ miniMapPosition: pos }, () => this.persistUserConfig());
-  },
-
-  toggleWatermarkField(e) {
-    const field = e.currentTarget.dataset.field;
-    if (!field) return;
-    const nextVal = !this.data[field];
-    this.setData({ [field]: nextVal }, () => this.persistUserConfig());
-  },
-
-  selectQuickPoi(e) {
-    if (this.data.antiTamperMode) {
-      wx.showToast({ title: '🛡 防伪模式下点位名称已锁定', icon: 'none' });
-      return;
-    }
-    const poi = e.currentTarget.dataset.poi;
-    if (poi) {
-      this.setData({ shortPoi: poi, hasCustomPoi: true });
-    }
-  },
-
-  selectQuickTitle(e) {
-    const title = e.currentTarget.dataset.title;
-    if (title) {
-      this.setData({ customTitle: title }, () => this.persistUserConfig());
-    }
-  },
-
-  appendQuickNote(e) {
-    if (this.data.antiTamperMode) {
-      wx.showToast({ title: '🛡 防伪模式下备注已锁定，不可篡改', icon: 'none' });
-      return;
-    }
-    const tag = e.currentTarget.dataset.note;
-    if (!tag) return;
-    const next = this.data.note ? `${this.data.note} · ${tag}` : tag;
-    this.setData({ note: next, showNote: true }, () => this.persistUserConfig());
-  },
-
-  clearNoteInput() {
-    if (this.data.antiTamperMode) {
-      wx.showToast({ title: '🛡 防伪模式下备注已锁定', icon: 'none' });
-      return;
-    }
-    this.setData({ note: '' }, () => this.persistUserConfig());
-  },
-
-  // ==================== 快门拍摄与离屏双轨保存 ====================
-  async validateLiveTextsAndGuard(revertOnAnyFailure) {
-    this.flushInputBuffers();
-    const res = await checkTextsSecurity(
-      [this.data.customTitle, this.data.shortPoi, this.data.fullAddr, this.data.note],
-      3
-    );
-    if (res && res.pass) {
-      this._safeTextSnapshot = {
-        customTitle: this.data.customTitle,
-        shortPoi: this.data.shortPoi,
-        fullAddr: this.data.fullAddr,
-        note: this.data.note
-      };
-      return true;
-    }
-    if ((revertOnAnyFailure || (res && res.risky)) && this._safeTextSnapshot) {
-      this.setData(this._safeTextSnapshot);
-    }
-    showViolationModal(res && res.message);
-    return false;
-  },
-
-  async handleShutterTap() {
-    if (this.data.countdownRemaining > 0) {
-      if (this._countdownTimer) clearInterval(this._countdownTimer);
-      this._countdownTimer = null;
-      this.setData({ countdownRemaining: 0 });
-      wx.showToast({ title: '已取消延时拍摄', icon: 'none' });
-      return;
-    }
-    if (this.isCompositing || this._checkingBeforeShutter) return;
-
-    this.flushInputBuffers();
-
-    // 防伪模式安全门禁：未获得真实定位（或仍为默认天安门占位坐标）严禁签发防伪哈希
-    if (this.data.antiTamperMode && !canSignAntiTamper(this.data.hasRealFix, this.data.rawGcjLat, this.data.rawGcjLon)) {
-      wx.showModal({
-        title: '🛡 防伪模式等待真实 GPS',
-        content: '当前尚未获取到手机真实 GPS 定位，防伪模式严禁使用默认坐标签发防伪码。请前往室外空旷处或先刷新定位后再拍摄。',
-        confirmText: '刷新定位',
-        cancelText: '暂不拍摄',
-        success: r => {
-          if (r.confirm) {
-            this.refreshRealGpsNow();
-          }
-        }
-      });
-      return;
-    }
-
-    this._checkingBeforeShutter = true;
-    let safeOk = false;
-    try {
-      safeOk = await this.validateLiveTextsAndGuard();
-    } finally {
-      this._checkingBeforeShutter = false;
-    }
-    if (!safeOk) return;
-
-    if (this.data.timerSeconds > 0) {
-      let rem = this.data.timerSeconds;
-      this.setData({ countdownRemaining: rem });
-      this._countdownTimer = setInterval(() => {
-        rem--;
-        if (rem <= 0) {
-          clearInterval(this._countdownTimer);
-          this._countdownTimer = null;
-          this.setData({ countdownRemaining: 0 });
-          this.executeImmediateCapture();
-        } else {
-          this.setData({ countdownRemaining: rem });
-        }
-      }, 1000);
-      return;
-    }
-
-    this.executeImmediateCapture();
-  },
-
-  executeImmediateCapture() {
-    if (this.isCompositing) return;
-    const camCtx = wx.createCameraContext();
-    const isFastFrame = this.data.captureMode === 'frame';
-    const quality = isFastFrame ? 'low' : 'high';
-
-    this.setData({ shutterFlashVisible: true });
-    setTimeout(() => {
-      this.setData({ shutterFlashVisible: false });
-    }, 140);
-
-    camCtx.takePhoto({
-      quality,
-      success: res => {
-        const t = getTimeStrings(this.data.ntpOffsetMs);
-        const canSign = this.data.antiTamperMode && canSignAntiTamper(this.data.hasRealFix, this.data.rawGcjLat, this.data.rawGcjLon);
-        const activeGcjLat = canSign ? this.data.rawGcjLat : this.data.gcjLat;
-        const activeGcjLon = canSign ? this.data.rawGcjLon : this.data.gcjLon;
-        const activeWgsLat = canSign ? this.data.rawWgsLat : this.data.wgsLat;
-        const activeWgsLon = canSign ? this.data.rawWgsLon : this.data.wgsLon;
-        const cleanPoi = this.data.shortPoi || '实拍点位';
-        const antiHash = canSign
-          ? computeAntiTamperHash(activeGcjLat, activeGcjLon, t.fullTs, cleanPoi, this.data.note)
-          : '';
-
-        const snapshotCfg = {
-          styleTemplate: this.data.styleTemplate,
-          showBottomScrim: this.data.showBottomScrim,
-          customTitle: this.data.customTitle,
-          coordSys: this.data.coordSys,
-          useDms: this.data.useDms,
-          accentColorIndex: this.data.accentColorIndex,
-          accentHex: this.data.accentHex,
-          fontScale: this.data.fontScale,
-          bgAlphaMode: this.data.bgAlphaMode,
-          cardBgRgba: this.data.cardBgRgba,
-          gcjLat: activeGcjLat,
-          gcjLon: activeGcjLon,
-          wgsLat: activeWgsLat,
-          wgsLon: activeWgsLon,
-          origGcjLat: activeGcjLat,
-          origGcjLon: activeGcjLon,
-          accuracy: this.data.accuracy,
-          altitude: this.data.altitude,
-          azimuthDeg: this.data.azimuthDeg,
-          azimuthText: this.data.azimuthText,
-          shortPoi: cleanPoi,
-          fullAddr: this.data.fullAddr,
-          note: this.data.note,
-          hm: t.hm,
-          hms: t.hms,
-          dateOnlyStr: t.datePart,
-          weekStr: t.weekStr,
-          dateWeek: t.dateWeek,
-          fullTs: t.fullTs,
-          showQr: this.data.showQr,
-          showMiniMap: this.data.showMiniMap,
-          miniMapPosition: this.data.miniMapPosition,
-          bottomRight: this.data.bottomRight,
-          antiTamperMode: canSign,
-          ntpSynced: this.data.ntpSynced,
-          antiTamperHash: antiHash,
-          showTime: this.data.showTime,
-          showLoc: this.data.showLoc,
-          showCoords: this.data.showCoords,
-          showCoordTag: this.data.showCoordTag,
-          showAccuracy: this.data.showAccuracy,
-          showAddress: this.data.showAddress,
-          showNote: this.data.showNote,
-          showEnv: this.data.showEnv,
-          fastFrame: isFastFrame
-        };
-
-        this.compositeAndPersistPhoto(res.tempImagePath, snapshotCfg);
-      },
-      fail: () => {
-        promptOpenSetting(
-          'scope.camera',
-          '无法调用相机拍照',
-          '请确认已授予小程序摄像头权限，或点击下方去设置开启。'
-        );
-      }
-    });
-  },
-
-  getFallbackCanvasNode(cb) {
-    if (this._cachedCanvasNode) {
-      cb(this._cachedCanvasNode);
-      return;
-    }
-    const query = wx.createSelectorQuery();
-    query
-      .select('#compositeCanvas')
-      .fields({ node: true, size: true })
-      .exec(res => {
-        const node = res && res[0] && res[0].node;
-        if (node) this._cachedCanvasNode = node;
-        cb(node || null);
-      });
-  },
-
-  compositeAndPersistPhoto(rawImagePath, cfg) {
-    this.isCompositing = true;
-    wx.showLoading({ title: '合成高清水印...' });
-
-    this.getFallbackCanvasNode(fallbackCanvas => {
-      renderWatermarkToTempFile(rawImagePath, cfg, {
-        fallbackCanvas,
-        generateThumb: true
-      })
-        .then(async out => {
-          const savedRawPath = await copyTempToUserData(rawImagePath, 'amap_raw');
-          const savedWmPath = await copyTempToUserData(out.tempFilePath, 'amap_wm');
-          const savedThumbPath = out.thumbTempFilePath
-            ? await copyTempToUserData(out.thumbTempFilePath, 'amap_thumb')
-            : savedWmPath;
-
-          const entry = {
-            id: 'wx_' + Date.now(),
-            createdAt: Date.now(),
-            rawPath: savedRawPath,
-            wmPath: savedWmPath,
-            thumbPath: savedThumbPath,
-            cfg
-          };
-
-          const savedList = addPhotoEntry(entry);
-          this.isCompositing = false;
-          wx.hideLoading();
-
-          this.setData({
-            photoCount: savedList.length,
-            latestPhotoThumb: savedThumbPath
-          });
-
-          if (this.data.autoSaveAlbum) {
-            saveImageToAlbumWithPermission(
-              savedWmPath,
-              `已存相册(${cfg.coordSys}水印·高德零偏差)`,
-              false
-            ).catch(() => {
-              wx.showToast({ title: '已存入应用内相册', icon: 'none' });
-            });
-          } else {
-            wx.showToast({ title: '已存入应用内相册', icon: 'none' });
-          }
-        })
-        .catch(err => {
-          this.isCompositing = false;
-          wx.hideLoading();
-          wx.showToast({
-            title: (err && err.message) || '水印合成导出失败，请重试',
-            icon: 'none',
-            duration: 2200
-          });
-        });
-    });
-  },
-
-  openCurrentInWeChatMap() {
-    wx.openLocation({
-      latitude: Number(this.data.gcjLat),
-      longitude: Number(this.data.gcjLon),
-      name: this.data.shortPoi || '实拍点位',
-      address: this.data.fullAddr || `高德 GCJ-02: ${this.data.gcjLat}, ${this.data.gcjLon}`,
-      scale: 18
-    });
-  },
-
-  // ==================== 弹窗开关（互斥防嵌套冲突） ====================
+  // ==================== 弹窗开关（互斥平滑切换，关闭无阻塞） ====================
   openPoiQuickModal() {
+    if (this.data.locationDenied) {
+      this.startHighAccuracyLocation(true, true);
+      return;
+    }
     this.setData({
       showSettings: false,
       showWmModal: false,
@@ -1427,11 +1603,13 @@ Page({
       showPoiModal: true
     });
   },
-  async closePoiQuickModal() {
-    const ok = await this.validateLiveTextsAndGuard(true);
-    if (ok) this.persistUserConfig();
+
+  closePoiQuickModal() {
+    this.flushInputBuffers();
+    this.persistUserConfig();
     this.setData({ showPoiModal: false });
   },
+
   openSettingsModal() {
     this.setData({
       showPoiModal: false,
@@ -1440,9 +1618,11 @@ Page({
       showSettings: true
     });
   },
+
   closeSettingsModal() {
     this.setData({ showSettings: false });
   },
+
   openWatermarkModal() {
     this.setData({
       showPoiModal: false,
@@ -1451,19 +1631,18 @@ Page({
       showWmModal: true
     });
   },
-  async closeWatermarkModal() {
-    const ok = await this.validateLiveTextsAndGuard(true);
-    if (ok) this.persistUserConfig();
-    this.setData({ showWmModal: false });
-  },
-  async applyWatermarkCustomization() {
-    wx.showLoading({ title: '内容安全检测中...' });
-    const ok = await this.validateLiveTextsAndGuard(false);
-    wx.hideLoading();
-    if (!ok) return;
+
+  closeWatermarkModal() {
+    this.flushInputBuffers();
     this.persistUserConfig();
     this.setData({ showWmModal: false });
-    wx.showToast({ title: '水印设置已实时生效', icon: 'none' });
+  },
+
+  applyWatermarkCustomization() {
+    this.flushInputBuffers();
+    this.persistUserConfig();
+    this.setData({ showWmModal: false });
+    wx.showToast({ title: '水印设置已生效', icon: 'none' });
   },
 
   // ==================== 开关回调 ====================
@@ -1488,7 +1667,7 @@ Page({
     const hadManualOffset = this.data.isManualCoord;
     const patch = { antiTamperMode: enabled };
 
-    if (enabled) {
+    if (enabled && this.data.hasRealFix) {
       patch.isManualCoord = false;
       patch.gcjLat = this.data.rawGcjLat;
       patch.gcjLon = this.data.rawGcjLon;
@@ -1503,8 +1682,8 @@ Page({
         this.startHighAccuracyLocation(true, true);
         wx.showToast({
           title: hadManualOffset
-            ? '🛡 已开启防伪：已强制回滚为真实GPS并锁定点位与备注'
-            : '🛡 已开启防伪：真实GPS、点位与备注已锁定',
+            ? '防伪已开启：已回滚为真实 GPS 并锁定'
+            : '防伪已开启：真实 GPS 与备注已锁定',
           icon: 'none'
         });
       }
@@ -1512,7 +1691,7 @@ Page({
     });
   },
 
-  // ==================== 防抖输入 + 退出前刷入缓冲 ====================
+  // ==================== 防抖输入 ====================
   _scheduleBufferedInput(field, val) {
     this._inputBuffers[field] = val;
     if (this._inputTimers[field]) clearTimeout(this._inputTimers[field]);
@@ -1524,7 +1703,7 @@ Page({
       const patch = { [field]: latest };
       if (field === 'shortPoi' || field === 'fullAddr') patch.hasCustomPoi = true;
       this.setData(patch);
-    }, 120);
+    }, 100);
   },
 
   onInputTitle(e) {
@@ -1552,9 +1731,6 @@ Page({
 
   noop() {},
 
-  /**
-   * 转发分享修复：取景页仅分享当前实时位置，绝不误发旧照片
-   */
   onShareAppMessage() {
     this.flushInputBuffers();
     const t = getTimeStrings(this.data.ntpOffsetMs);
@@ -1563,17 +1739,24 @@ Page({
       canSignAntiTamper(this.data.hasRealFix, this.data.rawGcjLat, this.data.rawGcjLon);
     const lat = canSign ? this.data.rawGcjLat : this.data.gcjLat;
     const lon = canSign ? this.data.rawGcjLon : this.data.gcjLon;
-    const rawPoi = this.data.shortPoi || '实拍点位';
+    const rawPoi = this.data.shortPoi === '定位中...' ? '实拍点位' : this.data.shortPoi || '实拍点位';
     const poi = encodeURIComponent(rawPoi);
     const ts = encodeURIComponent(t.fullTs);
     const note = encodeURIComponent(this.data.note || '');
+    const ntpFlag = this.data.ntpSynced ? '1' : '0';
     const sig = canSign
       ? computeAntiTamperHash(lat, lon, t.fullTs, rawPoi, this.data.note || '').slice(0, 12)
       : '';
-    const sigParam = sig ? `&sig=${sig}&note=${note}` : '';
+    const extra = `&ntp=${ntpFlag}${note ? `&note=${note}` : ''}${sig ? `&sig=${sig}` : ''}`;
+    if (!lat && !lon) {
+      return {
+        title: '极速高德水印相机 v1.0',
+        path: '/pages/index/index'
+      };
+    }
     return {
-      title: `📍 实时定位：${rawPoi} (${lat}°N, ${lon}°E)`,
-      path: `/pages/index/index?act=jump&lat=${lat}&lon=${lon}&poi=${poi}&ts=${ts}${sigParam}`
+      title: `实拍定位：${rawPoi} (${lat}°N, ${lon}°E)`,
+      path: `/pages/index/index?act=jump&lat=${lat}&lon=${lon}&poi=${poi}&ts=${ts}${extra}`
     };
   }
 });
