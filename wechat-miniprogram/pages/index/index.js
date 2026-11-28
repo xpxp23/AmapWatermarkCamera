@@ -1,17 +1,17 @@
 /**
- * 极速高德水印相机 v1.0 · 主取景页控制器
- * 核心升级：
- * - 快门零云函数阻塞，支持纯离线秒拍 + 后台异步合成队列连拍
- * - 接入云函数 regeoPoi 自动识别周边店铺/小区/地标（50m 空间缓存 + 权威授时）
- * - 离线拍摄队列 + 联网自动/一键补签授时与补齐周边地名
- * - 彻底移除 160px 假小图与极速裁切模式，统一高清水印全画幅导出
- * - 极简相机交互：顶 3 键 + 沉浸取景（点击对焦/横滑切模板）+ 底 3 槽 + 双 Tab 水印设置
+ * 极速高德水印相机 v2.0 · 主取景页控制器
+ * - 清爽日间 UI + 双列可视化水印选择 + 开关清单编辑与单页下钻
+ * - 支持「无水印原图拍摄」（保留 rawPath，随时在相册详情补加水印）
+ * - 支持各模板独立记忆配色/字号/透明度，并可收藏自定义方案至「我的常用」
+ * - 快门零云函数阻塞（纯离线秒拍 + 后台异步队列），文本编辑按规范接入云安全校验
  */
 
 const {
   gcj02ToWgs84,
   canSignAntiTamper,
   formatAzimuthText,
+  resolveDisplayCoordinates,
+  formatCoords,
   getTimeStrings,
   computeAntiTamperHash,
   verifyAntiTamperHash,
@@ -31,11 +31,7 @@ const {
   initOfflineNetworkListener
 } = require('../../utils/offline_queue.js');
 
-const {
-  buildVerificationReport,
-  formatVerifyReportText,
-  verifyImageFile
-} = require('../../utils/photo_verifier.js');
+const { checkTextsSecurity, showViolationModal } = require('../../utils/sec_check.js');
 
 const { renderWatermarkToTempFile } = require('../../utils/watermark_renderer.js');
 
@@ -68,6 +64,42 @@ const BG_ALPHA_PRESETS = [
   'rgba(11, 19, 43, 0.94)'
 ];
 
+const TEMPLATE_CATALOG = [
+  { id: 0, name: '大字时间', category: 'daily', tag: '通用', keywords: '大字时间打卡极简天气日常' },
+  { id: 1, name: '巡检卡片', category: 'work', tag: '推荐', keywords: '工程巡检卡片现场外业记录' },
+  { id: 2, name: '网格测绘', category: 'gis', tag: '测绘', keywords: '经纬网格测绘坐标定桩GIS' },
+  { id: 3, name: '胶片底栏', category: 'daily', tag: '极简', keywords: '极简胶片底栏风景通透打卡' },
+  { id: 4, name: '标准台账', category: 'work', tag: '台账', keywords: '外业标准台账清单验收记录' }
+];
+
+const WM_FIELD_TITLES = {
+  time: '真实时间与授时',
+  poi: '地点简称与位置',
+  coords: '经纬度与坐标系',
+  address: '详细地址',
+  note: '现场备注',
+  env: '海拔与方位',
+  qr: '高德定位二维码',
+  style: '卡片标题与样式'
+};
+
+function getFontScaleLabel(scale) {
+  const n = Number(scale);
+  if (n <= 0.9) return '小字号';
+  if (n >= 1.1) return '大字号';
+  return '标准';
+}
+
+function getDefaultTemplateStyle() {
+  return {
+    accentColorIndex: 0,
+    fontScale: 1,
+    bgAlphaMode: 1,
+    bottomRight: false,
+    showBottomScrim: false
+  };
+}
+
 Page({
   data: {
     statusBarHeight: 44,
@@ -95,14 +127,23 @@ Page({
     focusY: 0,
     templateToastText: '',
     styleTemplate: 0,
+    noWatermark: false,
     showBottomScrim: false,
     tplNames: ['大字时间', '巡检卡片', '网格测绘', '胶片底栏', '标准台账'],
+    tplCards: TEMPLATE_CATALOG,
+    filteredTplCards: TEMPLATE_CATALOG,
+    customPresets: [],
+    filteredPresets: [],
+    activePresetId: '',
+    templateStyles: {},
     quickTitleTags: ['现场点位核验', '工程巡检记录', '隐蔽工程验收', '外业测绘定桩', '安全隐患排查'],
     quickNoteTags: ['核验合格', '定位已校准', '施工进行中', '待整改复核', '初检通过'],
     accentColors: ACCENT_PALETTE,
     accentColorIndex: 0,
     accentHex: '#38bdf8',
+    accentName: '天际蓝',
     fontScale: 1,
+    fontScaleLabel: '标准',
     bgAlphaMode: 1,
     cardBgRgba: BG_ALPHA_PRESETS[1],
     customTitle: '现场点位核验',
@@ -153,13 +194,23 @@ Page({
     pendingComposeCount: 0,
     offlinePendingCount: 0,
     isReconcilingOffline: false,
-    wmTab: 'basic', // 'basic' | 'pro'
+    wmStep: 'picker', // 'picker' | 'editor' | 'field'
+    wmPickerTab: 'all', // 'all' | 'presets'
+    wmSearchOpen: false,
+    wmSearchQuery: '',
+    wmCategory: 'all',
+    wmEditField: 'poi',
+    wmFieldTitle: '地点简称与位置',
+    wmOverlayLiftPx: 180,
+    liveTimeHm: '--:--',
+    liveDateStr: '',
+    liveCoordShort: '定位校准中...',
+    livePreviewTime: '',
+    livePreviewCoord: '定位校准中...',
+    livePreviewEnv: '开启后显示实时海拔与方位角',
     showSettings: false,
     showWmModal: false,
     showPoiModal: false,
-    showVerifyModal: false,
-    verifyReport: null,
-    manualVerifyInput: '',
     sharedBannerVisible: false,
     sharedPoint: null
   },
@@ -173,6 +224,7 @@ Page({
     this._lastCompassTs = 0;
     this._inputBuffers = {};
     this._inputTimers = {};
+    this._dirtyTextFields = new Set();
     this._captureQueue = [];
     this._drainingQueue = false;
     this._touchStartX = 0;
@@ -327,13 +379,11 @@ Page({
     if (patch.shortPoi !== undefined || patch.fullAddr !== undefined) {
       patch.hasCustomPoi = true;
     }
-    this.setData(patch);
+    this.setData(patch, () => this.syncDrawerPreviewStrings());
   },
 
   onInterceptBackGesture() {
-    if (this.data.showVerifyModal) {
-      this.closeVerifyModal();
-    } else if (this.data.showWmModal) {
+    if (this.data.showWmModal) {
       this.closeWatermarkModal();
     } else if (this.data.showPoiModal) {
       this.closePoiQuickModal();
@@ -342,30 +392,133 @@ Page({
     }
   },
 
+  normalizeTemplateStyles(rawMap) {
+    const out = {};
+    for (let i = 0; i < TEMPLATE_CATALOG.length; i++) {
+      const k = String(i);
+      const src = rawMap && rawMap[k] && typeof rawMap[k] === 'object' ? rawMap[k] : {};
+      const def = getDefaultTemplateStyle();
+      out[k] = {
+        accentColorIndex: src.accentColorIndex !== undefined ? Number(src.accentColorIndex) : def.accentColorIndex,
+        fontScale: Number(src.fontScale) || def.fontScale,
+        bgAlphaMode: src.bgAlphaMode !== undefined ? Number(src.bgAlphaMode) : def.bgAlphaMode,
+        bottomRight: src.bottomRight !== undefined ? Boolean(src.bottomRight) : def.bottomRight,
+        showBottomScrim: src.showBottomScrim !== undefined ? Boolean(src.showBottomScrim) : def.showBottomScrim
+      };
+    }
+    return out;
+  },
+
+  filterTplCardsList(category, query) {
+    const cat = category || 'all';
+    const q = String(query || '').trim().toLowerCase();
+    return TEMPLATE_CATALOG.filter(item => {
+      if (cat !== 'all' && item.category !== cat) return false;
+      if (!q) return true;
+      return (
+        item.name.toLowerCase().indexOf(q) !== -1 ||
+        item.tag.toLowerCase().indexOf(q) !== -1 ||
+        item.keywords.toLowerCase().indexOf(q) !== -1
+      );
+    });
+  },
+
+  filterCustomPresetsList(presets, query) {
+    const list = Array.isArray(presets) ? presets : [];
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(p => {
+      const text = `${p.name || ''} ${p.customTitle || ''} ${p.note || ''} ${p.coordSys || ''}`.toLowerCase();
+      return text.indexOf(q) !== -1;
+    });
+  },
+
+  syncDrawerPreviewStrings() {
+    const t = getTimeStrings(this.data.ntpOffsetMs);
+    const hasCoord = this.data.hasRealFix || this.data.isManualCoord;
+    let coordShort = '定位校准中...';
+    let coordFull = '定位校准中...';
+    if (hasCoord) {
+      const res = resolveDisplayCoordinates(
+        this.data.coordSys,
+        this.data.gcjLat,
+        this.data.gcjLon,
+        this.data.wgsLat,
+        this.data.wgsLon
+      );
+      coordShort = formatCoords(res.lat, res.lon, false);
+      const formatted = formatCoords(res.lat, res.lon, this.data.useDms);
+      const acc = this.data.showAccuracy && this.data.accuracy ? ` ±${this.data.accuracy}m` : '';
+      coordFull = this.data.showCoordTag ? `${formatted} (${res.tag})${acc}` : `${formatted}${acc}`;
+    }
+    const envParts = [];
+    if (this.data.altitude) envParts.push(`海拔 ${this.data.altitude}m`);
+    if (this.data.azimuthText) envParts.push(this.data.azimuthText);
+    const livePreviewEnv = envParts.length > 0
+      ? envParts.join(' · ')
+      : (this.data.showEnv ? '待获取传感器数据' : '开启后显示实时海拔与方位');
+
+    this.setData({
+      liveTimeHm: t.hm,
+      liveDateStr: `${t.datePart} ${t.weekStr}`,
+      liveCoordShort: coordShort,
+      livePreviewTime: `${t.fullTs} ${t.weekStr}`,
+      livePreviewCoord: coordFull,
+      livePreviewEnv
+    });
+  },
+
   buildMergedStartupPatch(statusBarHeight, menuBtnTop, menuBtnHeight, menuBtnRightSpace) {
+    const t = getTimeStrings(0);
     const patch = {
       statusBarHeight,
       menuBtnTop,
       menuBtnHeight,
-      menuBtnRightSpace
+      menuBtnRightSpace,
+      liveTimeHm: t.hm,
+      liveDateStr: `${t.datePart} ${t.weekStr}`,
+      livePreviewTime: `${t.fullTs} ${t.weekStr}`
     };
     const savedCfg = loadUserConfig();
     if (savedCfg && typeof savedCfg === 'object') {
-      const idx = Number(savedCfg.accentColorIndex) || 0;
-      const alphaIdx = savedCfg.bgAlphaMode !== undefined ? Number(savedCfg.bgAlphaMode) : 1;
-      patch.styleTemplate = savedCfg.styleTemplate !== undefined ? Number(savedCfg.styleTemplate) : 0;
-      patch.showBottomScrim = Boolean(savedCfg.showBottomScrim);
+      const tpl = savedCfg.styleTemplate !== undefined ? Number(savedCfg.styleTemplate) : 0;
+      const normalizedStyles = this.normalizeTemplateStyles(savedCfg.templateStyles);
+      if (savedCfg.accentColorIndex !== undefined && !savedCfg.templateStyles) {
+        normalizedStyles[String(tpl)] = {
+          accentColorIndex: Number(savedCfg.accentColorIndex) || 0,
+          fontScale: Number(savedCfg.fontScale) || 1,
+          bgAlphaMode: savedCfg.bgAlphaMode !== undefined ? Number(savedCfg.bgAlphaMode) : 1,
+          bottomRight: Boolean(savedCfg.bottomRight),
+          showBottomScrim: Boolean(savedCfg.showBottomScrim)
+        };
+      }
+      const activeStyle = normalizedStyles[String(tpl)] || getDefaultTemplateStyle();
+      const idx = savedCfg.accentColorIndex !== undefined ? Number(savedCfg.accentColorIndex) : activeStyle.accentColorIndex;
+      const alphaIdx = savedCfg.bgAlphaMode !== undefined ? Number(savedCfg.bgAlphaMode) : activeStyle.bgAlphaMode;
+      const fScale = Number(savedCfg.fontScale) || activeStyle.fontScale || 1;
+      const pal = ACCENT_PALETTE[idx] || ACCENT_PALETTE[0];
+      const presets = Array.isArray(savedCfg.customPresets) ? savedCfg.customPresets : [];
+
+      patch.styleTemplate = tpl;
+      patch.noWatermark = Boolean(savedCfg.noWatermark);
+      patch.templateStyles = normalizedStyles;
+      patch.customPresets = presets;
+      patch.filteredPresets = presets;
+      patch.activePresetId = savedCfg.activePresetId || '';
+      patch.showBottomScrim = savedCfg.showBottomScrim !== undefined ? Boolean(savedCfg.showBottomScrim) : activeStyle.showBottomScrim;
       patch.coordSys = savedCfg.coordSys || 'WGS-84';
       patch.useDms = Boolean(savedCfg.useDms);
       patch.customTitle = savedCfg.customTitle || '现场点位核验';
       patch.note = savedCfg.note || '';
       patch.accentColorIndex = idx;
-      patch.accentHex = (ACCENT_PALETTE[idx] || ACCENT_PALETTE[0]).hex;
-      patch.fontScale = Number(savedCfg.fontScale) || 1;
+      patch.accentHex = pal.hex;
+      patch.accentName = pal.name;
+      patch.fontScale = fScale;
+      patch.fontScaleLabel = getFontScaleLabel(fScale);
       patch.bgAlphaMode = alphaIdx;
       patch.cardBgRgba = BG_ALPHA_PRESETS[alphaIdx] || BG_ALPHA_PRESETS[1];
       patch.showQr = savedCfg.showQr !== false;
-      patch.bottomRight = Boolean(savedCfg.bottomRight);
+      patch.bottomRight = savedCfg.bottomRight !== undefined ? Boolean(savedCfg.bottomRight) : activeStyle.bottomRight;
       patch.showGridLines = Boolean(savedCfg.showGridLines);
       patch.antiTamperMode = Boolean(savedCfg.antiTamperMode);
       patch.showTime = savedCfg.showTime !== false;
@@ -377,6 +530,8 @@ Page({
       patch.showNote = savedCfg.showNote !== false;
       patch.showEnv = Boolean(savedCfg.showEnv);
       patch.autoSaveAlbum = savedCfg.autoSaveAlbum !== false;
+    } else {
+      patch.templateStyles = this.normalizeTemplateStyles(null);
     }
     return patch;
   },
@@ -400,8 +555,23 @@ Page({
   },
 
   persistUserConfig() {
+    const tplKey = String(this.data.styleTemplate);
+    const nextStyles = {
+      ...(this.data.templateStyles || {}),
+      [tplKey]: {
+        accentColorIndex: this.data.accentColorIndex,
+        fontScale: this.data.fontScale,
+        bgAlphaMode: this.data.bgAlphaMode,
+        bottomRight: this.data.bottomRight,
+        showBottomScrim: this.data.showBottomScrim
+      }
+    };
     saveUserConfig({
       styleTemplate: this.data.styleTemplate,
+      noWatermark: this.data.noWatermark,
+      templateStyles: nextStyles,
+      customPresets: this.data.customPresets || [],
+      activePresetId: this.data.activePresetId || '',
       showBottomScrim: this.data.showBottomScrim,
       coordSys: this.data.coordSys,
       useDms: this.data.useDms,
@@ -432,6 +602,7 @@ Page({
     if (!app || !app.globalData) return;
     app.globalData.liveConfigSnapshot = {
       styleTemplate: this.data.styleTemplate,
+      noWatermark: this.data.noWatermark,
       showBottomScrim: this.data.showBottomScrim,
       customTitle: this.data.customTitle,
       coordSys: this.data.coordSys,
@@ -661,7 +832,6 @@ Page({
       this.data.showPoiModal ||
       this.data.showWmModal ||
       this.data.showSettings ||
-      this.data.showVerifyModal ||
       this.data.sharedBannerVisible
     ) {
       return;
@@ -672,8 +842,8 @@ Page({
     const dy = touch.clientY - this._touchStartY;
     const dt = Date.now() - (this._touchStartTime || 0);
 
-    // 水平轻滑切换水印模板
-    if (dt < 450 && Math.abs(dx) > 58 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+    // 水平轻滑切换水印模板（无水印模式下不误触发切换）
+    if (!this.data.noWatermark && dt < 450 && Math.abs(dx) > 58 && Math.abs(dx) > Math.abs(dy) * 1.4) {
       const count = this.data.tplNames.length;
       const next = dx < 0 ? (this.data.styleTemplate + 1) % count : (this.data.styleTemplate - 1 + count) % count;
       this.applyTemplateIndex(next, true);
@@ -704,11 +874,46 @@ Page({
         wx.vibrateShort({ type: 'light' });
       } catch (err) {}
     }
-    const patch = { styleTemplate: idx };
+    const curKey = String(this.data.styleTemplate);
+    const updatedStyles = {
+      ...(this.data.templateStyles || {}),
+      [curKey]: {
+        accentColorIndex: this.data.accentColorIndex,
+        fontScale: this.data.fontScale,
+        bgAlphaMode: this.data.bgAlphaMode,
+        bottomRight: this.data.bottomRight,
+        showBottomScrim: this.data.showBottomScrim
+      }
+    };
+    const nextKey = String(idx);
+    const savedNextStyle = updatedStyles[nextKey] || getDefaultTemplateStyle();
+    const colorIdx = savedNextStyle.accentColorIndex !== undefined ? Number(savedNextStyle.accentColorIndex) : 0;
+    const pal = ACCENT_PALETTE[colorIdx] || ACCENT_PALETTE[0];
+    const alphaIdx = savedNextStyle.bgAlphaMode !== undefined ? Number(savedNextStyle.bgAlphaMode) : 1;
+    const fScale = Number(savedNextStyle.fontScale) || 1;
+
+    const patch = {
+      noWatermark: false,
+      styleTemplate: idx,
+      activePresetId: '',
+      templateStyles: updatedStyles,
+      accentColorIndex: colorIdx,
+      accentHex: pal.hex,
+      accentName: pal.name,
+      fontScale: fScale,
+      fontScaleLabel: getFontScaleLabel(fScale),
+      bgAlphaMode: alphaIdx,
+      cardBgRgba: BG_ALPHA_PRESETS[alphaIdx] || BG_ALPHA_PRESETS[1],
+      bottomRight: Boolean(savedNextStyle.bottomRight),
+      showBottomScrim: Boolean(savedNextStyle.showBottomScrim)
+    };
     if (showHudToast) {
       patch.templateToastText = this.data.tplNames[idx] || '';
     }
-    this.setData(patch, () => this.persistUserConfig());
+    this.setData(patch, () => {
+      this.syncDrawerPreviewStrings();
+      this.persistUserConfig();
+    });
     if (showHudToast) {
       if (this._tplToastTimer) clearTimeout(this._tplToastTimer);
       this._tplToastTimer = setTimeout(() => {
@@ -1039,81 +1244,11 @@ Page({
     this.applyTemplateIndex(idx, false);
   },
 
-  switchWmTab(e) {
-    const tab = e.currentTarget.dataset.tab || 'basic';
-    if (tab !== this.data.wmTab) {
-      this.setData({ wmTab: tab });
-    }
-  },
-
-  applyQuickScenePreset(e) {
-    const preset = e.currentTarget.dataset.preset;
-    let patch = {};
-    if (preset === 'minimal') {
-      patch = {
-        styleTemplate: 0,
-        showTime: true,
-        showLoc: true,
-        showCoords: true,
-        showCoordTag: true,
-        showAccuracy: true,
-        showAddress: false,
-        showNote: false,
-        showEnv: false,
-        showQr: true
-      };
-    } else if (preset === 'engineering') {
-      patch = {
-        styleTemplate: 1,
-        showTime: true,
-        showLoc: true,
-        showCoords: true,
-        showCoordTag: true,
-        showAccuracy: true,
-        showAddress: true,
-        showNote: true,
-        showEnv: true,
-        showQr: true
-      };
-    } else if (preset === 'gis') {
-      patch = {
-        styleTemplate: 2,
-        useDms: true,
-        showTime: true,
-        showLoc: true,
-        showCoords: true,
-        showCoordTag: true,
-        showAccuracy: true,
-        showAddress: true,
-        showEnv: true,
-        showQr: true
-      };
-    } else if (preset === 'ledger') {
-      patch = {
-        styleTemplate: 4,
-        showTime: true,
-        showLoc: true,
-        showCoords: true,
-        showCoordTag: true,
-        showAccuracy: true,
-        showAddress: true,
-        showNote: true,
-        showEnv: false,
-        showQr: true
-      };
-    }
-    this.setData(patch, () => {
-      if (this.data.showEnv) this.startCompassTracking();
-      else this.stopCompassTracking();
-      this.persistUserConfig();
-      wx.showToast({ title: '已应用预设方案', icon: 'none' });
-    });
-  },
-
   selectCoordSystem(e) {
     const sys = e.currentTarget.dataset.sys;
     if (!sys) return;
     this.setData({ coordSys: sys }, () => {
+      this.syncDrawerPreviewStrings();
       this.persistUserConfig();
       wx.showToast({ title: `坐标系已切换：${sys}`, icon: 'none' });
     });
@@ -1121,18 +1256,27 @@ Page({
 
   setDmsFormat(e) {
     const useDms = e.currentTarget.dataset.dms === '1';
-    this.setData({ useDms }, () => this.persistUserConfig());
+    this.setData({ useDms }, () => {
+      this.syncDrawerPreviewStrings();
+      this.persistUserConfig();
+    });
   },
 
   selectAccentColor(e) {
     const idx = Number(e.currentTarget.dataset.idx) || 0;
-    const hex = (ACCENT_PALETTE[idx] || ACCENT_PALETTE[0]).hex;
-    this.setData({ accentColorIndex: idx, accentHex: hex }, () => this.persistUserConfig());
+    const pal = ACCENT_PALETTE[idx] || ACCENT_PALETTE[0];
+    this.setData(
+      { accentColorIndex: idx, accentHex: pal.hex, accentName: pal.name },
+      () => this.persistUserConfig()
+    );
   },
 
   selectFontScale(e) {
     const sc = Number(e.currentTarget.dataset.scale) || 1;
-    this.setData({ fontScale: sc }, () => this.persistUserConfig());
+    this.setData(
+      { fontScale: sc, fontScaleLabel: getFontScaleLabel(sc) },
+      () => this.persistUserConfig()
+    );
   },
 
   selectBgAlpha(e) {
@@ -1150,6 +1294,21 @@ Page({
         if (nextVal) this.startCompassTracking();
         else this.stopCompassTracking();
       }
+      this.syncDrawerPreviewStrings();
+      this.persistUserConfig();
+    });
+  },
+
+  onSwitchWatermarkField(e) {
+    const field = e.currentTarget.dataset.field;
+    if (!field) return;
+    const nextVal = Boolean(e.detail && e.detail.value);
+    this.setData({ [field]: nextVal }, () => {
+      if (field === 'showEnv') {
+        if (nextVal) this.startCompassTracking();
+        else this.stopCompassTracking();
+      }
+      this.syncDrawerPreviewStrings();
       this.persistUserConfig();
     });
   },
@@ -1169,7 +1328,7 @@ Page({
     if (detail && detail.address) {
       patch.fullAddr = detail.address;
     }
-    this.setData(patch);
+    this.setData(patch, () => this.syncDrawerPreviewStrings());
   },
 
   selectQuickTitle(e) {
@@ -1195,6 +1354,7 @@ Page({
       wx.showToast({ title: '防伪模式下备注已锁定', icon: 'none' });
       return;
     }
+    if (this._dirtyTextFields) this._dirtyTextFields.delete('note');
     this.setData({ note: '' }, () => this.persistUserConfig());
   },
 
@@ -1288,6 +1448,7 @@ Page({
 
         const snapshotCfg = {
           styleTemplate: this.data.styleTemplate,
+          noWatermark: Boolean(this.data.noWatermark),
           showBottomScrim: this.data.showBottomScrim,
           customTitle: this.data.customTitle,
           coordSys: this.data.coordSys,
@@ -1509,120 +1670,65 @@ Page({
     });
   },
 
-  // ==================== 识图验真 ====================
-  openVerifyEntrySheet() {
-    this.setData({
-      showPoiModal: false,
-      showSettings: false,
-      showWmModal: false,
-      showVerifyModal: true
-    });
-  },
-
-  closeVerifyModal() {
-    this.setData({ showVerifyModal: false });
-  },
-
-  verifyByLiveCameraScan() {
-    wx.scanCode({
-      scanType: ['qrCode'],
-      onlyFromCamera: false,
-      success: res => {
-        const parsed = parseLocationPayload(res.result);
-        const report = buildVerificationReport(parsed, '', '镜头扫码核验');
-        if (report) {
-          this.setData({
-            showVerifyModal: true,
-            verifyReport: report,
-            sharedBannerVisible: true,
-            sharedPoint: parsed
-          });
-        } else {
-          wx.showToast({ title: '未检测到有效防伪定位码', icon: 'none' });
-        }
-      }
-    });
-  },
-
-  verifyPhotoFromAlbum() {
-    wx.chooseMedia({
-      count: 1,
-      mediaType: ['image'],
-      sourceType: ['album'],
-      success: async res => {
-        const file = res.tempFiles && res.tempFiles[0];
-        if (!file) return;
-        const path = file.tempFilePath;
-        wx.showLoading({ title: '1:1双角识码验真中...' });
-        try {
-          const fallbackCanvas = await this.getFallbackCanvasNodeAsync();
-          const result = await verifyImageFile(path, fallbackCanvas);
-          wx.hideLoading();
-          if (result && result.ok && result.report) {
-            this.setData({
-              showVerifyModal: true,
-              verifyReport: result.report
-            });
-          } else {
-            wx.showToast({
-              title: (result && result.reason) || '未检测到有效防伪定位码',
-              icon: 'none',
-              duration: 2400
-            });
+  // ==================== 弹窗开关（互斥平滑切换 & 2-Step 水印抽屉） ====================
+  computeWmOverlayLift() {
+    const run = () => {
+      try {
+        const q = wx.createSelectorQuery();
+        q.select('.viewfinder-wrap').boundingClientRect();
+        q.select('#wmBottomSheet').boundingClientRect();
+        q.exec(res => {
+          if (!res || !res[0] || !res[1]) return;
+          const overlap = Math.max(0, Math.round(res[0].bottom - res[1].top + 8));
+          if (overlap > 0 && overlap !== this.data.wmOverlayLiftPx) {
+            this.setData({ wmOverlayLiftPx: overlap });
           }
-        } catch (err) {
-          wx.hideLoading();
-          wx.showToast({ title: '未检测到有效防伪定位码', icon: 'none' });
-        }
+        });
+      } catch (e) {}
+    };
+    if (typeof wx.nextTick === 'function') {
+      wx.nextTick(run);
+    } else {
+      setTimeout(run, 40);
+    }
+  },
+
+  refreshFilteredCatalogs() {
+    this.setData({
+      filteredTplCards: this.filterTplCardsList(this.data.wmCategory, this.data.wmSearchQuery),
+      filteredPresets: this.filterCustomPresetsList(this.data.customPresets, this.data.wmSearchQuery)
+    });
+  },
+
+  async verifyDirtyTextsBeforeSave(targetFields) {
+    if (!this._dirtyTextFields || this._dirtyTextFields.size === 0) {
+      return true;
+    }
+    const fields = Array.isArray(targetFields) ? targetFields : [];
+    const texts = [];
+    const checkedKeys = [];
+    fields.forEach(k => {
+      if (this._dirtyTextFields.has(k)) {
+        const v = String(this.data[k] || '').trim();
+        if (v) texts.push(v);
+        checkedKeys.push(k);
       }
     });
-  },
-
-  onInputManualVerify(e) {
-    this.setData({ manualVerifyInput: e.detail.value });
-  },
-
-  runManualTextVerify() {
-    const raw = (this.data.manualVerifyInput || '').trim();
-    if (!raw) {
-      wx.showToast({ title: '请粘贴链接或二维码文本', icon: 'none' });
-      return;
+    if (texts.length === 0) {
+      checkedKeys.forEach(k => this._dirtyTextFields.delete(k));
+      return true;
     }
-    const parsed = parseLocationPayload(raw);
-    const report = buildVerificationReport(parsed, '', '链接/文本解析核验');
-    if (report) {
-      this.setData({ verifyReport: report });
-    } else {
-      wx.showToast({ title: '未检测到有效防伪定位码或坐标', icon: 'none' });
+    wx.showLoading({ title: '内容合规校验中...' });
+    const secRes = await checkTextsSecurity(texts, 3);
+    wx.hideLoading();
+    if (!secRes.pass) {
+      showViolationModal(secRes.message);
+      return false;
     }
+    checkedKeys.forEach(k => this._dirtyTextFields.delete(k));
+    return true;
   },
 
-  previewVerifiedPhoto() {
-    const rep = this.data.verifyReport;
-    if (rep && rep.imagePath) {
-      wx.previewImage({ urls: [rep.imagePath] });
-    }
-  },
-
-  openVerifiedLocationInMap() {
-    const rep = this.data.verifyReport;
-    if (!rep) return;
-    wx.openLocation({
-      latitude: Number(rep.gcjLat),
-      longitude: Number(rep.gcjLon),
-      name: rep.shortPoi || '实拍点位',
-      address: `高德 GCJ-02: ${rep.gcjLat}, ${rep.gcjLon} (${rep.statusBadge})`,
-      scale: 18
-    });
-  },
-
-  copyVerifyReportText() {
-    const text = formatVerifyReportText(this.data.verifyReport);
-    if (!text) return;
-    wx.setClipboardData({ data: text });
-  },
-
-  // ==================== 弹窗开关（互斥平滑切换，关闭无阻塞） ====================
   openPoiQuickModal() {
     if (this.data.locationDenied) {
       this.startHighAccuracyLocation(true, true);
@@ -1636,13 +1742,14 @@ Page({
     this.setData({
       showSettings: false,
       showWmModal: false,
-      showVerifyModal: false,
       showPoiModal: true
     });
   },
 
-  closePoiQuickModal() {
+  async closePoiQuickModal() {
     this.flushInputBuffers();
+    const ok = await this.verifyDirtyTextsBeforeSave(['shortPoi', 'fullAddr']);
+    if (!ok) return;
     this.persistUserConfig();
     this.setData({ showPoiModal: false });
   },
@@ -1651,7 +1758,6 @@ Page({
     this.setData({
       showPoiModal: false,
       showWmModal: false,
-      showVerifyModal: false,
       showSettings: true
     });
   },
@@ -1661,25 +1767,282 @@ Page({
   },
 
   openWatermarkModal() {
+    this.syncDrawerPreviewStrings();
+    this.refreshFilteredCatalogs();
+    this.setData(
+      {
+        showPoiModal: false,
+        showSettings: false,
+        showWmModal: true,
+        wmStep: 'picker'
+      },
+      () => this.computeWmOverlayLift()
+    );
+  },
+
+  async closeWatermarkModal() {
+    this.flushInputBuffers();
+    const ok = await this.verifyDirtyTextsBeforeSave(['customTitle', 'shortPoi', 'fullAddr', 'note']);
+    if (!ok) return;
+    this.persistUserConfig();
     this.setData({
-      showPoiModal: false,
-      showSettings: false,
-      showVerifyModal: false,
-      showWmModal: true
+      showWmModal: false,
+      wmStep: 'picker',
+      wmSearchOpen: false
     });
   },
 
-  closeWatermarkModal() {
+  async applyWatermarkCustomization() {
     this.flushInputBuffers();
-    this.persistUserConfig();
-    this.setData({ showWmModal: false });
+    const ok = await this.verifyDirtyTextsBeforeSave(['customTitle', 'shortPoi', 'fullAddr', 'note']);
+    if (!ok) return;
+    this.setData(
+      {
+        noWatermark: false,
+        showWmModal: false,
+        wmStep: 'picker',
+        wmSearchOpen: false
+      },
+      () => {
+        this.persistUserConfig();
+        wx.showToast({ title: '水印设置已生效', icon: 'none' });
+      }
+    );
   },
 
-  applyWatermarkCustomization() {
+  toggleNoWatermark() {
+    const next = !this.data.noWatermark;
+    this.setData(
+      {
+        noWatermark: next,
+        activePresetId: ''
+      },
+      () => {
+        this.persistUserConfig();
+        wx.showToast({
+          title: next ? '已切换无水印原图拍摄' : '已启用水印显示',
+          icon: 'none'
+        });
+      }
+    );
+  },
+
+  switchWmPickerTab(e) {
+    const tab = e.currentTarget.dataset.tab || 'all';
+    if (tab === this.data.wmPickerTab) return;
+    this.setData({ wmPickerTab: tab }, () => this.refreshFilteredCatalogs());
+  },
+
+  toggleWmSearch() {
+    const next = !this.data.wmSearchOpen;
+    this.setData(
+      {
+        wmSearchOpen: next,
+        wmSearchQuery: next ? this.data.wmSearchQuery : ''
+      },
+      () => this.refreshFilteredCatalogs()
+    );
+  },
+
+  onInputWmSearch(e) {
+    this.setData(
+      { wmSearchQuery: e.detail.value || '' },
+      () => this.refreshFilteredCatalogs()
+    );
+  },
+
+  clearWmSearch() {
+    this.setData(
+      { wmSearchOpen: false, wmSearchQuery: '' },
+      () => this.refreshFilteredCatalogs()
+    );
+  },
+
+  selectWmCategory(e) {
+    const cat = e.currentTarget.dataset.cat || 'all';
+    this.setData({ wmCategory: cat }, () => this.refreshFilteredCatalogs());
+  },
+
+  onTapTplCard(e) {
+    const idx = Number(e.currentTarget.dataset.idx);
+    if (isNaN(idx)) return;
+    if (!this.data.noWatermark && this.data.styleTemplate === idx) {
+      this.enterWmEditor();
+      return;
+    }
+    this.applyTemplateIndex(idx, false);
+  },
+
+  enterWmEditor() {
+    this.syncDrawerPreviewStrings();
+    this.setData({
+      noWatermark: false,
+      wmStep: 'editor'
+    });
+  },
+
+  backToWmPicker() {
+    this.refreshFilteredCatalogs();
+    this.setData({ wmStep: 'picker' });
+  },
+
+  openWmFieldEditor(e) {
+    const field = e.currentTarget.dataset.field || 'poi';
+    this.syncDrawerPreviewStrings();
+    this.setData({
+      wmStep: 'field',
+      wmEditField: field,
+      wmFieldTitle: WM_FIELD_TITLES[field] || '编辑水印项'
+    });
+  },
+
+  async confirmWmFieldAndReturn() {
     this.flushInputBuffers();
+    const ok = await this.verifyDirtyTextsBeforeSave(['customTitle', 'shortPoi', 'fullAddr', 'note']);
+    if (!ok) return;
+    this.syncDrawerPreviewStrings();
     this.persistUserConfig();
-    this.setData({ showWmModal: false });
-    wx.showToast({ title: '水印设置已生效', icon: 'none' });
+    this.setData({ wmStep: 'editor' });
+  },
+
+  promptSaveCurrentPreset() {
+    this.flushInputBuffers();
+    const tplName = this.data.tplNames[this.data.styleTemplate] || '水印';
+    const suggested = `${tplName}·${this.data.customTitle || '常用'}`.slice(0, 14);
+    wx.showModal({
+      title: '存为常用水印',
+      editable: true,
+      content: suggested,
+      placeholderText: '输入常用水印名称（如：外业巡检）',
+      confirmColor: '#2563eb',
+      success: async res => {
+        if (!res.confirm) return;
+        const name = String(res.content || suggested).trim().slice(0, 18);
+        if (!name) return;
+
+        const texts = [name, this.data.customTitle, this.data.note].filter(Boolean);
+        if (texts.length > 0) {
+          wx.showLoading({ title: '安全合规校验中...' });
+          const secRes = await checkTextsSecurity(texts, 3);
+          wx.hideLoading();
+          if (!secRes.pass) {
+            showViolationModal(secRes.message);
+            return;
+          }
+        }
+
+        const presetId = `preset_${Date.now()}`;
+        const newPreset = {
+          id: presetId,
+          name,
+          styleTemplate: this.data.styleTemplate,
+          accentColorIndex: this.data.accentColorIndex,
+          accentHex: this.data.accentHex,
+          fontScale: this.data.fontScale,
+          bgAlphaMode: this.data.bgAlphaMode,
+          cardBgRgba: this.data.cardBgRgba,
+          bottomRight: this.data.bottomRight,
+          showBottomScrim: this.data.showBottomScrim,
+          customTitle: this.data.customTitle,
+          coordSys: this.data.coordSys,
+          useDms: this.data.useDms,
+          showTime: this.data.showTime,
+          showLoc: this.data.showLoc,
+          showCoords: this.data.showCoords,
+          showCoordTag: this.data.showCoordTag,
+          showAccuracy: this.data.showAccuracy,
+          showAddress: this.data.showAddress,
+          showNote: this.data.showNote,
+          showEnv: this.data.showEnv,
+          showQr: this.data.showQr,
+          note: this.data.antiTamperMode ? '' : (this.data.note || '')
+        };
+
+        const nextPresets = [newPreset, ...(this.data.customPresets || [])].slice(0, 20);
+        this.setData(
+          {
+            customPresets: nextPresets,
+            filteredPresets: this.filterCustomPresetsList(nextPresets, this.data.wmSearchQuery),
+            activePresetId: presetId,
+            noWatermark: false
+          },
+          () => {
+            this.persistUserConfig();
+            wx.showToast({ title: `已保存「${name}」`, icon: 'success' });
+          }
+        );
+      }
+    });
+  },
+
+  onTapPresetCard(e) {
+    const id = e.currentTarget.dataset.id;
+    const preset = (this.data.customPresets || []).find(p => p && p.id === id);
+    if (!preset) return;
+
+    if (!this.data.noWatermark && this.data.activePresetId === id) {
+      this.enterWmEditor();
+      return;
+    }
+
+    const colorIdx = Number(preset.accentColorIndex) || 0;
+    const pal = ACCENT_PALETTE[colorIdx] || ACCENT_PALETTE[0];
+    const alphaIdx = preset.bgAlphaMode !== undefined ? Number(preset.bgAlphaMode) : 1;
+    const fScale = Number(preset.fontScale) || 1;
+
+    const patch = {
+      noWatermark: false,
+      activePresetId: preset.id,
+      styleTemplate: Number(preset.styleTemplate) || 0,
+      accentColorIndex: colorIdx,
+      accentHex: preset.accentHex || pal.hex,
+      accentName: pal.name,
+      fontScale: fScale,
+      fontScaleLabel: getFontScaleLabel(fScale),
+      bgAlphaMode: alphaIdx,
+      cardBgRgba: preset.cardBgRgba || BG_ALPHA_PRESETS[alphaIdx] || BG_ALPHA_PRESETS[1],
+      bottomRight: Boolean(preset.bottomRight),
+      showBottomScrim: Boolean(preset.showBottomScrim),
+      customTitle: preset.customTitle || '现场点位核验',
+      coordSys: preset.coordSys || 'WGS-84',
+      useDms: Boolean(preset.useDms),
+      showTime: preset.showTime !== false,
+      showLoc: preset.showLoc !== false,
+      showCoords: preset.showCoords !== false,
+      showCoordTag: preset.showCoordTag !== false,
+      showAccuracy: preset.showAccuracy !== false,
+      showAddress: Boolean(preset.showAddress),
+      showNote: preset.showNote !== false,
+      showEnv: Boolean(preset.showEnv),
+      showQr: preset.showQr !== false
+    };
+    if (!this.data.antiTamperMode && preset.note !== undefined) {
+      patch.note = preset.note;
+    }
+
+    this.setData(patch, () => {
+      if (this.data.showEnv) this.startCompassTracking();
+      else this.stopCompassTracking();
+      this.syncDrawerPreviewStrings();
+      this.persistUserConfig();
+      wx.showToast({ title: `已应用：${preset.name}`, icon: 'none' });
+    });
+  },
+
+  deleteCustomPreset(e) {
+    const id = e.currentTarget.dataset.id;
+    const nextPresets = (this.data.customPresets || []).filter(p => p && p.id !== id);
+    this.setData(
+      {
+        customPresets: nextPresets,
+        filteredPresets: this.filterCustomPresetsList(nextPresets, this.data.wmSearchQuery),
+        activePresetId: this.data.activePresetId === id ? '' : this.data.activePresetId
+      },
+      () => {
+        this.persistUserConfig();
+        wx.showToast({ title: '已删除该常用方案', icon: 'none' });
+      }
+    );
   },
 
   // ==================== 开关回调 ====================
@@ -1687,7 +2050,10 @@ Page({
     this.setData({ showGridLines: e.detail.value }, () => this.persistUserConfig());
   },
   onToggleShowAddress(e) {
-    this.setData({ showAddress: e.detail.value }, () => this.persistUserConfig());
+    this.setData({ showAddress: e.detail.value }, () => {
+      this.syncDrawerPreviewStrings();
+      this.persistUserConfig();
+    });
   },
   onToggleBottomScrim(e) {
     this.setData({ showBottomScrim: e.detail.value }, () => this.persistUserConfig());
@@ -1724,12 +2090,16 @@ Page({
           icon: 'none'
         });
       }
+      this.syncDrawerPreviewStrings();
       this.persistUserConfig();
     });
   },
 
-  // ==================== 防抖输入 ====================
+  // ==================== 防抖输入（记录变更以触发云安全校验） ====================
   _scheduleBufferedInput(field, val) {
+    if (this._dirtyTextFields) {
+      this._dirtyTextFields.add(field);
+    }
     this._inputBuffers[field] = val;
     if (this._inputTimers[field]) clearTimeout(this._inputTimers[field]);
     this._inputTimers[field] = setTimeout(() => {
@@ -1739,7 +2109,7 @@ Page({
       if (latest === undefined) return;
       const patch = { [field]: latest };
       if (field === 'shortPoi' || field === 'fullAddr') patch.hasCustomPoi = true;
-      this.setData(patch);
+      this.setData(patch, () => this.syncDrawerPreviewStrings());
     }, 100);
   },
 
@@ -1787,7 +2157,7 @@ Page({
     const extra = `&ntp=${ntpFlag}${note ? `&note=${note}` : ''}${sig ? `&sig=${sig}` : ''}`;
     if (!lat && !lon) {
       return {
-        title: '极速高德水印相机 v1.0',
+        title: '极速高德水印相机 v2.0',
         path: '/pages/index/index'
       };
     }

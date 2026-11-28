@@ -1,10 +1,7 @@
 /**
- * 极速高德水印相机 v1.0 · 独立相册分包 · 网格相册页 (packageAlbum/pages/gallery)
- * 特性：
- * - 仅加载 240px 缩略图 thumbPath + lazy-load，100 张显存 < 8MB
- * - 按日期吸顶分组的 3 列正方形网格，极简角标（左下防伪盾牌/可编辑标记，右下时间）
- * - 顶部系统相册融合双入口（批量加水印 + 系统相册选图验真）
- * - 存储配额可视化进度条 + 一键清理无损底图 + 多选批量存相册/导出台账/删除
+ * 极速高德水印相机 v2.0 · 独立相册分包 · 网格相册页 (packageAlbum/pages/gallery)
+ * - 仅加载 240px 缩略图 thumbPath + lazy-load
+ * - 顶部系统相册批量加水印入口 + 离线补签横幅 + 存储空间进度条
  */
 
 const {
@@ -13,11 +10,6 @@ const {
   clearAllRawOriginals,
   estimateStorageUsage
 } = require('../../../utils/photo_store.js');
-
-const {
-  verifyImageFile,
-  formatVerifyReportText
-} = require('../../../utils/photo_verifier.js');
 
 const {
   ensureAlbumWritePermission
@@ -58,6 +50,7 @@ function groupPhotosByDate(photos) {
       thumbPath: p.thumbPath || p.wmPath || '',
       wmPath: p.wmPath || '',
       hasRaw: Boolean(p.rawPath),
+      noWatermark: Boolean(cfg.noWatermark),
       antiTamper: Boolean(cfg.antiTamperMode),
       offlinePending: Boolean(cfg.offlinePending),
       hm,
@@ -91,9 +84,7 @@ Page({
     selectedMap: {},
     selectedCount: 0,
     offlinePendingCount: 0,
-    isReconcilingOffline: false,
-    showVerifyModal: false,
-    verifyReport: null
+    isReconcilingOffline: false
   },
 
   onLoad() {
@@ -187,87 +178,26 @@ Page({
     });
   },
 
-  // 顶部系统相册融合入口 1：批量加水印
   openSystemAlbumBatch() {
     wx.navigateTo({
       url: '/packageBatch/pages/batch/batch?autoPick=1'
     });
   },
 
-  // 顶部系统相册融合入口 2：系统相册选图验真（零假阳性）
-  verifyFromSystemAlbum() {
-    wx.chooseMedia({
-      count: 1,
-      mediaType: ['image'],
-      sourceType: ['album'],
-      success: async res => {
-        const file = res && res.tempFiles && res.tempFiles[0];
-        if (!file) return;
-        wx.showLoading({ title: '1:1双角识码验真中...' });
-        try {
-          const fc = await this.getVerifyFallbackCanvas();
-          const result = await verifyImageFile(file.tempFilePath, fc);
-          wx.hideLoading();
-          if (result && result.ok && result.report) {
-            this.setData({
-              showVerifyModal: true,
-              verifyReport: result.report
-            });
-          } else {
-            wx.showToast({
-              title: (result && result.reason) || '未检测到有效防伪定位码',
-              icon: 'none',
-              duration: 2400
-            });
-          }
-        } catch (err) {
-          wx.hideLoading();
-          wx.showToast({ title: '未检测到有效防伪定位码', icon: 'none' });
-        }
-      }
-    });
-  },
-
-  closeVerifyModal() {
-    this.setData({ showVerifyModal: false });
-  },
-
-  copyVerifyReport() {
-    const text = formatVerifyReportText(this.data.verifyReport);
-    if (!text) return;
-    wx.setClipboardData({ data: text });
-  },
-
-  openVerifiedInMap() {
-    const rep = this.data.verifyReport;
-    if (!rep) return;
-    wx.openLocation({
-      latitude: Number(rep.gcjLat),
-      longitude: Number(rep.gcjLon),
-      name: rep.shortPoi || '实拍点位',
-      address: `高德 GCJ-02: ${rep.gcjLat}, ${rep.gcjLon} (${rep.statusBadge})`,
-      scale: 18
-    });
-  },
-
-  // 一键清理无损底图（保留 120 张水印成品与缩略图）
   handleClearRawOriginals() {
     if (!this.data.storage || this.data.storage.rawCount === 0) {
       wx.showToast({ title: '当前没有可清理的底图', icon: 'none' });
       return;
     }
     wx.showModal({
-      title: '一键清理无损底图',
-      content: `将清理 ${this.data.storage.rawCount} 张无损底图以释放本地空间。所有已合成的高清水印照片与缩略图将 100% 保留，清理后旧照片仅不再支持重绘水印。`,
-      confirmText: '确认清理',
+      title: '清理无损底图',
+      content: `将清理 ${this.data.storage.rawCount} 张可编辑无损底图以释放空间，已生成的高清成品图与缩略图仍会完整保留。`,
+      confirmColor: '#2563eb',
       success: res => {
         if (!res.confirm) return;
-        const result = clearAllRawOriginals();
+        const cleared = clearAllRawOriginals();
         this.reloadGalleryData();
-        wx.showToast({
-          title: `已释放 ${result.freedCount} 张无损底图空间`,
-          icon: 'success'
-        });
+        wx.showToast({ title: `已清理 ${cleared} 张无损底图`, icon: 'success' });
       }
     });
   },
@@ -277,42 +207,44 @@ Page({
     return (this._allPhotos || []).filter(p => p && map[p.id]);
   },
 
-  // 多选操作 1：批量存系统相册
   async batchSaveToSystemAlbum() {
     const selected = this.getSelectedPhotos();
     if (selected.length === 0) {
       wx.showToast({ title: '请先勾选照片', icon: 'none' });
       return;
     }
-    const ok = await ensureAlbumWritePermission(true);
-    if (!ok) {
-      wx.showToast({ title: '未授予系统相册写入权限', icon: 'none' });
+    const granted = await ensureAlbumWritePermission(true);
+    if (!granted) {
+      wx.showToast({ title: '请先授权相册写入权限', icon: 'none' });
       return;
     }
     wx.showLoading({ title: `正在保存 0/${selected.length}...` });
-    let saved = 0;
+    let ok = 0;
     for (let i = 0; i < selected.length; i++) {
       wx.showLoading({ title: `正在保存 ${i + 1}/${selected.length}...` });
       try {
-        await saveOneToAlbum(selected[i].wmPath);
-        saved++;
+        if (selected[i].wmPath) {
+          await saveOneToAlbum(selected[i].wmPath);
+          ok++;
+        }
       } catch (e) {}
     }
     wx.hideLoading();
-    wx.showToast({ title: `已保存 ${saved}/${selected.length} 张至系统相册`, icon: 'none' });
+    wx.showToast({ title: `成功保存 ${ok} 张至系统相册`, icon: 'success' });
   },
 
-  // 多选操作 2：批量导出台账文本（复制到剪贴板）
   batchExportLedgerText() {
     const selected = this.getSelectedPhotos();
     if (selected.length === 0) {
       wx.showToast({ title: '请先勾选照片', icon: 'none' });
       return;
     }
-    const lines = [`【极速高德水印相机 v1.0 · 批量外业台账 (${selected.length}条)】`];
+    const lines = [`【极速高德水印相机 v2.0 · 批量外业台账 (${selected.length}条)】`];
     selected.forEach((p, idx) => {
       const c = p.cfg || {};
-      const lockTag = c.antiTamperMode ? `🛡防伪(${(c.antiTamperHash || '').slice(0, 12)})` : '普通水印';
+      const lockTag = c.antiTamperMode
+        ? `防伪(${(c.antiTamperHash || '').slice(0, 12)})`
+        : (c.noWatermark ? '无水印原图' : '普通水印');
       lines.push(
         `${idx + 1}. [${c.fullTs || ''}] ${c.shortPoi || '实拍点位'} | GCJ-02:${c.gcjLat},${c.gcjLon} | WGS-84:${c.wgsLat},${c.wgsLon} | ${lockTag}${c.note ? ' | 备注:' + c.note : ''}`
       );
@@ -325,7 +257,6 @@ Page({
     });
   },
 
-  // 多选操作 3：批量删除
   batchDeleteSelected() {
     const selected = this.getSelectedPhotos();
     if (selected.length === 0) {
@@ -349,19 +280,19 @@ Page({
     });
   },
 
-  getVerifyFallbackCanvas() {
+  getOfflineFallbackCanvas() {
     return new Promise(resolve => {
-      if (this._verifyCanvas) {
-        resolve(this._verifyCanvas);
+      if (this._offlineCanvas) {
+        resolve(this._offlineCanvas);
         return;
       }
       const query = wx.createSelectorQuery();
       query
-        .select('#galleryVerifyCanvas')
+        .select('#galleryOfflineCanvas')
         .fields({ node: true, size: true })
         .exec(res => {
           const node = res && res[0] && res[0].node;
-          if (node) this._verifyCanvas = node;
+          if (node) this._offlineCanvas = node;
           resolve(node || null);
         });
     });
@@ -374,7 +305,7 @@ Page({
     this.setData({ isReconcilingOffline: true });
     wx.showLoading({ title: `正在补签授时 (0/${cnt})...` });
     try {
-      const fc = await this.getVerifyFallbackCanvas();
+      const fc = await this.getOfflineFallbackCanvas();
       const res = await reconcileOfflineQueue({
         fallbackCanvas: fc,
         onProgress: ({ current, total }) => {

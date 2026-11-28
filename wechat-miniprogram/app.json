@@ -23,10 +23,10 @@
   "window": {
     "backgroundTextStyle": "dark",
     "navigationStyle": "custom",
-    "navigationBarBackgroundColor": "#000000",
-    "navigationBarTitleText": "极速高德水印相机 v1.0",
-    "navigationBarTextStyle": "white",
-    "backgroundColor": "#000000"
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTitleText": "极速高德水印相机 v2.0",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f5f6f8"
   },
   "requiredPrivateInfos": [
     "getLocation",

@@ -1,21 +1,21 @@
 /**
- * 极速高德水印相机 v1.0 · 批量相册加水印分包页面
- * v1.0 核心升级：
- * - 选图瞬间解析 64KB EXIF 并立即展示队列，彻底消除选图期 20 次串行云函数阻塞
- * - 优先 EXIF 模式下自动按每张照片自身 EXIF 坐标调用 regeoPoi 解析真实周边地名（网格缓存防重复请求）
- * - 修复部分完成后按钮数量显示偏差（精准展示待处理张数 pendingCount）
- * - 移除 160px 假小图与假默认坐标/海拔
+ * 极速高德水印相机 v2.0 · 批量相册加水印分包页面
+ * - 选图阶段自动通过云函数 secCheck (imgSecCheck) 进行图片安全合规检测
+ * - 选图瞬间解析 64KB EXIF，优先 EXIF 模式下自动按每张照片自身 EXIF 坐标识别周边 POI
+ * - 开始队列前通过云函数 secCheck (msgSecCheck v2) 校验用户输入点位与备注文本
  */
 
-const {
-  getTimeStrings
-} = require('../../../utils/coord_qr.js');
-
+const { getTimeStrings } = require('../../../utils/coord_qr.js');
 const { resolveNearbyPoi } = require('../../../utils/poi_service.js');
 const { readImageExifLite } = require('../../utils/exif_lite.js');
 const { renderWatermarkToTempFile } = require('../../../utils/watermark_renderer.js');
 const { ensureAlbumWritePermission } = require('../../../utils/privacy.js');
 const { loadUserConfig } = require('../../../utils/photo_store.js');
+const {
+  checkImageSecurity,
+  checkTextsSecurity,
+  showViolationModal
+} = require('../../../utils/sec_check.js');
 
 const TPL_NAMES = ['大字时间', '巡检卡片', '网格测绘', '胶片底栏', '标准台账'];
 
@@ -110,11 +110,12 @@ Page({
   loadBaseWatermarkConfig() {
     const app = getApp();
     if (app && app.globalData && app.globalData.liveConfigSnapshot) {
-      return { ...app.globalData.liveConfigSnapshot };
+      return { ...app.globalData.liveConfigSnapshot, noWatermark: false };
     }
     const saved = loadUserConfig() || {};
     return {
       styleTemplate: saved.styleTemplate !== undefined ? Number(saved.styleTemplate) : 0,
+      noWatermark: false,
       showBottomScrim: Boolean(saved.showBottomScrim),
       customTitle: saved.customTitle || '现场点位核验',
       coordSys: saved.coordSys || 'WGS-84',
@@ -207,11 +208,32 @@ Page({
         const files = (res && res.tempFiles) || [];
         if (files.length === 0) return;
 
-        wx.showLoading({ title: `解析 EXIF (${files.length}张)...` });
-        let newItems = [];
+        wx.showLoading({ title: `安全合规校验 (0/${files.length})...` });
+        const fallbackCanvas = await this.getFallbackCanvasNode();
+        const verifiedFiles = [];
+        let blockedMessage = '';
+
         try {
-          newItems = await Promise.all(
-            files.map(async (f, i) => {
+          for (let i = 0; i < files.length; i++) {
+            wx.showLoading({ title: `安全合规校验 (${i + 1}/${files.length})...` });
+            const f = files[i];
+            const sec = await checkImageSecurity(f.tempFilePath, fallbackCanvas);
+            if (!sec.pass) {
+              blockedMessage = sec.message;
+              break;
+            }
+            verifiedFiles.push(f);
+          }
+
+          if (blockedMessage) {
+            wx.hideLoading();
+            showViolationModal(blockedMessage);
+            return;
+          }
+
+          wx.showLoading({ title: `解析 EXIF (${verifiedFiles.length}张)...` });
+          const newItems = await Promise.all(
+            verifiedFiles.map(async (f, i) => {
               const exif = await readImageExifLite(f.tempFilePath);
               let exifLabel = '无EXIF·用当前';
               if (exif.hasTime && exif.hasGps) exifLabel = 'EXIF 时间+GPS';
@@ -224,17 +246,18 @@ Page({
                 status: 'pending',
                 errorMsg: '',
                 exif,
-                exifLabel
+                exifLabel,
+                secChecked: true
               };
             })
           );
+
+          if (newItems.length > 0) {
+            const merged = [...this.data.items, ...newItems];
+            this.setData({ items: merged }, () => this.recomputeStats());
+          }
         } finally {
           wx.hideLoading();
-        }
-
-        if (newItems.length > 0) {
-          const merged = [...this.data.items, ...newItems];
-          this.setData({ items: merged }, () => this.recomputeStats());
         }
       }
     });
@@ -298,7 +321,6 @@ Page({
     let shortPoi = (this.data.shortPoi || '').trim() || base.shortPoi || '实拍点位';
     let fullAddr = base.fullAddr || '';
 
-    // 修复 EXIF 地名覆盖 Bug：当优先 EXIF 且照片自带 GPS 且用户未手动锁定统一地名时，自动识别该照片自身坐标的周边 POI
     if (useGpsFromExif && !this._userEditedPoi) {
       const poiRes = await resolveNearbyPoi(gcjLat, gcjLon);
       if (poiRes && poiRes.ok && poiRes.resolved && poiRes.shortPoi) {
@@ -309,6 +331,7 @@ Page({
 
     return {
       ...base,
+      noWatermark: false,
       styleTemplate: this.data.styleTemplate,
       showBottomScrim: this.data.showBottomScrim,
       shortPoi,
@@ -382,6 +405,17 @@ Page({
       return;
     }
 
+    const textsToCheck = [this.data.shortPoi, this.data.note].filter(Boolean);
+    if (textsToCheck.length > 0) {
+      wx.showLoading({ title: '内容合规校验中...' });
+      const txtSec = await checkTextsSecurity(textsToCheck, 3);
+      wx.hideLoading();
+      if (!txtSec.pass) {
+        showViolationModal(txtSec.message);
+        return;
+      }
+    }
+
     const granted = await ensureAlbumWritePermission(true);
     if (!granted) {
       wx.showToast({ title: '未开启相册写入权限，无法导出', icon: 'none' });
@@ -408,6 +442,13 @@ Page({
 
         let exportedTempPath = '';
         try {
+          if (!currentItem.secChecked) {
+            const imgSec = await checkImageSecurity(currentItem.path, fallbackCanvas);
+            if (!imgSec.pass) {
+              showViolationModal(imgSec.message);
+              throw new Error(imgSec.message);
+            }
+          }
           const cfg = await this.buildCfgForItem(currentItem);
           const out = await renderWatermarkToTempFile(currentItem.path, cfg, {
             fallbackCanvas,
@@ -416,7 +457,11 @@ Page({
           exportedTempPath = out.tempFilePath;
           await saveTempToSystemAlbum(exportedTempPath);
 
-          this.setData({ [`items[${idx}].status`]: 'success', [`items[${idx}].errorMsg`]: '' });
+          this.setData({
+            [`items[${idx}].secChecked`]: true,
+            [`items[${idx}].status`]: 'success',
+            [`items[${idx}].errorMsg`]: ''
+          });
         } catch (err) {
           const msg = (err && (err.message || err.errMsg)) || '处理失败';
           this.setData({

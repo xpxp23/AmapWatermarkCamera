@@ -1,11 +1,11 @@
 <view class="batch-page">
-  <!-- 顶部胶囊对齐毛玻璃导航栏 -->
+  <!-- 顶部清爽白底胶囊对齐导航栏 -->
   <view
     class="nav-header"
     style="padding-top: {{menuBtnTop}}px; height: {{menuBtnHeight}}px; padding-right: {{menuBtnRightSpace}}px;"
   >
     <view class="nav-back" bindtap="goBack">
-      <text class="nav-chevron">‹</text>
+      <view class="ico-sm ico-back"></view>
       <text class="nav-back-txt">返回</text>
     </view>
     <view class="nav-title">批量加水印</view>
@@ -15,9 +15,9 @@
     <!-- 顶部配置卡片 -->
     <view class="config-card">
       <view class="card-row-between">
-        <text class="card-section-title">🎨 水印模板与来源策略</text>
+        <text class="card-section-title">水印模板与来源策略</text>
         <view class="exif-toggle-pill {{useExifPriority ? 'on' : ''}}" bindtap="toggleExifMode">
-          {{useExifPriority ? '✓ 优先用照片EXIF' : '统一用当前时间/地点'}}
+          {{useExifPriority ? '✓ 优先用照片 EXIF' : '统一用当前时间/地点'}}
         </view>
       </view>
 
@@ -34,13 +34,13 @@
       </view>
 
       <view class="inline-field-row">
-        <input class="batch-input" value="{{shortPoi}}" disabled="{{isRunning}}" bindinput="onInputPoi" placeholder="默认点位简称 (无EXIF GPS时使用)" />
+        <input class="batch-input" value="{{shortPoi}}" disabled="{{isRunning}}" bindinput="onInputPoi" placeholder="默认点位简称 (无 EXIF GPS 时使用)" />
         <input class="batch-input" value="{{note}}" disabled="{{isRunning}}" bindinput="onInputNote" placeholder="统一现场备注 (选填)" />
       </view>
 
       <view wx:if="{{styleTemplate === 0}}" class="scrim-row">
-        <text class="scrim-lbl">🌘 模板0底部托底暗影 (默认关闭)</text>
-        <switch checked="{{showBottomScrim}}" disabled="{{isRunning}}" bindchange="onToggleBottomScrim" color="#0284c7" />
+        <text class="scrim-lbl">模板 0 底部托底暗影 (默认关闭)</text>
+        <switch checked="{{showBottomScrim}}" disabled="{{isRunning}}" bindchange="onToggleBottomScrim" color="#07c160" />
       </view>
     </view>
 
@@ -57,9 +57,11 @@
 
     <!-- 选图队列网格 -->
     <view wx:if="{{items.length === 0}}" class="empty-box" bindtap="chooseAlbumImages">
-      <view class="empty-icon">🗂</view>
+      <view class="empty-icon-circle">
+        <view class="ico-lg ico-batch"></view>
+      </view>
       <view class="empty-title">从手机系统相册批量选图</view>
-      <view class="empty-sub">单次最多选 20 张（支持继续追加）· 自动读取照片 EXIF 原拍时间与 GPS · 串行合成直存系统相册不占空间</view>
+      <view class="empty-sub">单次最多选 20 张（支持继续追加）· 自动读取照片 EXIF 原拍时间与 GPS · 串行合成直存系统相册</view>
       <view class="empty-cta">＋ 选择相册照片</view>
     </view>
 
@@ -88,15 +90,15 @@
     </view>
   </scroll-view>
 
-  <!-- 底部固定操作栏 -->
+  <!-- 底部固定白底操作栏 -->
   <view class="batch-footer">
     <block wx:if="{{isRunning}}">
       <button class="footer-btn danger" disabled="{{isCancelling}}" bindtap="cancelBatchQueue">
-        {{isCancelling ? '正在停止...' : '⏹ 取消剩余任务'}}
+        {{isCancelling ? '正在停止...' : '停止剩余任务'}}
       </button>
     </block>
     <block wx:else>
-      <button wx:if="{{failedCount > 0}}" class="footer-btn amber" bindtap="retryFailedItems">↻ 重试失败项 ({{failedCount}})</button>
+      <button wx:if="{{failedCount > 0}}" class="footer-btn amber" bindtap="retryFailedItems">重试失败项 ({{failedCount}})</button>
       <button class="footer-btn primary" bindtap="{{pendingCount > 0 ? 'startBatchQueue' : 'chooseAlbumImages'}}">
         {{pendingCount > 0 ? ('开始批量加水印 (' + pendingCount + '张)') : '从系统相册选图'}}
       </button>

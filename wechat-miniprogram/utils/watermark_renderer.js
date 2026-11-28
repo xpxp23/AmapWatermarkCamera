@@ -241,7 +241,7 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     if (cfg.showTime) rows.push(['时间', `${cfg.fullTs} ${weekPart}`, '#e2e8f0']);
     if (cfg.showNote && cfg.note) rows.push(['备注', cfg.note, '#fde68a']);
     if (cfg.antiTamperMode && sigHash) {
-      rows.push(['验真', `SHA256:${sigHash.slice(0, 12)} (${timeBadge})`, '#34d399']);
+      rows.push(['防伪', `SHA256:${sigHash.slice(0, 12)} (${timeBadge})`, '#34d399']);
     } else if (cfg.offlinePending) {
       rows.push(['状态', '离线拍摄 · 待联网补签授时', '#fbbf24']);
     }
@@ -537,7 +537,7 @@ function drawCanvasWatermarkAndQr(ctx, w, h, cfg) {
     ctx.font = `bold ${Math.round(15 * scaleFactor)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText(
-      cfg.antiTamperMode ? '扫码验真跳高德' : '长按跳高德',
+      cfg.antiTamperMode ? '防伪定位码' : '长按跳高德',
       boxLeft + qrBoxSize / 2,
       boxTop + qrBoxSize + Math.round(18 * scaleFactor)
     );
@@ -691,7 +691,9 @@ function renderWatermarkToTempFile(rawImagePath, cfg, options) {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
-        drawCanvasWatermarkAndQr(ctx, w, h, cfg || {});
+        if (!cfg || !cfg.noWatermark) {
+          drawCanvasWatermarkAndQr(ctx, w, h, cfg || {});
+        }
 
         const quality = opts.quality || 0.92;
         const tempFilePath = await exportCanvasToJpg(canvas, w, h, quality);

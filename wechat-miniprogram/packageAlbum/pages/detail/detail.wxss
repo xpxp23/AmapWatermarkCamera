@@ -1,9 +1,64 @@
+/* 极速高德水印相机 v2.0 · 照片详情页（深色沉浸看图画布 + 清爽白底半屏抽屉） */
+
 .detail-page {
   width: 100vw;
   height: 100vh;
-  background-color: #000000;
+  background-color: #090d16;
   position: relative;
   overflow: hidden;
+}
+
+.ico-sm {
+  width: 28rpx;
+  height: 28rpx;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  flex-shrink: 0;
+}
+
+.ico-dock {
+  width: 36rpx;
+  height: 36rpx;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.ico-back-white {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='15 18 9 12 15 6'/%3E%3C/svg%3E");
+}
+
+.ico-nav {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='3 11 22 2 13 21 11 13 3 11'/%3E%3C/svg%3E");
+}
+
+.ico-share {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8'/%3E%3Cpolyline points='16 6 12 2 8 6'/%3E%3Cline x1='12' y1='2' x2='12' y2='15'/%3E%3C/svg%3E");
+}
+
+.ico-edit {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z'/%3E%3C/svg%3E");
+}
+
+.ico-lock {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='11' width='18' height='11' rx='2' ry='2'/%3E%3Cpath d='M7 11V7a5 5 0 0 1 10 0v4'/%3E%3C/svg%3E");
+}
+
+.ico-info {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cline x1='12' y1='16' x2='12' y2='12'/%3E%3Cline x1='12' y1='8' x2='12.01' y2='8'/%3E%3C/svg%3E");
+}
+
+.ico-pin {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z'/%3E%3Ccircle cx='12' cy='10' r='3'/%3E%3C/svg%3E");
+}
+
+.ico-edit-blue {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z'/%3E%3C/svg%3E");
+}
+
+.ico-close {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b5563' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3C/svg%3E");
 }
 
 .detail-nav {
@@ -11,33 +66,39 @@
   top: 0;
   left: 0;
   right: 0;
-  z-index: 20;
   padding-left: 20rpx;
-  padding-bottom: 12rpx;
+  padding-bottom: 14rpx;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+  justify-content: center;
+  z-index: 20;
+  background: linear-gradient(180deg, rgba(9, 13, 22, 0.72) 0%, rgba(9, 13, 22, 0) 100%);
   box-sizing: content-box;
 }
 
 .nav-back {
+  position: absolute;
+  left: 20rpx;
+  bottom: 14rpx;
   display: flex;
   align-items: center;
-  padding: 6rpx 18rpx 6rpx 10rpx;
-  border-radius: 28rpx;
-  background-color: rgba(15, 23, 42, 0.72);
+  gap: 4rpx;
+  background-color: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(8px);
+  padding: 8rpx 20rpx 8rpx 12rpx;
+  border-radius: 999rpx;
 }
 
-.nav-chevron { font-size: 36rpx; line-height: 1; margin-right: 4rpx; }
-.nav-txt { font-size: 24rpx; }
+.nav-txt {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #ffffff;
+}
 
 .nav-counter {
-  padding: 6rpx 18rpx;
-  border-radius: 24rpx;
-  background-color: rgba(15, 23, 42, 0.72);
-  font-size: 23rpx;
-  color: #e2e8f0;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #f8fafc;
 }
 
 .detail-swiper {
@@ -58,21 +119,20 @@
   height: 100%;
 }
 
-/* 底部极简悬浮 4 键栏 */
 .floating-dock {
   position: fixed;
   left: 36rpx;
   right: 36rpx;
   bottom: calc(28rpx + env(safe-area-inset-bottom));
-  z-index: 20;
-  background-color: rgba(15, 23, 42, 0.88);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 40rpx;
+  background-color: rgba(17, 24, 39, 0.78);
+  backdrop-filter: blur(14px);
+  border: 1rpx solid rgba(255, 255, 255, 0.14);
+  border-radius: 999rpx;
   padding: 14rpx 20rpx;
   display: flex;
   align-items: center;
   justify-content: space-around;
+  z-index: 20;
 }
 
 .dock-btn {
@@ -80,60 +140,67 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 108rpx;
+  min-width: 100rpx;
   color: #ffffff;
 }
 
 .dock-btn.locked {
-  opacity: 0.75;
+  opacity: 0.65;
 }
 
 .share-reset {
   background: transparent;
-  border: none;
   padding: 0;
   margin: 0;
   line-height: normal;
+  border: none;
 }
 
 .share-reset::after {
   border: none;
 }
 
-.dock-icon {
-  font-size: 34rpx;
-  line-height: 1.1;
-}
-
 .dock-lbl {
   font-size: 20rpx;
-  color: #cbd5e1;
-  margin-top: 4rpx;
+  color: #e2e8f0;
+  margin-top: 6rpx;
 }
 
-/* 半屏详情与重绘抽屉 */
+/* ==================== 清爽白底半屏抽屉 ==================== */
 .drawer-mask {
   position: fixed;
   left: 0;
   top: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.62);
+  background-color: rgba(15, 23, 42, 0.42);
   display: flex;
   align-items: flex-end;
-  z-index: 50;
+  z-index: 60;
 }
 
 .drawer-card {
   width: 100%;
-  max-height: 80vh;
-  background-color: #0f172a;
-  border-top: 2rpx solid rgba(56, 189, 248, 0.35);
-  border-radius: 30rpx 30rpx 0 0;
-  padding: 26rpx 26rpx calc(28rpx + env(safe-area-inset-bottom));
+  background-color: #ffffff;
+  border-top-left-radius: 32rpx;
+  border-top-right-radius: 32rpx;
+  padding: 18rpx 30rpx calc(26rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
+  box-shadow: 0 -10rpx 36rpx rgba(15, 23, 42, 0.14);
+}
+
+.drawer-card.edit-drawer {
+  max-height: 82vh;
   display: flex;
   flex-direction: column;
+}
+
+.drawer-handle {
+  width: 68rpx;
+  height: 8rpx;
+  border-radius: 4rpx;
+  background-color: #e2e8f0;
+  margin: 0 auto 16rpx;
 }
 
 .drawer-header {
@@ -143,88 +210,119 @@
   margin-bottom: 18rpx;
 }
 
+.drawer-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
 .drawer-title {
-  font-size: 29rpx;
-  font-weight: bold;
-  color: #ffffff;
+  font-size: 31rpx;
+  font-weight: 700;
+  color: #111827;
 }
 
 .drawer-close {
-  width: 50rpx;
-  height: 50rpx;
-  border-radius: 25rpx;
-  background-color: #1e293b;
-  color: #cbd5e1;
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 28rpx;
+  background-color: #f3f4f6;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24rpx;
 }
 
 .coord-box {
-  background-color: #0b132b;
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  border-radius: 16rpx;
-  padding: 16rpx;
+  background-color: #f8fafc;
+  border: 1rpx solid #eaedf2;
+  border-radius: 20rpx;
+  padding: 18rpx 20rpx;
   margin-bottom: 16rpx;
 }
 
 .coord-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12rpx;
+  gap: 14rpx;
 }
 
-.coord-col { flex: 1; min-width: 0; }
-.coord-line { font-size: 21rpx; color: #e2e8f0; margin-bottom: 4rpx; }
-.coord-line.muted { color: #94a3b8; font-size: 19.5rpx; }
+.coord-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.coord-line {
+  font-size: 22rpx;
+  color: #1f2937;
+  margin-bottom: 6rpx;
+  word-break: break-all;
+}
+
+.coord-line.accent {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.coord-line.muted {
+  color: #6b7280;
+}
+
+.coord-line.amber {
+  color: #d97706;
+}
 
 .copy-pill {
-  padding: 10rpx 18rpx;
-  border-radius: 14rpx;
-  background-color: rgba(2, 132, 199, 0.25);
-  border: 1px solid #38bdf8;
-  color: #38bdf8;
-  font-size: 21rpx;
-  font-weight: bold;
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #2563eb;
+  background-color: #eff6ff;
+  border: 1rpx solid #bfdbfe;
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
   flex-shrink: 0;
 }
 
-.report-card {
-  border-radius: 16rpx;
-  padding: 16rpx;
-  background-color: #1e293b;
-  border: 1px solid rgba(148, 163, 184, 0.22);
+.antitamper-card {
+  background-color: #ecfdf5;
+  border: 1rpx solid #a7f3d0;
+  border-radius: 18rpx;
+  padding: 16rpx 20rpx;
   margin-bottom: 14rpx;
 }
 
-.report-card.VERIFIED {
-  background-color: rgba(5, 150, 105, 0.22);
-  border-color: #34d399;
-}
-
-.report-card.TAMPERED {
-  background-color: rgba(220, 38, 38, 0.22);
-  border-color: #f87171;
-}
-
-.rep-head {
+.antitamper-head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
 }
 
-.rep-badge { font-size: 23rpx; font-weight: bold; }
-.rep-copy { font-size: 21rpx; color: #38bdf8; font-weight: bold; }
-.rep-title { font-size: 25rpx; font-weight: bold; margin-top: 6rpx; }
-.rep-desc { font-size: 20.5rpx; color: #cbd5e1; margin-top: 6rpx; line-height: 1.5; }
-.rep-sig { font-size: 19rpx; color: #94a3b8; margin-top: 8rpx; }
+.antitamper-badge {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: #047857;
+}
+
+.antitamper-tag {
+  font-size: 20rpx;
+  color: #059669;
+  background-color: #ffffff;
+  padding: 4rpx 12rpx;
+  border-radius: 999rpx;
+}
+
+.antitamper-sig {
+  font-size: 20rpx;
+  color: #065f46;
+  margin-top: 8rpx;
+  word-break: break-all;
+}
 
 .raw-hint {
-  font-size: 21rpx;
-  color: #94a3b8;
-  margin-bottom: 18rpx;
+  font-size: 22rpx;
+  color: #6b7280;
+  margin-bottom: 20rpx;
+  line-height: 1.5;
 }
 
 .drawer-actions {
@@ -234,21 +332,33 @@
 
 .d-btn {
   flex: 1;
-  height: 78rpx;
-  line-height: 78rpx;
-  border-radius: 16rpx;
-  font-size: 24rpx;
-  font-weight: bold;
+  height: 84rpx;
+  line-height: 84rpx;
+  font-size: 26rpx;
+  font-weight: 700;
+  border-radius: 18rpx;
+  border: none;
   color: #ffffff;
 }
 
-.d-btn.blue { background-color: #0284c7; }
-.d-btn.danger { background-color: #dc2626; }
+.d-btn::after,
+.confirm-redraw-btn::after {
+  border: none;
+}
 
-/* 编辑抽屉 */
+.d-btn.blue {
+  background-color: #2563eb;
+}
+
+.d-btn.danger {
+  background-color: #fef2f2;
+  color: #ef4444;
+  border: 1rpx solid #fecaca;
+}
+
+/* 独立无损重绘表单（日间浅色） */
 .edit-scroll {
   max-height: 58vh;
-  margin-bottom: 14rpx;
 }
 
 .section-head {
@@ -259,100 +369,120 @@
 }
 
 .section-lbl {
-  font-size: 21rpx;
-  color: #94a3b8;
-  margin: 12rpx 0 8rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #6b7280;
+  margin: 14rpx 0 8rpx;
 }
 
-.link-ops { display: flex; gap: 16rpx; }
-.link-btn { font-size: 21rpx; font-weight: bold; }
-.link-btn.muted { color: #94a3b8; }
+.link-ops {
+  display: flex;
+  gap: 18rpx;
+}
+
+.link-btn {
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.link-btn.accent {
+  color: #2563eb;
+}
+
+.link-btn.muted {
+  color: #6b7280;
+}
 
 .edit-row {
   display: flex;
   gap: 10rpx;
-  align-items: center;
+  margin-bottom: 10rpx;
 }
 
-.picker-col { flex: 1; }
+.picker-col {
+  flex: 1.3;
+}
 
 .field-pill {
-  height: 68rpx;
-  line-height: 68rpx;
+  height: 74rpx;
+  line-height: 74rpx;
+  background-color: #f8fafc;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 16rpx;
   text-align: center;
-  background-color: #1e293b;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 12rpx;
-  font-size: 22rpx;
-  color: #ffffff;
+  font-size: 23rpx;
+  color: #111827;
 }
 
 .sec-input {
-  width: 96rpx;
-  height: 68rpx;
+  width: 110rpx;
+  height: 74rpx;
+  background-color: #f8fafc;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 16rpx;
   text-align: center;
-  background-color: #1e293b;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 12rpx;
-  color: #ffffff;
-  font-size: 22rpx;
+  font-size: 24rpx;
+  color: #111827;
 }
 
 .edit-input {
   flex: 1;
-  height: 68rpx;
-  background-color: #1e293b;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 12rpx;
-  padding: 0 16rpx;
-  color: #ffffff;
-  font-size: 22rpx;
+  height: 74rpx;
+  background-color: #f8fafc;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 16rpx;
+  padding: 0 20rpx;
+  font-size: 24rpx;
+  color: #111827;
   box-sizing: border-box;
 }
 
 .edit-input.full {
   width: 100%;
-  margin-bottom: 10rpx;
+  margin-bottom: 12rpx;
 }
 
 .chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10rpx;
-  margin-bottom: 10rpx;
+  margin-bottom: 12rpx;
 }
 
 .chip-opt {
-  padding: 8rpx 16rpx;
-  border-radius: 14rpx;
-  background-color: #1e293b;
-  color: #94a3b8;
-  font-size: 21rpx;
+  padding: 10rpx 20rpx;
+  border-radius: 999rpx;
+  background-color: #f3f4f6;
+  border: 1rpx solid #e5e7eb;
+  font-size: 22rpx;
+  color: #4b5563;
 }
 
 .chip-opt.active {
-  background-color: rgba(2, 132, 199, 0.28);
-  border: 1px solid #38bdf8;
-  color: #38bdf8;
-  font-weight: bold;
+  background-color: #eff6ff;
+  border-color: #2563eb;
+  color: #2563eb;
+  font-weight: 700;
 }
 
 .toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12rpx 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  font-size: 23rpx;
+  padding: 14rpx 0;
+  font-size: 25rpx;
+  color: #111827;
+  border-top: 1rpx solid #f1f5f9;
 }
 
 .confirm-redraw-btn {
+  margin-top: 18rpx;
   width: 100%;
-  height: 82rpx;
-  line-height: 82rpx;
-  border-radius: 18rpx;
-  background-color: #0284c7;
+  height: 86rpx;
+  line-height: 86rpx;
+  background-color: #2563eb;
   color: #ffffff;
-  font-size: 26rpx;
-  font-weight: bold;
+  font-size: 28rpx;
+  font-weight: 700;
+  border-radius: 18rpx;
 }

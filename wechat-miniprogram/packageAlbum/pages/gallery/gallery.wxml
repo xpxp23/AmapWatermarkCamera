@@ -1,11 +1,11 @@
 <view class="gallery-page">
-  <!-- 顶部精准对齐胶囊的居中毛玻璃顶栏 -->
+  <!-- 顶部清爽白底导航栏（对齐微信胶囊） -->
   <view
     class="glass-nav"
     style="padding-top: {{menuBtnTop}}px; height: {{menuBtnHeight}}px; padding-right: {{menuBtnRightSpace}}px;"
   >
     <view class="nav-left-btn" bindtap="goBackCamera">
-      <text class="nav-chevron">‹</text>
+      <view class="ico-sm ico-back"></view>
       <text class="nav-txt">相机</text>
     </view>
 
@@ -17,25 +17,21 @@
   </view>
 
   <scroll-view scroll-y class="gallery-scroll">
-    <!-- 顶部系统相册融合双入口卡片 -->
-    <view class="dual-entry-row">
-      <view class="entry-card blue" bindtap="openSystemAlbumBatch">
-        <view class="entry-icon">🗂</view>
+    <!-- 顶部通栏系统相册批量加水印入口 -->
+    <view class="single-entry-card" bindtap="openSystemAlbumBatch">
+      <view class="entry-left">
+        <view class="entry-icon-box">
+          <view class="ico-md ico-batch"></view>
+        </view>
         <view class="entry-text-col">
           <view class="entry-title">系统相册批量加水印</view>
-          <view class="entry-sub">一次选20张 · EXIF自动还原</view>
+          <view class="entry-sub">一次选 20 张 · 自动读取 EXIF 原拍时间与 GPS 地点</view>
         </view>
       </view>
-      <view class="entry-card emerald" bindtap="verifyFromSystemAlbum">
-        <view class="entry-icon">🛡</view>
-        <view class="entry-text-col">
-          <view class="entry-title">系统相册选图验真</view>
-          <view class="entry-sub">1:1双角识码 · SHA-256核验</view>
-        </view>
-      </view>
+      <view class="entry-go-pill">去选图</view>
     </view>
 
-    <!-- 离线拍摄待补签横幅（仅存在离线待补签照片时显示） -->
+    <!-- 离线拍摄待补签横幅 -->
     <view wx:if="{{offlinePendingCount > 0}}" class="offline-sync-banner" bindtap="handleReconcileOffline">
       <view class="offline-sync-text">
         <text class="offline-sync-title">有 {{offlinePendingCount}} 张离线照片待补签授时与地名</text>
@@ -47,8 +43,8 @@
     <!-- 双轨存储空间估算进度条 + 一键清理底图 -->
     <view class="storage-card">
       <view class="storage-head">
-        <text class="storage-info">存储估算 {{storage.usedMB}}MB / {{storage.quotaMB}}MB · 成品 {{storage.photoCount}}/{{storage.maxPhotos}} · 底图 {{storage.rawCount}}/{{storage.maxRaw}}</text>
-        <text wx:if="{{storage.rawCount > 0}}" class="storage-clean-btn" bindtap="handleClearRawOriginals">一键清理底图</text>
+        <text class="storage-info">空间 {{storage.usedMB}}MB / {{storage.quotaMB}}MB · 成品 {{storage.photoCount}}/{{storage.maxPhotos}} · 底图 {{storage.rawCount}}/{{storage.maxRaw}}</text>
+        <text wx:if="{{storage.rawCount > 0}}" class="storage-clean-btn" bindtap="handleClearRawOriginals">清理底图</text>
       </view>
       <view class="storage-track">
         <view class="storage-fill {{storage.percent > 80 ? 'warn' : ''}}" style="width: {{storage.percent}}%;"></view>
@@ -57,17 +53,19 @@
 
     <!-- 空状态 -->
     <view wx:if="{{photoCount === 0}}" class="empty-state">
-      <view class="empty-icon">📷</view>
-      <view class="empty-title">暂无应用内水印照片</view>
-      <view class="empty-desc">返回相机拍摄即可生成高德零偏差水印照片（最多保留 120 张缩略图与水印成品，最近 25 张支持无损重绘）。</view>
+      <view class="empty-icon-circle">
+        <view class="ico-lg ico-camera"></view>
+      </view>
+      <view class="empty-title">暂无应用内照片</view>
+      <view class="empty-desc">返回相机拍摄即可自动收录（最多保留 120 张成品与缩略图，最近 25 张支持无损补加或重绘水印）。</view>
       <button class="empty-btn" bindtap="goBackCamera">返回相机拍摄</button>
     </view>
 
-    <!-- 按日期吸顶分组的 3 列正方形网格（仅加载 thumbPath + lazy-load） -->
+    <!-- 按日期吸顶分组的 3 列正方形网格 -->
     <block wx:else>
       <view wx:for="{{dateGroups}}" wx:key="date" class="date-group">
         <view class="date-sticky-header">
-          <text class="date-label">📅 {{item.date}}</text>
+          <text class="date-label">{{item.date}}</text>
           <text class="date-count">{{item.count}} 张</text>
         </view>
 
@@ -87,10 +85,11 @@
               {{selectedMap[photo.id] ? '✓' : ''}}
             </view>
 
-            <!-- 极简左下角标：防伪盾牌 / 可编辑标记 -->
+            <!-- 极简左下角标 -->
             <view wx:if="{{photo.offlinePending}}" class="corner-badge bl offline">待补签</view>
-            <view wx:elif="{{photo.antiTamper}}" class="corner-badge bl shield">🛡</view>
-            <view wx:elif="{{photo.hasRaw}}" class="corner-badge bl edit">✎</view>
+            <view wx:elif="{{photo.noWatermark}}" class="corner-badge bl plain">无水印</view>
+            <view wx:elif="{{photo.antiTamper}}" class="corner-badge bl shield">防伪</view>
+            <view wx:elif="{{photo.hasRaw}}" class="corner-badge bl edit">可改</view>
 
             <!-- 极简右下角标：拍摄时间 -->
             <view wx:if="{{photo.hm}}" class="corner-badge br time">{{photo.hm}}</view>
@@ -106,40 +105,12 @@
       {{selectedCount === photoCount ? '取消全选' : '全选'}} ({{selectedCount}})
     </view>
     <view class="multi-actions">
-      <view class="multi-btn blue" bindtap="batchSaveToSystemAlbum">⬇ 存相册</view>
-      <view class="multi-btn emerald" bindtap="batchExportLedgerText">📋 导台账</view>
-      <view class="multi-btn danger" bindtap="batchDeleteSelected">🗑 删除</view>
+      <view class="multi-btn blue" bindtap="batchSaveToSystemAlbum">存相册</view>
+      <view class="multi-btn emerald" bindtap="batchExportLedgerText">导台账</view>
+      <view class="multi-btn danger" bindtap="batchDeleteSelected">删除</view>
     </view>
   </view>
 
-  <!-- 系统相册选图验真报告弹窗 -->
-  <view wx:if="{{showVerifyModal && verifyReport}}" class="verify-mask" bindtap="closeVerifyModal">
-    <view class="verify-dialog" catchtap="noop">
-      <view class="verify-head">
-        <text class="verify-title">🛡 识图验真报告 v1.0</text>
-        <text class="verify-close" bindtap="closeVerifyModal">✕</text>
-      </view>
-
-      <view class="verify-banner {{verifyReport.status}}">
-        <view class="vb-badge">{{verifyReport.statusBadge}}</view>
-        <view class="vb-title">{{verifyReport.statusTitle}}</view>
-        <view class="vb-desc">{{verifyReport.statusDesc}}</view>
-      </view>
-
-      <view class="verify-kv">
-        <view class="kv-row"><text class="kv-k">点位名称</text><text class="kv-v">{{verifyReport.shortPoi}}</text></view>
-        <view class="kv-row"><text class="kv-k">高德 GCJ-02</text><text class="kv-v accent mono">{{verifyReport.gcjLat}}, {{verifyReport.gcjLon}}</text></view>
-        <view class="kv-row"><text class="kv-k">大地 WGS-84</text><text class="kv-v mono">{{verifyReport.wgsLat}}, {{verifyReport.wgsLon}}</text></view>
-        <view class="kv-row"><text class="kv-k">拍摄时间</text><text class="kv-v mono">{{verifyReport.timestamp}}</text></view>
-        <view class="kv-row"><text class="kv-k">内嵌签名</text><text class="kv-v mono">{{verifyReport.actualSig}}</text></view>
-        <view class="kv-row"><text class="kv-k">期望签名</text><text class="kv-v mono">{{verifyReport.expectedSig}}</text></view>
-      </view>
-
-      <view class="verify-actions">
-        <button class="v-btn blue" bindtap="openVerifiedInMap">🧭 跳高德导航</button>
-        <button class="v-btn emerald" bindtap="copyVerifyReport">📋 复制报告</button>
-      </view>
-    </view>
-  </view>
-  <canvas type="2d" id="galleryVerifyCanvas" style="width: 520px; height: 520px; position: fixed; left: -9999px; top: -9999px;"></canvas>
+  <!-- 离线补签重绘备用 Canvas -->
+  <canvas type="2d" id="galleryOfflineCanvas" style="width: 1080px; height: 1440px; position: fixed; left: -9999px; top: -9999px;"></canvas>
 </view>

@@ -51,7 +51,7 @@
         <view wx:if="{{liveEnvStr}}" class="wm-card-row emerald">环境：{{liveEnvStr}}</view>
         <view wx:if="{{showTime}}" class="wm-card-row">时间：{{fullTs}} {{weekStr}}</view>
         <view wx:if="{{showNote && note}}" class="wm-card-row amber">备注：{{note}}</view>
-        <view wx:if="{{antiTamperMode}}" class="wm-card-row emerald">验真：SHA256:{{liveAntiTamperShort}}</view>
+        <view wx:if="{{antiTamperMode}}" class="wm-card-row emerald">防伪：SHA256:{{liveAntiTamperShort}}</view>
       </view>
     </view>
 
@@ -122,7 +122,7 @@
         <view class="wm-qr-finder bl"></view>
         <view class="wm-qr-center-dot">高德</view>
       </view>
-      <view class="wm-qr-txt" style="color: {{antiTamperMode ? '#34d399' : accentHex}};">{{antiTamperMode ? '扫码验真' : '扫码跳高德'}}</view>
+      <view class="wm-qr-txt" style="color: {{antiTamperMode ? '#34d399' : accentHex}};">{{antiTamperMode ? '防伪定位' : '扫码跳高德'}}</view>
     </view>
   </view>
 
@@ -135,7 +135,7 @@
         <view class="wm-qr-finder bl"></view>
         <view class="wm-qr-center-dot">高德</view>
       </view>
-      <view class="wm-qr-txt" style="color: {{antiTamperMode ? '#34d399' : accentHex}};">{{antiTamperMode ? '扫码验真' : '扫码跳高德'}}</view>
+      <view class="wm-qr-txt" style="color: {{antiTamperMode ? '#34d399' : accentHex}};">{{antiTamperMode ? '防伪定位' : '扫码跳高德'}}</view>
     </view>
 
     <view class="wm-tpl-film-full" style="background-color: {{cardBgRgba}}; border-top-color: {{accentHex}};" catchtap="onTapWatermark">

@@ -1,5 +1,7 @@
 {
   "navigationBarTitleText": "照片详情",
   "navigationStyle": "custom",
+  "navigationBarTextStyle": "white",
+  "backgroundColor": "#090d16",
   "disableScroll": true
 }

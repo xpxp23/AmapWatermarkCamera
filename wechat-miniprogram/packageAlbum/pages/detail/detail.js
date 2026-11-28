@@ -1,24 +1,16 @@
 /**
- * 极速高德水印相机 v1.0 · 独立相册分包 · 照片详情与无损重绘页 (packageAlbum/pages/detail)
- * 特性：
+ * 极速高德水印相机 v2.0 · 独立相册分包 · 照片详情与无损重绘页 (packageAlbum/pages/detail)
  * - 全屏 <swiper> 左右滑切，点击大图调用 wx.previewImage 双指缩放
- * - 底部极简悬浮 4 键栏：导航 | 转发 | 改水印/已锁 | 详情
- * - 半屏详情抽屉：双坐标系一键复制、SHA-256 验真报告、保存相册与删除
- * - 独立无损重绘编辑器：使用深拷贝 editDraft，绝不污染全局相机配置
+ * - 底部悬浮 4 键栏：导航 | 转发 | 改水印/加水印/已锁 | 详情
+ * - 独立无损重绘编辑器：使用深拷贝 editDraft，保存前接入云内容安全校验 (msgSecCheck v2)
  */
 
 const {
   gcj02ToWgs84,
   resolveDisplayCoordinates,
   formatAzimuthText,
-  computeAntiTamperHash,
-  verifyAntiTamperHash
+  computeAntiTamperHash
 } = require('../../../utils/coord_qr.js');
-
-const {
-  buildVerificationReport,
-  formatVerifyReportText
-} = require('../../../utils/photo_verifier.js');
 
 const { renderWatermarkToTempFile } = require('../../../utils/watermark_renderer.js');
 
@@ -30,6 +22,7 @@ const {
   safeUnlinkFile
 } = require('../../../utils/photo_store.js');
 
+const { checkTextsSecurity, showViolationModal } = require('../../../utils/sec_check.js');
 const { saveImageToAlbumWithPermission } = require('../../../utils/privacy.js');
 const { removeOfflinePhoto } = require('../../../utils/offline_queue.js');
 
@@ -44,7 +37,6 @@ Page({
     photos: [],
     currentIndex: 0,
     currentPhoto: null,
-    verifyReport: null,
     showDetailDrawer: false,
     showEditDrawer: false,
     editDraft: null
@@ -82,33 +74,8 @@ Page({
       menuBtnRightSpace,
       photos,
       currentIndex: idx,
-      currentPhoto,
-      verifyReport: this.computePhotoReport(currentPhoto)
+      currentPhoto
     });
-  },
-
-  computePhotoReport(photo) {
-    if (!photo || !photo.cfg) return null;
-    const c = photo.cfg;
-    const sig = c.antiTamperHash ? String(c.antiTamperHash).slice(0, 12) : '';
-    const isVerified = c.antiTamperMode
-      ? verifyAntiTamperHash(c.gcjLat, c.gcjLon, c.fullTs, c.shortPoi, sig, c.note)
-      : false;
-    return buildVerificationReport(
-      {
-        gcjLat: c.gcjLat,
-        gcjLon: c.gcjLon,
-        shortPoi: c.shortPoi,
-        timestamp: c.fullTs,
-        note: c.note,
-        signature: sig,
-        ntpSynced: c.ntpSynced,
-        hasAntiTamper: Boolean(c.antiTamperMode),
-        verified: isVerified
-      },
-      photo.wmPath,
-      '本机水印相册原片核验'
-    );
   },
 
   goBack() {
@@ -121,7 +88,6 @@ Page({
     this.setData({
       currentIndex: idx,
       currentPhoto,
-      verifyReport: this.computePhotoReport(currentPhoto),
       showDetailDrawer: false,
       showEditDrawer: false
     });
@@ -166,12 +132,6 @@ Page({
     wx.setClipboardData({ data: txt });
   },
 
-  copyVerifyReport() {
-    const text = formatVerifyReportText(this.data.verifyReport);
-    if (!text) return;
-    wx.setClipboardData({ data: text });
-  },
-
   saveCurrentToAlbum() {
     const cur = this.data.currentPhoto;
     if (!cur || !cur.wmPath) return;
@@ -202,7 +162,6 @@ Page({
           photos: remaining,
           currentIndex: nextIdx,
           currentPhoto: nextPhoto,
-          verifyReport: this.computePhotoReport(nextPhoto),
           showDetailDrawer: false,
           showEditDrawer: false
         });
@@ -217,8 +176,8 @@ Page({
     if (!cur || !cur.cfg) return;
     if (cur.cfg.antiTamperMode) {
       wx.showModal({
-        title: '🛡 防篡改原片已锁定',
-        content: '该照片在拍摄时已开启「外业防篡改验真模式」，真实 GPS 坐标、授时时间、点位、备注与 SHA-256 签名均已锁定，不允许二次修改。',
+        title: '防篡改原片已锁定',
+        content: '该照片在拍摄时已开启「外业防篡改锁定模式」，真实 GPS 坐标、授时时间、点位、备注与 SHA-256 签名均已锁定，不允许二次修改。',
         showCancel: false,
         confirmText: '我知道了'
       });
@@ -354,11 +313,20 @@ Page({
     const d = this.data.editDraft;
     if (!cur || !d || !cur.rawPath) return;
     if (cur.cfg && cur.cfg.antiTamperMode) {
-      wx.showToast({ title: '🛡 防篡改原片禁止修改', icon: 'none' });
+      wx.showToast({ title: '防篡改原片禁止修改', icon: 'none' });
       return;
     }
 
-
+    const textsToCheck = [d.customTitle, d.shortPoi, d.fullAddr, d.note].filter(Boolean);
+    if (textsToCheck.length > 0) {
+      wx.showLoading({ title: '安全合规校验中...' });
+      const txtSec = await checkTextsSecurity(textsToCheck, 3);
+      wx.hideLoading();
+      if (!txtSec.pass) {
+        showViolationModal(txtSec.message);
+        return;
+      }
+    }
 
     const rawLat = parseFloat(d.editGcjLat);
     const rawLon = parseFloat(d.editGcjLon);
@@ -383,6 +351,7 @@ Page({
     const azDeg = ((Math.round(Number(d.editAzimuthDeg) || 0) % 360) + 360) % 360;
     const updatedCfg = {
       ...cur.cfg,
+      noWatermark: false,
       antiTamperMode: false,
       antiTamperHash: '',
       styleTemplate: d.styleTemplate,
@@ -447,7 +416,6 @@ Page({
       this.setData({
         photos: updatedList,
         currentPhoto: nextPhoto,
-        verifyReport: this.computePhotoReport(nextPhoto),
         showEditDrawer: false,
         editDraft: null
       });
@@ -464,7 +432,7 @@ Page({
     const cur = this.data.currentPhoto;
     if (!cur || !cur.cfg) {
       return {
-        title: '极速高德水印相机 v1.0',
+        title: '极速高德水印相机 v2.0',
         path: '/pages/index/index'
       };
     }
